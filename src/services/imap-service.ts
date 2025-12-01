@@ -203,6 +203,8 @@ export class ImapService {
     }
 
     try {
+      console.error(`[IMAP] Connecting to ${account.host}:${account.port} (TLS: ${account.tls ? 'implicit' : 'STARTTLS'})`);
+
       const client = new ImapFlow({
         host: account.host,
         port: account.port,
@@ -216,12 +218,17 @@ export class ImapService {
         verifyOnly: false,
         // ImapFlow has built-in keepalive, but we can configure it
         socketTimeout: account.connTimeout || 10000,
-        greetingTimeout: account.authTimeout || 3000
+        greetingTimeout: account.authTimeout || 3000,
+        // For Proton Bridge and other self-signed certs (localhost, etc.)
+        tls: {
+          rejectUnauthorized: account.host === 'localhost' || account.host === '127.0.0.1' ? false : true
+        }
       });
 
       // Set up event listeners
       client.on('error', (err) => {
         console.error(`[IMAP] Connection error for account ${accountId}:`, err.message);
+        console.error(`[IMAP] Error details:`, err);
         this.updateConnectionState(accountId, ConnectionState.ERROR);
         this.recordCircuitBreakerFailure(accountId);
 
@@ -237,6 +244,7 @@ export class ImapService {
 
       // Connect
       await client.connect();
+      console.error(`[IMAP] Successfully connected to ${account.host}:${account.port}`);
 
       this.activeConnections.set(accountId, client);
       this.updateConnectionState(accountId, ConnectionState.CONNECTED);

@@ -773,8 +773,25 @@ function onEmailChange() {
   if (provider) {
     document.getElementById('accountProvider').value = provider.id;
     onProviderChange();
+    onImapPortChange(); // Update TLS checkbox based on detected port
     showAccountFormMessage(`✓ Detected ${provider.displayName}`, 'success');
   }
+}
+
+function onImapPortChange() {
+  const port = parseInt(document.getElementById('accountImapPort').value);
+  const tlsCheckbox = document.getElementById('accountImapTls');
+
+  // Auto-detect TLS setting based on common ports
+  // Port 993 = implicit TLS (checked)
+  // Port 143, 1143 = STARTTLS or plain (unchecked for STARTTLS)
+  // Port 465 = legacy SSL (checked)
+  if (port === 993 || port === 465) {
+    tlsCheckbox.checked = true;
+  } else if (port === 143 || port === 1143) {
+    tlsCheckbox.checked = false; // STARTTLS or plain
+  }
+  // For other ports, leave as-is
 }
 
 function onSmtpToggle() {
@@ -879,6 +896,12 @@ async function testAccountConnection() {
   showAccountFormMessage('Testing connection...', 'info');
 
   try {
+    // Get TLS setting from checkbox
+    const useTls = document.getElementById('accountImapTls').checked;
+    const port = parseInt(imapPort);
+
+    console.log('Testing connection with:', { email, host: imapHost, port, tls: useTls });
+
     const response = await fetch('/api/test-connection', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -886,17 +909,21 @@ async function testAccountConnection() {
         email: email,
         password: password,
         host: imapHost,
-        port: parseInt(imapPort),
-        tls: true
+        port: port,
+        tls: useTls
       })
     });
 
     const result = await response.json();
+    console.log('Test connection result:', result);
 
     if (result.success) {
       showAccountFormMessage('✅ Connection successful!', 'success');
     } else {
       showAccountFormMessage('❌ Connection failed: ' + result.error, 'error');
+      if (result.help) {
+        console.log('Help:', result.help);
+      }
     }
   } catch (error) {
     showAccountFormMessage('❌ Test failed: ' + error.message, 'error');
@@ -917,12 +944,16 @@ async function saveAccount() {
   showAccountFormMessage('Saving account...', 'info');
 
   try {
+    // Get TLS setting from checkbox
+    const useTls = document.getElementById('accountImapTls').checked;
+    const port = parseInt(imapPort);
+
     const accountData = {
       email: email,
       password: password,
       host: imapHost,  // Backend expects 'host', not 'imapHost'
-      port: parseInt(imapPort),
-      tls: true  // Backend expects 'tls', not 'imapSecure'
+      port: port,
+      tls: useTls  // From checkbox
     };
 
     // Add SMTP configuration if enabled

@@ -103,8 +103,8 @@ export class WebUIServer {
 
     // Serve static files from public directory
     // In development: __dirname = src/web, public is at ../../public
-    // In production: __dirname = web (inside install dir), public is at ../public
-    const publicPath = path.join(__dirname, '../public');
+    // In production: __dirname = dist/web, public is at ../../public
+    const publicPath = path.join(__dirname, '../../public');
     this.app.use(express.static(publicPath));
   }
 
@@ -162,14 +162,18 @@ export class WebUIServer {
           }
         }
 
+        // Set default port and auto-detect TLS if not specified
+        const finalPort = imapPort || 993;
+        const finalTls = useTls !== undefined ? useTls : (finalPort === 993 || finalPort === 465);
+
         const account = this.db.createAccount({
           user_id: this.defaultUserId,
           name: name || email,
           host: imapHost,
-          port: imapPort || 993,
+          port: finalPort,
           username: email,
           password,
-          tls: useTls !== false,
+          tls: finalTls,
           smtp_host: smtp?.host,
           smtp_port: smtp?.port,
           smtp_username: smtp?.user || email,
@@ -200,16 +204,21 @@ export class WebUIServer {
 
       try {
         const { email, password, host, port, tls } = req.body;
+        console.error('[API] Test connection request:', { email, host, port, tls: tls });
+
+        // Auto-detect TLS based on port if not explicitly specified
+        const imapPort = port || 993;
+        const useTls = tls !== undefined ? tls : (imapPort === 993 || imapPort === 465);
 
         // Create temporary account for testing
         const testAccount: ImapAccount = {
           id: 'test-' + Date.now(),
           name: 'Test',
           host: host || 'imap.gmail.com',
-          port: port || 993,
+          port: imapPort,
           user: email,
           password,
-          tls: tls !== false,
+          tls: useTls,
         };
 
         // Try to connect
