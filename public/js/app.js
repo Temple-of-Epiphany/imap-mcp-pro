@@ -706,6 +706,7 @@ async function deleteCategory(categoryId) {
 
 // Accounts Management
 let emailProviders = [];
+let currentEditingAccountId = null;
 
 async function loadEmailProviders() {
   try {
@@ -812,6 +813,9 @@ async function loadAccountsList() {
               <span class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Configured</span>
             </div>
             <div class="flex gap-2">
+              <button onclick="editAccount('${acc.id}')" class="text-blue-600 hover:text-blue-800 text-sm">
+                Edit
+              </button>
               <button onclick="testSingleAccount('${acc.id}')" class="text-gray-600 hover:text-gray-800 text-sm">
                 Test
               </button>
@@ -836,6 +840,7 @@ async function loadAccountsList() {
 }
 
 async function startAddAccount() {
+  currentEditingAccountId = null;
   document.getElementById('accountsList').classList.add('hidden');
   document.getElementById('accountFormView').classList.remove('hidden');
   document.getElementById('formTitle').textContent = 'Add New Account';
@@ -858,6 +863,58 @@ async function startAddAccount() {
   document.getElementById('providerNotes').classList.add('hidden');
   document.getElementById('accountFormMessage').classList.add('hidden');
   document.getElementById('smtpDetails').style.display = 'block';
+}
+
+async function editAccount(accountId) {
+  try {
+    // Fetch full account details
+    const response = await fetch('/api/accounts');
+    const accounts = await response.json();
+    const account = accounts.find(acc => acc.id === accountId);
+
+    if (!account) {
+      alert('Account not found');
+      return;
+    }
+
+    currentEditingAccountId = accountId;
+    document.getElementById('accountsList').classList.add('hidden');
+    document.getElementById('accountFormView').classList.remove('hidden');
+    document.getElementById('formTitle').textContent = 'Edit Account';
+
+    // Load email providers if not already loaded
+    if (emailProviders.length === 0) {
+      await loadEmailProviders();
+    }
+
+    // Populate form with existing data
+    document.getElementById('accountProvider').value = '';  // Can't auto-detect provider from existing data
+    document.getElementById('accountEmail').value = account.user || '';
+    document.getElementById('accountPassword').value = '';  // Don't show password for security
+    document.getElementById('accountImapHost').value = account.host || '';
+    document.getElementById('accountImapPort').value = account.port || '993';
+
+    // Populate SMTP fields if present
+    if (account.smtp && account.smtp.host) {
+      document.getElementById('smtpEnabled').checked = true;
+      document.getElementById('accountSmtpHost').value = account.smtp.host || '';
+      document.getElementById('accountSmtpPort').value = account.smtp.port || '465';
+      document.getElementById('accountSmtpSecure').checked = account.smtp.tls || false;
+      document.getElementById('smtpDetails').style.display = 'block';
+    } else {
+      document.getElementById('smtpEnabled').checked = false;
+      document.getElementById('accountSmtpHost').value = '';
+      document.getElementById('accountSmtpPort').value = '465';
+      document.getElementById('accountSmtpSecure').checked = true;
+      document.getElementById('smtpDetails').style.display = 'none';
+    }
+
+    document.getElementById('providerNotes').classList.add('hidden');
+    document.getElementById('accountFormMessage').classList.add('hidden');
+  } catch (error) {
+    console.error('Failed to load account for editing:', error);
+    alert('Failed to load account details: ' + error.message);
+  }
 }
 
 function cancelAccountForm() {
@@ -891,12 +948,25 @@ async function testAccountConnection() {
       })
     });
 
-    const result = await response.json();
+    // Handle non-JSON responses (e.g., rate limiting, server errors)
+    const contentType = response.headers.get('content-type');
+    let result;
+    if (contentType && contentType.includes('application/json')) {
+      result = await response.json();
+    } else {
+      const text = await response.text();
+      result = { success: false, error: text || 'Server returned non-JSON response' };
+    }
 
     if (result.success) {
       showAccountFormMessage('✅ Connection successful!', 'success');
     } else {
-      showAccountFormMessage('❌ Connection failed: ' + result.error, 'error');
+      // Display both the error and helpful context
+      let errorMessage = '❌ Connection failed: ' + result.error;
+      if (result.help) {
+        errorMessage += '\n\n' + result.help;
+      }
+      showAccountFormMessage(errorMessage, 'error');
     }
   } catch (error) {
     showAccountFormMessage('❌ Test failed: ' + error.message, 'error');
@@ -909,21 +979,32 @@ async function saveAccount() {
   const imapHost = document.getElementById('accountImapHost').value.trim();
   const imapPort = document.getElementById('accountImapPort').value.trim();
 
-  if (!email || !password || !imapHost || !imapPort) {
-    showAccountFormMessage('Please fill in all fields', 'error');
+  // For edit mode, password is optional (only update if changed)
+  const isEditMode = currentEditingAccountId !== null;
+  if (!email || !imapHost || !imapPort) {
+    showAccountFormMessage('Please fill in required fields', 'error');
     return;
   }
 
-  showAccountFormMessage('Saving account...', 'info');
+  if (!isEditMode && !password) {
+    showAccountFormMessage('Password is required for new accounts', 'error');
+    return;
+  }
+
+  showAccountFormMessage(isEditMode ? 'Updating account...' : 'Saving account...', 'info');
 
   try {
     const accountData = {
       email: email,
-      password: password,
-      host: imapHost,  // Backend expects 'host', not 'imapHost'
+      host: imapHost,
       port: parseInt(imapPort),
-      tls: true  // Backend expects 'tls', not 'imapSecure'
+      tls: true
     };
+
+    // Only include password if provided (required for new, optional for edit)
+    if (password) {
+      accountData.password = password;
+    }
 
     // Add SMTP configuration if enabled
     const smtpEnabled = document.getElementById('smtpEnabled').checked;
@@ -936,15 +1017,18 @@ async function saveAccount() {
         accountData.smtp = {
           host: smtpHost,
           port: parseInt(smtpPort),
-          secure: smtpSecure,  // Backend expects 'secure' or 'tls'
-          user: email,  // Use same email as SMTP user
-          password: password  // Use same password
+          secure: smtpSecure,
+          user: email,
+          password: password || undefined  // Use password if provided
         };
       }
     }
 
-    const response = await fetch('/api/accounts', {
-      method: 'POST',
+    const url = isEditMode ? `/api/accounts/${currentEditingAccountId}` : '/api/accounts';
+    const method = isEditMode ? 'PUT' : 'POST';
+
+    const response = await fetch(url, {
+      method: method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(accountData)
     });
@@ -952,13 +1036,19 @@ async function saveAccount() {
     const result = await response.json();
 
     if (result.success) {
-      showAccountFormMessage('✅ Account saved successfully!', 'success');
+      showAccountFormMessage(isEditMode ? '✅ Account updated successfully!' : '✅ Account saved successfully!', 'success');
       setTimeout(() => {
+        currentEditingAccountId = null;
         cancelAccountForm();
         loadAccountsList();
       }, 1500);
     } else {
-      showAccountFormMessage('❌ Failed to save: ' + result.error, 'error');
+      // Display both the error and helpful context
+      let errorMessage = '❌ Failed to save: ' + result.error;
+      if (result.help) {
+        errorMessage += '\n\n' + result.help;
+      }
+      showAccountFormMessage(errorMessage, 'error');
     }
   } catch (error) {
     showAccountFormMessage('❌ Save failed: ' + error.message, 'error');
@@ -976,6 +1066,9 @@ function showAccountFormMessage(message, type) {
   };
 
   messageEl.className = `mt-4 p-4 rounded-md border ${bgColors[type] || bgColors.info}`;
+
+  // Preserve line breaks in multi-line messages
+  messageEl.style.whiteSpace = 'pre-line';
   messageEl.textContent = message;
 }
 
@@ -1039,6 +1132,18 @@ async function testSingleAccount(accountId) {
         ? (testResults.smtp.success ? `<span class="text-green-600">✓ SMTP OK</span>` : `<span class="text-red-600">✗ SMTP Failed</span>`)
         : `<span class="text-gray-500">○ SMTP Not Tested</span>`;
 
+      // Build error details with help text
+      let errorDetails = '';
+      if (testResults.error) {
+        errorDetails = `<div class="text-xs text-red-600 mt-2 whitespace-pre-line">${testResults.error}</div>`;
+      }
+      if (testResults.imap?.error) {
+        errorDetails += `<div class="text-xs text-red-600 mt-2 whitespace-pre-line">IMAP: ${testResults.imap.error}</div>`;
+      }
+      if (testResults.smtp?.error) {
+        errorDetails += `<div class="text-xs text-red-600 mt-2 whitespace-pre-line">SMTP: ${testResults.smtp.error}</div>`;
+      }
+
       resultDiv.innerHTML = `
         <div class="bg-gray-50 rounded p-3">
           <div class="flex gap-4">
@@ -1046,15 +1151,99 @@ async function testSingleAccount(accountId) {
             <div>${smtpStatus}</div>
           </div>
           ${testResults.imap?.unreadCount !== undefined ? `<div class="text-xs text-gray-600 mt-1">📬 ${testResults.imap.unreadCount} unread emails</div>` : ''}
-          ${testResults.error ? `<div class="text-xs text-red-600 mt-1">${testResults.error}</div>` : ''}
+          ${errorDetails}
           <div class="text-xs text-gray-500 mt-1">Test completed in ${testResults.totalTime}ms</div>
         </div>
       `;
     } else {
-      resultDiv.innerHTML = `<div class="bg-red-50 text-red-600 rounded p-3">❌ ${result.error || 'Test failed'}</div>`;
+      // Display error with help text if available
+      let errorMessage = result.error || 'Test failed';
+      if (result.help) {
+        errorMessage += '\n\n' + result.help;
+      }
+      resultDiv.innerHTML = `<div class="bg-red-50 text-red-600 rounded p-3 whitespace-pre-line">❌ ${errorMessage}</div>`;
     }
   } catch (error) {
     resultDiv.innerHTML = `<div class="bg-red-50 text-red-600 rounded p-3">❌ ${error.message}</div>`;
+  }
+}
+
+async function checkAccountStatus() {
+  try {
+    const response = await fetch('/api/accounts/status');
+    const result = await response.json();
+
+    if (result.success && result.accounts) {
+      // Create a status dialog/modal
+      const statusHtml = `
+        <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+                    background: white; padding: 24px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                    max-width: 600px; max-height: 80vh; overflow-y: auto; z-index: 1000;">
+          <div style="display: flex; justify-between; align-items: center; margin-bottom: 16px;">
+            <h3 style="font-size: 18px; font-weight: bold;">Account Login Status</h3>
+            <button onclick="closeStatusDialog()" style="background: none; border: none; font-size: 24px; cursor: pointer;">&times;</button>
+          </div>
+          <div style="space-y: 12px;">
+            ${result.accounts.map(acc => {
+              let statusColor = 'gray';
+              let statusText = 'Unknown';
+              let statusIcon = '○';
+
+              if (acc.status === 'connected') {
+                statusColor = 'green';
+                statusText = 'Connected';
+                statusIcon = '✓';
+              } else if (acc.status === 'circuit_breaker_open') {
+                statusColor = 'red';
+                statusText = 'Circuit Breaker Open';
+                statusIcon = '✗';
+              } else if (acc.status === 'recovering') {
+                statusColor = 'orange';
+                statusText = 'Recovering';
+                statusIcon = '↻';
+              } else if (acc.status === 'error') {
+                statusColor = 'red';
+                statusText = 'Error';
+                statusIcon = '✗';
+              } else {
+                statusColor = 'gray';
+                statusText = 'Disconnected';
+                statusIcon = '○';
+              }
+
+              return `
+                <div style="border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; margin-bottom: 12px;">
+                  <div style="font-weight: 600; margin-bottom: 4px;">${acc.email}</div>
+                  <div style="font-size: 14px; color: #666; margin-bottom: 4px;">${acc.host}</div>
+                  <div style="font-size: 14px; color: ${statusColor}; font-weight: 500;">
+                    ${statusIcon} ${statusText}
+                  </div>
+                  ${acc.error ? `<div style="font-size: 13px; color: #dc2626; margin-top: 8px; padding: 8px; background: #fef2f2; border-radius: 4px;">${acc.error}</div>` : ''}
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+        <div id="statusDialogBackdrop" onclick="closeStatusDialog()"
+             style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 999;"></div>
+      `;
+
+      const dialogDiv = document.createElement('div');
+      dialogDiv.id = 'statusDialog';
+      dialogDiv.innerHTML = statusHtml;
+      document.body.appendChild(dialogDiv);
+    } else {
+      alert('Failed to check account status: ' + (result.error || 'Unknown error'));
+    }
+  } catch (error) {
+    alert('Failed to check account status: ' + error.message);
+  }
+}
+
+function closeStatusDialog() {
+  const dialog = document.getElementById('statusDialog');
+  if (dialog) {
+    dialog.remove();
   }
 }
 

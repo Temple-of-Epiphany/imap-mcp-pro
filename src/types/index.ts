@@ -184,6 +184,7 @@ export interface CircuitBreakerState {
   failureCount: number;
   successCount: number;
   lastFailureTime?: Date;
+  lastFailureReason?: string;
   lastStateChange: Date;
   config: Required<CircuitBreakerConfig>;
 }

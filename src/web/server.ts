@@ -75,7 +75,7 @@ export class WebUIServer {
     const globalLimiter = rateLimit({
       windowMs: 15 * 60 * 1000, // 15 minutes
       max: 100, // Limit each IP to 100 requests per window
-      message: 'Too many requests from this IP, please try again later',
+      message: { success: false, error: 'Too many requests from this IP, please try again later' },
       standardHeaders: true,
       legacyHeaders: false
     });
@@ -91,7 +91,11 @@ export class WebUIServer {
     this.authLimiter = rateLimit({
       windowMs: 15 * 60 * 1000, // 15 minutes
       max: 10, // Only 10 auth attempts per 15 minutes
-      message: 'Too many authentication attempts, please try again later',
+      message: {
+        success: false,
+        error: 'Too many authentication attempts, please try again later',
+        help: '💡 Rate limit exceeded. Please wait 15 minutes before trying again, or check your password to avoid repeated failures.'
+      },
       skipSuccessfulRequests: false, // Count all attempts
       standardHeaders: true,
       legacyHeaders: false
@@ -481,6 +485,70 @@ export class WebUIServer {
           success: false,
           error: error instanceof Error ? error.message : 'Test failed',
           totalTime: Date.now() - startTime
+        });
+      }
+    });
+
+    // Check login status for all accounts
+    this.app.get('/api/accounts/status', async (req, res) => {
+      try {
+        const userId = process.env.MCP_USER_ID || 'default';
+        const accounts = this.db.listDecryptedAccountsForUser(userId);
+        const statusResults = [];
+
+        for (const dbAccount of accounts) {
+          const imapAccount: ImapAccount = {
+            id: dbAccount.account_id,
+            name: dbAccount.name,
+            host: dbAccount.host,
+            port: dbAccount.port,
+            user: dbAccount.username,
+            password: dbAccount.password,
+            tls: dbAccount.tls
+          };
+
+          let status = 'disconnected';
+          let error = null;
+          let connectionState = null;
+
+          // Check if account has an active connection
+          const metadata = (this.imapService as any).connectionMetadata.get(dbAccount.account_id);
+          if (metadata) {
+            connectionState = metadata.state;
+
+            // Check circuit breaker status
+            if (metadata.circuitBreaker) {
+              const cb = metadata.circuitBreaker;
+              if (cb.state === 'OPEN') {
+                status = 'circuit_breaker_open';
+                error = (cb as any).lastFailureReason || 'Too many failures - circuit breaker opened';
+              } else if (cb.state === 'HALF_OPEN') {
+                status = 'recovering';
+              } else if (metadata.state === 'connected') {
+                status = 'connected';
+              } else if (metadata.state === 'error') {
+                status = 'error';
+                error = (cb as any).lastFailureReason || 'Connection error';
+              }
+            }
+          }
+
+          statusResults.push({
+            id: dbAccount.account_id,
+            name: dbAccount.name,
+            email: dbAccount.username,
+            host: dbAccount.host,
+            status: status,
+            connectionState: connectionState,
+            error: error
+          });
+        }
+
+        res.json({ success: true, accounts: statusResults });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to check account status'
         });
       }
     });

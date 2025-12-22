@@ -223,7 +223,10 @@ export class ImapService {
       client.on('error', (err) => {
         console.error(`[IMAP] Connection error for account ${accountId}:`, err.message);
         this.updateConnectionState(accountId, ConnectionState.ERROR);
-        this.recordCircuitBreakerFailure(accountId);
+
+        // Capture failure reason for circuit breaker
+        const errorReason = err.message || 'Connection error';
+        this.recordCircuitBreakerFailure(accountId, errorReason);
 
         // Attempt reconnect
         this.scheduleReconnect(accountId);
@@ -263,7 +266,30 @@ export class ImapService {
     } catch (error) {
       console.error(`[IMAP] Failed to connect account ${accountId}:`, error);
       this.updateConnectionState(accountId, ConnectionState.ERROR);
-      this.recordCircuitBreakerFailure(accountId);
+
+      // Determine failure reason for circuit breaker
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      let failureReason = errorMessage;
+
+      // Enhance error message for authentication failures
+      if (errorMessage.toLowerCase().includes('auth') ||
+          errorMessage.toLowerCase().includes('invalid credentials') ||
+          errorMessage.toLowerCase().includes('login') ||
+          errorMessage.toLowerCase().includes('authentication failed')) {
+        failureReason = `Authentication failed for ${account.user}`;
+        const enhancedError = new Error(`${failureReason}. Please verify your password. Many providers (Gmail, Yahoo, Outlook, etc.) require app-specific passwords instead of your regular account password.`);
+        enhancedError.name = 'AuthenticationError';
+        this.recordCircuitBreakerFailure(accountId, failureReason);
+        throw enhancedError;
+      } else if (errorMessage.toLowerCase().includes('timeout')) {
+        failureReason = `Connection timeout for ${account.user}`;
+      } else if (errorMessage.toLowerCase().includes('econnrefused')) {
+        failureReason = `Connection refused by ${account.host}:${account.port}`;
+      } else if (errorMessage.toLowerCase().includes('enotfound')) {
+        failureReason = `Server not found: ${account.host}`;
+      }
+
+      this.recordCircuitBreakerFailure(accountId, failureReason);
       throw error;
     }
   }
@@ -1297,7 +1323,7 @@ export class ImapService {
     };
   }
 
-  private recordCircuitBreakerFailure(accountId: string): void {
+  private recordCircuitBreakerFailure(accountId: string, reason?: string): void {
     const metadata = this.connectionMetadata.get(accountId);
     if (!metadata?.circuitBreaker) return;
 
@@ -1306,17 +1332,28 @@ export class ImapService {
     cb.lastFailureTime = new Date();
     cb.successCount = 0;
 
+    // Store the failure reason for better diagnostics
+    if (!cb.lastFailureReason) {
+      (cb as any).lastFailureReason = reason;
+    }
+
     if (cb.state === CircuitState.CLOSED && cb.failureCount >= cb.config.failureThreshold) {
       cb.state = CircuitState.OPEN;
       cb.lastStateChange = new Date();
-      console.error(`[CircuitBreaker] OPENED for account ${accountId} (${cb.failureCount} failures)`);
+
+      const account = this.accountStore.get(accountId);
+      const email = account?.user || accountId;
+      const failureInfo = reason ? ` - Reason: ${reason}` : '';
+
+      console.error(`[CircuitBreaker] OPENED for account ${email} (${cb.failureCount} failures)${failureInfo}`);
+      console.error(`[CircuitBreaker] Will attempt recovery in ${cb.config.timeout}ms`);
 
       // Schedule transition to HALF_OPEN
       setTimeout(() => {
         if (cb.state === CircuitState.OPEN) {
           cb.state = CircuitState.HALF_OPEN;
           cb.lastStateChange = new Date();
-          console.error(`[CircuitBreaker] Transitioned to HALF_OPEN for account ${accountId}`);
+          console.error(`[CircuitBreaker] Transitioned to HALF_OPEN for account ${email} - Testing recovery...`);
         }
       }, cb.config.timeout);
     }
