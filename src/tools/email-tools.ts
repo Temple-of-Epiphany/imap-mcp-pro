@@ -13,7 +13,7 @@ export function emailTools(
 ): void {
   // Search emails tool
   server.registerTool('imap_search_emails', {
-    description: 'Search for emails in a folder',
+    description: 'Search for emails in a folder. Default limit is 50 to prevent token overflow. Use search criteria to narrow results for large folders.',
     inputSchema: {
       accountId: z.string().describe('Account ID'),
       folder: z.string().default('INBOX').describe('Folder name (default: INBOX)'),
@@ -25,11 +25,15 @@ export function emailTools(
       before: z.string().optional().describe('Search emails before date (YYYY-MM-DD)'),
       seen: z.boolean().optional().describe('Filter by read/unread status'),
       flagged: z.boolean().optional().describe('Filter by flagged status'),
-      limit: z.number().optional().default(50).describe('Maximum number of results'),
+      limit: z.number().optional().default(50).describe('Maximum number of results (default: 50, max: 100 to prevent token limits)'),
     }
   }, withErrorHandling(async ({ accountId, folder, limit, ...searchCriteria }) => {
     const criteria: any = {};
-    
+
+    // Enforce maximum limit to prevent token overflow (Issue #85)
+    const maxLimit = 100;
+    const effectiveLimit = Math.min(limit || 50, maxLimit);
+
     if (searchCriteria.from) criteria.from = searchCriteria.from;
     if (searchCriteria.to) criteria.to = searchCriteria.to;
     if (searchCriteria.subject) criteria.subject = searchCriteria.subject;
@@ -38,16 +42,29 @@ export function emailTools(
     if (searchCriteria.before) criteria.before = new Date(searchCriteria.before);
     if (searchCriteria.seen !== undefined) criteria.seen = searchCriteria.seen;
     if (searchCriteria.flagged !== undefined) criteria.flagged = searchCriteria.flagged;
-    
+
     const messages = await imapService.searchEmails(accountId, folder, criteria);
-    const limitedMessages = messages.slice(0, limit);
-    
+    const limitedMessages = messages.slice(0, effectiveLimit);
+
+    // Build warnings
+    const warnings = [];
+    if (limit && limit > maxLimit) {
+      warnings.push(`Requested limit ${limit} exceeds maximum ${maxLimit}. Returning ${maxLimit} results to prevent token overflow.`);
+    }
+    if (messages.length > effectiveLimit) {
+      warnings.push(`Found ${messages.length} emails but returning only ${effectiveLimit}. Use search criteria (from, subject, since, etc.) to narrow results.`);
+    }
+    if (messages.length > 500) {
+      warnings.push(`Large folder detected (${messages.length} emails). Consider using bulk operations with chunking for better performance.`);
+    }
+
     return {
       content: [{
         type: 'text',
         text: JSON.stringify({
           totalFound: messages.length,
           returned: limitedMessages.length,
+          warnings: warnings.length > 0 ? warnings : undefined,
           messages: limitedMessages,
         }, null, 2)
       }]

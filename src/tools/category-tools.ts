@@ -25,15 +25,19 @@ export function categoryTools(
 
   // Apply categories to emails in a folder
   server.registerTool('imap_apply_categories', {
-    description: 'Apply Quick Categories to emails in a folder. Scans emails and moves them to target folders based on keyword matches.',
+    description: 'Apply Quick Categories to emails in a folder. Scans emails and moves them to target folders based on keyword matches. Default limit is 100 to prevent token overflow.',
     inputSchema: {
       accountId: z.string().describe('Account ID'),
       folder: z.string().default('INBOX').describe('Folder to scan (default: INBOX)'),
-      limit: z.number().optional().default(100).describe('Maximum number of emails to process (default: 100)'),
+      limit: z.number().optional().default(100).describe('Maximum number of emails to process (default: 100, max: 200)'),
       dryRun: z.boolean().optional().default(false).describe('Dry run mode - show matches without moving emails')
     }
   }, withErrorHandling(async ({ accountId, folder, limit, dryRun }) => {
     const { userId } = getToolContext(db);
+
+    // Enforce maximum limit to prevent token overflow (Issue #85)
+    const maxLimit = 200;
+    const effectiveLimit = Math.min(limit || 100, maxLimit);
 
     // Get enabled categories for this account
     const categories = db.getEnabledCategoriesForAccount(userId, accountId);
@@ -54,12 +58,22 @@ export function categoryTools(
     }
 
     // Search for all recent emails (no criteria = all emails)
-    let emails = await imapService.searchEmails(accountId, folder, {});
+    let allEmails = await imapService.searchEmails(accountId, folder, {});
 
     // Limit to most recent emails if needed
-    if (limit && emails.length > limit) {
+    let emails = allEmails;
+    if (allEmails.length > effectiveLimit) {
       // Sort by UID descending (most recent first) and take limit
-      emails = emails.sort((a, b) => b.uid - a.uid).slice(0, limit);
+      emails = allEmails.sort((a, b) => b.uid - a.uid).slice(0, effectiveLimit);
+    }
+
+    // Build warnings
+    const warnings = [];
+    if (limit && limit > maxLimit) {
+      warnings.push(`Requested limit ${limit} exceeds maximum ${maxLimit}. Processing ${maxLimit} emails to prevent token overflow.`);
+    }
+    if (allEmails.length > effectiveLimit) {
+      warnings.push(`Found ${allEmails.length} emails in folder but processing only ${effectiveLimit} most recent. Use search criteria in imap_search_emails first to narrow results.`);
     }
 
     let processedCount = 0;
@@ -130,6 +144,7 @@ export function categoryTools(
           processedEmails: processedCount,
           categorizedEmails: categorizedCount,
           categoryMatches,
+          warnings: warnings.length > 0 ? warnings : undefined,
           moveOperations: dryRun ? moveOperations : undefined,
           message: dryRun
             ? `Dry run complete. Found ${categorizedCount} emails that would be categorized.`
