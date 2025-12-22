@@ -796,20 +796,35 @@ export class WebUIServer {
 
     // Categories (Issue #61)
     // Get all categories for an account
-    this.app.get('/api/categories/:accountId', (req, res) => {
+    // ===================================
+    // Quick Categories Endpoints (Issue #71)
+    // ===================================
+
+    // Get categories for user (optionally filtered by account)
+    this.app.get('/api/categories', (req, res) => {
       try {
-        const { accountId } = req.params;
-        const categories = this.db.getCategories(accountId);
+        const userId = process.env.MCP_USER_ID || 'default';
+        const { accountId } = req.query;
+
+        const categories = this.db.listCategoriesForUser(
+          userId,
+          accountId as string | undefined
+        );
 
         res.json({
           success: true,
-          categories: categories.map((c: any) => ({
+          categories: categories.map(c => ({
             categoryId: c.category_id,
-            categoryName: c.category_name,
-            folderName: c.folder_name,
+            userId: c.user_id,
             accountId: c.account_id,
+            categoryName: c.category_name,
+            keywords: c.keywords,
+            targetFolder: c.target_folder,
+            enabled: c.enabled,
+            matchCount: c.match_count,
             createdAt: c.created_at,
-            updatedAt: c.updated_at
+            updatedAt: c.updated_at,
+            lastMatched: c.last_matched
           }))
         });
       } catch (error) {
@@ -823,20 +838,39 @@ export class WebUIServer {
     // Create category
     this.app.post('/api/categories', (req, res) => {
       try {
-        const { accountId, categoryName, folderName } = req.body;
+        const userId = process.env.MCP_USER_ID || 'default';
+        const { accountId, categoryName, keywords, targetFolder, enabled } = req.body;
 
-        if (!accountId || !categoryName || !folderName) {
+        if (!accountId || !categoryName || !keywords || !targetFolder) {
           return res.status(400).json({
             success: false,
-            error: 'accountId, categoryName, and folderName are required'
+            error: 'accountId, categoryName, keywords, and targetFolder are required'
           });
         }
 
-        const categoryId = this.db.createCategory(accountId, categoryName, folderName);
+        const category = this.db.createCategory({
+          user_id: userId,
+          account_id: accountId,
+          category_name: categoryName,
+          keywords,
+          target_folder: targetFolder,
+          enabled: enabled !== undefined ? enabled : true
+        });
 
         res.json({
           success: true,
-          categoryId,
+          category: {
+            categoryId: category.category_id,
+            userId: category.user_id,
+            accountId: category.account_id,
+            categoryName: category.category_name,
+            keywords: category.keywords,
+            targetFolder: category.target_folder,
+            enabled: category.enabled,
+            matchCount: category.match_count,
+            createdAt: category.created_at,
+            updatedAt: category.updated_at
+          },
           message: 'Category created successfully'
         });
       } catch (error) {
@@ -851,11 +885,13 @@ export class WebUIServer {
     this.app.put('/api/categories/:categoryId', (req, res) => {
       try {
         const { categoryId } = req.params;
-        const { categoryName, folderName } = req.body;
+        const { categoryName, keywords, targetFolder, enabled } = req.body;
 
         const updates: any = {};
-        if (categoryName !== undefined) updates.categoryName = categoryName;
-        if (folderName !== undefined) updates.folderName = folderName;
+        if (categoryName !== undefined) updates.category_name = categoryName;
+        if (keywords !== undefined) updates.keywords = keywords;
+        if (targetFolder !== undefined) updates.target_folder = targetFolder;
+        if (enabled !== undefined) updates.enabled = enabled;
 
         this.db.updateCategory(parseInt(categoryId), updates);
 

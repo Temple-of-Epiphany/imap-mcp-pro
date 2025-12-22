@@ -96,6 +96,20 @@ export interface Rule {
   execution_count: number;
 }
 
+export interface Category {
+  category_id: number;
+  user_id: string;
+  account_id: string;
+  category_name: string;
+  keywords: string; // Comma or semicolon separated
+  target_folder: string;
+  enabled: boolean;
+  match_count: number;
+  created_at: string;
+  updated_at: string;
+  last_matched?: string;
+}
+
 export interface SpamDomain {
   domain: string;
   spam_score: number;

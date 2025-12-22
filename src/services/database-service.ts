@@ -27,6 +27,7 @@ import {
   UserAccount,
   Contact,
   Rule,
+  Category,
   SpamDomain,
   SpamCache,
   UnsubscribeLink,
@@ -820,51 +821,103 @@ export class DatabaseService {
     return stmt.all(accountId);
   }
 
+  // ===================
+  // Quick Categories Management (Issue #71)
+  // ===================
+
   /**
-   * Get category by ID
+   * Create a new Quick Category
    */
-  getCategory(categoryId: number): any | null {
-    const stmt = this.db.prepare('SELECT * FROM categories WHERE category_id = ?');
-    return stmt.get(categoryId) || null;
+  createCategory(category: Omit<Category, 'category_id' | 'created_at' | 'updated_at' | 'match_count' | 'last_matched'>): Category {
+    const stmt = this.db.prepare(`
+      INSERT INTO categories (user_id, account_id, category_name, keywords, target_folder, enabled)
+      VALUES (@user_id, @account_id, @category_name, @keywords, @target_folder, @enabled)
+    `);
+
+    const result = stmt.run({
+      user_id: category.user_id,
+      account_id: category.account_id,
+      category_name: category.category_name,
+      keywords: category.keywords,
+      target_folder: category.target_folder,
+      enabled: category.enabled ? 1 : 0
+    });
+
+    return this.getCategory(result.lastInsertRowid as number)!;
   }
 
   /**
-   * Create category
+   * Get category by ID
    */
-  createCategory(accountId: string, categoryName: string, folderName: string): number {
-    const now = Date.now();
-    const stmt = this.db.prepare(`
-      INSERT INTO categories (category_name, folder_name, account_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?)
-    `);
+  getCategory(categoryId: number): Category | null {
+    const stmt = this.db.prepare('SELECT * FROM categories WHERE category_id = ?');
+    const category = stmt.get(categoryId) as any;
+    if (!category) return null;
 
-    const result = stmt.run(categoryName, folderName, accountId, now, now);
-    return result.lastInsertRowid as number;
+    return {
+      ...category,
+      enabled: Boolean(category.enabled)
+    };
+  }
+
+  /**
+   * List all categories for a user
+   */
+  listCategoriesForUser(userId: string, accountId?: string): Category[] {
+    let query = 'SELECT * FROM categories WHERE user_id = ?';
+    const params: any[] = [userId];
+
+    if (accountId) {
+      query += ' AND account_id = ?';
+      params.push(accountId);
+    }
+
+    query += ' ORDER BY category_name ASC';
+
+    const stmt = this.db.prepare(query);
+    const categories = stmt.all(...params) as any[];
+
+    return categories.map(cat => ({
+      ...cat,
+      enabled: Boolean(cat.enabled)
+    }));
   }
 
   /**
    * Update category
    */
-  updateCategory(categoryId: number, updates: {
-    categoryName?: string;
-    folderName?: string;
-  }): void {
+  updateCategory(categoryId: number, updates: Partial<Omit<Category, 'category_id' | 'created_at' | 'user_id' | 'account_id'>>): void {
     const fields: string[] = [];
     const values: any[] = [];
 
-    if (updates.categoryName !== undefined) {
+    if (updates.category_name !== undefined) {
       fields.push('category_name = ?');
-      values.push(updates.categoryName);
+      values.push(updates.category_name);
     }
-    if (updates.folderName !== undefined) {
-      fields.push('folder_name = ?');
-      values.push(updates.folderName);
+    if (updates.keywords !== undefined) {
+      fields.push('keywords = ?');
+      values.push(updates.keywords);
+    }
+    if (updates.target_folder !== undefined) {
+      fields.push('target_folder = ?');
+      values.push(updates.target_folder);
+    }
+    if (updates.enabled !== undefined) {
+      fields.push('enabled = ?');
+      values.push(updates.enabled ? 1 : 0);
+    }
+    if (updates.match_count !== undefined) {
+      fields.push('match_count = ?');
+      values.push(updates.match_count);
+    }
+    if (updates.last_matched !== undefined) {
+      fields.push('last_matched = ?');
+      values.push(updates.last_matched);
     }
 
     if (fields.length === 0) return;
 
-    fields.push('updated_at = ?');
-    values.push(Date.now());
+    fields.push('updated_at = CURRENT_TIMESTAMP');
     values.push(categoryId);
 
     const stmt = this.db.prepare(`UPDATE categories SET ${fields.join(', ')} WHERE category_id = ?`);
@@ -877,6 +930,36 @@ export class DatabaseService {
   deleteCategory(categoryId: number): void {
     const stmt = this.db.prepare('DELETE FROM categories WHERE category_id = ?');
     stmt.run(categoryId);
+  }
+
+  /**
+   * Increment match count for a category
+   */
+  incrementCategoryMatch(categoryId: number): void {
+    const stmt = this.db.prepare(`
+      UPDATE categories
+      SET match_count = match_count + 1,
+          last_matched = CURRENT_TIMESTAMP
+      WHERE category_id = ?
+    `);
+    stmt.run(categoryId);
+  }
+
+  /**
+   * Get enabled categories for an account (used by categorization engine)
+   */
+  getEnabledCategoriesForAccount(userId: string, accountId: string): Category[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM categories
+      WHERE user_id = ? AND account_id = ? AND enabled = 1
+      ORDER BY category_name ASC
+    `);
+    const categories = stmt.all(userId, accountId) as any[];
+
+    return categories.map(cat => ({
+      ...cat,
+      enabled: Boolean(cat.enabled)
+    }));
   }
 
   // ===================

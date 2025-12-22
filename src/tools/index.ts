@@ -12,6 +12,7 @@ import { registerScoringTools } from './scoring-tools.js';
 import { registerSubscriptionTools } from './subscription-tools.js';
 import { capabilityTools } from './capability-tools.js';
 import { dnsFirewallTools } from './dns-firewall-tools.js';
+import { categoryTools } from './category-tools.js';
 
 export function registerTools(
   server: McpServer,
@@ -30,6 +31,9 @@ export function registerTools(
 
   // Register folder operation tools
   folderTools(server, imapService, db);
+
+  // Register category tools (Issue #71 - Quick Categories)
+  categoryTools(server, imapService, db);
 
   // Register capability tools (Issue #55 - RFC 9051 compliance)
   capabilityTools(server, imapService, db);

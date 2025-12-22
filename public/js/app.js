@@ -616,50 +616,82 @@ async function loadCategoryAccounts() {
 async function loadCategories() {
   const accountId = document.getElementById('categoryAccountSelect').value;
   if (!accountId) {
-    document.getElementById('categoriesList').innerHTML = '<p class="text-sm text-gray-500">Select an account to view categories</p>';
+    document.getElementById('categoriesList').innerHTML = '<p class="text-sm text-gray-500 text-center py-8">Select an account to view categories</p>';
     return;
   }
 
   try {
-    const response = await fetch(`/api/categories/${accountId}`);
+    const response = await fetch(`/api/categories?accountId=${accountId}`);
     const result = await response.json();
 
     if (result.success && result.categories) {
       const container = document.getElementById('categoriesList');
 
       if (result.categories.length === 0) {
-        container.innerHTML = '<p class="text-sm text-gray-500">No categories configured for this account</p>';
+        container.innerHTML = '<p class="text-sm text-gray-500 text-center py-8">No categories configured for this account</p>';
       } else {
-        container.innerHTML = '<div class="space-y-2">' + result.categories.map(cat => `
-          <div class="border border-gray-200 rounded-lg p-4 flex justify-between items-center">
-            <div>
-              <h5 class="font-semibold">${cat.categoryName}</h5>
-              <p class="text-sm text-gray-500">Folder: ${cat.folderName}</p>
+        container.innerHTML = '<div class="space-y-3">' + result.categories.map(cat => `
+          <div class="border ${cat.enabled ? 'border-purple-300 bg-purple-50' : 'border-gray-200 bg-gray-50'} rounded-lg p-4">
+            <div class="flex justify-between items-start mb-2">
+              <div class="flex-1">
+                <div class="flex items-center gap-2 mb-1">
+                  <h5 class="font-semibold text-lg ${cat.enabled ? 'text-purple-900' : 'text-gray-500'}">${cat.categoryName}</h5>
+                  <span class="px-2 py-1 text-xs rounded ${cat.enabled ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'}">
+                    ${cat.enabled ? 'Enabled' : 'Disabled'}
+                  </span>
+                </div>
+                <div class="space-y-1 text-sm">
+                  <p class="text-gray-700">
+                    <i class="fas fa-tags mr-1"></i><strong>Keywords:</strong>
+                    <span class="text-gray-600">${cat.keywords}</span>
+                  </p>
+                  <p class="text-gray-700">
+                    <i class="fas fa-folder mr-1"></i><strong>Folder:</strong>
+                    <span class="text-gray-600">${cat.targetFolder}</span>
+                  </p>
+                  ${cat.matchCount > 0 ? `
+                    <p class="text-gray-600 text-xs">
+                      <i class="fas fa-check-circle mr-1"></i>Matched ${cat.matchCount} email${cat.matchCount !== 1 ? 's' : ''}
+                      ${cat.lastMatched ? ` (last: ${new Date(cat.lastMatched).toLocaleString()})` : ''}
+                    </p>
+                  ` : ''}
+                </div>
+              </div>
+              <div class="flex gap-2 ml-4">
+                <button onclick="toggleCategory(${cat.categoryId}, ${!cat.enabled})"
+                        class="px-3 py-1 text-sm rounded ${cat.enabled ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}">
+                  <i class="fas ${cat.enabled ? 'fa-pause' : 'fa-play'} mr-1"></i>${cat.enabled ? 'Disable' : 'Enable'}
+                </button>
+                <button onclick="deleteCategory(${cat.categoryId})"
+                        class="px-3 py-1 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200">
+                  <i class="fas fa-trash mr-1"></i>Delete
+                </button>
+              </div>
             </div>
-            <button onclick="deleteCategory(${cat.categoryId})" class="text-red-600 hover:text-red-800 text-sm">
-              Delete
-            </button>
           </div>
         `).join('') + '</div>';
       }
     }
   } catch (error) {
     console.error('Failed to load categories:', error);
+    document.getElementById('categoriesList').innerHTML = '<p class="text-sm text-red-500 text-center py-8">Failed to load categories</p>';
   }
 }
 
 async function addCategory() {
   const accountId = document.getElementById('categoryAccountSelect').value;
   const categoryName = document.getElementById('newCategoryName').value.trim();
-  const folderName = document.getElementById('newFolderName').value.trim();
+  const keywords = document.getElementById('newCategoryKeywords').value.trim();
+  const targetFolder = document.getElementById('newCategoryFolder').value.trim();
+  const enabled = document.getElementById('newCategoryEnabled').checked;
 
   if (!accountId) {
     alert('Please select an account first');
     return;
   }
 
-  if (!categoryName || !folderName) {
-    alert('Please enter both category name and folder name');
+  if (!categoryName || !keywords || !targetFolder) {
+    alert('Please fill in all required fields: Category Name, Keywords, and Target Folder');
     return;
   }
 
@@ -667,20 +699,49 @@ async function addCategory() {
     const response = await fetch('/api/categories', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ accountId, categoryName, folderName })
+      body: JSON.stringify({
+        accountId,
+        categoryName,
+        keywords,
+        targetFolder,
+        enabled
+      })
     });
 
     const result = await response.json();
     if (result.success) {
       document.getElementById('newCategoryName').value = '';
-      document.getElementById('newFolderName').value = '';
+      document.getElementById('newCategoryKeywords').value = '';
+      document.getElementById('newCategoryFolder').value = '';
+      document.getElementById('newCategoryEnabled').checked = true;
       loadCategories();
+      alert('Category created successfully!');
     } else {
       alert('Failed to add category: ' + result.error);
     }
   } catch (error) {
     console.error('Failed to add category:', error);
     alert('Failed to add category');
+  }
+}
+
+async function toggleCategory(categoryId, enabled) {
+  try {
+    const response = await fetch(`/api/categories/${categoryId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled })
+    });
+
+    const result = await response.json();
+    if (result.success) {
+      loadCategories();
+    } else {
+      alert('Failed to toggle category: ' + result.error);
+    }
+  } catch (error) {
+    console.error('Failed to toggle category:', error);
+    alert('Failed to toggle category');
   }
 }
 
