@@ -742,9 +742,14 @@ export class ImapService {
     if (criteria.body) query.body = criteria.body;
     if (criteria.since) query.since = criteria.since;
     if (criteria.before) query.before = criteria.before;
-    if (criteria.seen !== undefined) {
+
+    // Issue #82: Handle unreadOnly convenience parameter (takes precedence over seen)
+    if (criteria.unreadOnly) {
+      query.unseen = true;
+    } else if (criteria.seen !== undefined) {
       query[criteria.seen ? 'seen' : 'unseen'] = true;
     }
+
     if (criteria.flagged !== undefined) {
       query[criteria.flagged ? 'flagged' : 'unflagged'] = true;
     }

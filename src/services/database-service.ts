@@ -962,6 +962,117 @@ export class DatabaseService {
     }));
   }
 
+  // ===========================
+  // UserCheck Key Management (Issue #83)
+  // ===========================
+
+  /**
+   * Create a new UserCheck API key
+   */
+  createUserCheckKey(data: {
+    user_id: string;
+    api_key: string;
+    daily_limit?: number;
+    notes?: string;
+  }): { id: number } {
+    const stmt = this.db.prepare(`
+      INSERT INTO usercheck_keys (user_id, api_key, daily_limit, notes, is_active)
+      VALUES (?, ?, ?, ?, 1)
+    `);
+
+    const result = stmt.run(
+      data.user_id,
+      data.api_key,
+      data.daily_limit || 1000,
+      data.notes || null
+    );
+
+    return { id: Number(result.lastInsertRowid) };
+  }
+
+  /**
+   * Get active UserCheck API key for a user
+   */
+  getActiveUserCheckKey(userId: string): { id: number; api_key: string; daily_limit: number } | null {
+    const stmt = this.db.prepare(`
+      SELECT id, api_key, daily_limit
+      FROM usercheck_keys
+      WHERE user_id = ? AND is_active = 1
+      ORDER BY created_at DESC
+      LIMIT 1
+    `);
+
+    const result = stmt.get(userId) as any;
+    if (!result) return null;
+
+    return {
+      id: result.id,
+      api_key: result.api_key,
+      daily_limit: result.daily_limit
+    };
+  }
+
+  /**
+   * List all UserCheck API keys for a user
+   */
+  listUserCheckKeys(userId: string): any[] {
+    const stmt = this.db.prepare(`
+      SELECT id, api_key, is_active, daily_limit, daily_usage,
+             usage_reset_at, last_used, created_at, notes
+      FROM usercheck_keys
+      WHERE user_id = ?
+      ORDER BY created_at DESC
+    `);
+
+    return stmt.all(userId) as any[];
+  }
+
+  /**
+   * Delete a UserCheck API key
+   */
+  deleteUserCheckKey(keyId: number): void {
+    const stmt = this.db.prepare('DELETE FROM usercheck_keys WHERE id = ?');
+    stmt.run(keyId);
+  }
+
+  /**
+   * Update UserCheck key usage statistics
+   */
+  updateUserCheckKeyUsage(userId: string, apiKey: string): void {
+    const now = new Date().toISOString();
+
+    // Get current usage and reset time
+    const stmt = this.db.prepare(`
+      SELECT daily_usage, usage_reset_at FROM usercheck_keys
+      WHERE user_id = ? AND api_key = ?
+    `);
+
+    const keyData = stmt.get(userId, apiKey) as { daily_usage: number; usage_reset_at: string } | undefined;
+
+    if (!keyData) return;
+
+    const resetDate = new Date(keyData.usage_reset_at);
+    const currentDate = new Date();
+
+    // Reset usage if 24 hours have passed
+    if (currentDate.getTime() - resetDate.getTime() > 24 * 60 * 60 * 1000) {
+      const updateStmt = this.db.prepare(`
+        UPDATE usercheck_keys
+        SET daily_usage = 1, usage_reset_at = ?, last_used = ?
+        WHERE user_id = ? AND api_key = ?
+      `);
+      updateStmt.run(now, now, userId, apiKey);
+    } else {
+      // Increment usage
+      const updateStmt = this.db.prepare(`
+        UPDATE usercheck_keys
+        SET daily_usage = daily_usage + 1, last_used = ?
+        WHERE user_id = ? AND api_key = ?
+      `);
+      updateStmt.run(now, userId, apiKey);
+    }
+  }
+
   // ===================
   // Close Database
   // ===================

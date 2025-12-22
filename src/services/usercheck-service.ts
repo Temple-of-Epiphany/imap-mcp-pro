@@ -67,16 +67,10 @@ export class UserCheckService {
   }
 
   /**
-   * Get UserCheck API key for a user
+   * Get UserCheck API key for a user (Issue #83)
    */
   private async getApiKey(userId: string): Promise<string> {
-    const stmt = this.db['db'].prepare(`
-      SELECT api_key FROM usercheck_keys
-      WHERE user_id = ? AND is_active = 1
-      LIMIT 1
-    `);
-
-    const result = stmt.get(userId) as { api_key: string } | undefined;
+    const result = this.db.getActiveUserCheckKey(userId);
 
     if (!result) {
       throw new Error(`No active UserCheck API key found for user ${userId}`);
@@ -86,37 +80,10 @@ export class UserCheckService {
   }
 
   /**
-   * Update UserCheck key usage
+   * Update UserCheck key usage (Issue #83)
    */
   private async updateKeyUsage(userId: string, apiKey: string): Promise<void> {
-    const now = new Date();
-    const stmt = this.db['db'].prepare(`
-      SELECT daily_usage, usage_reset_at FROM usercheck_keys
-      WHERE user_id = ? AND api_key = ?
-    `);
-
-    const keyData = stmt.get(userId, apiKey) as { daily_usage: number; usage_reset_at: string };
-
-    if (!keyData) return;
-
-    const resetDate = new Date(keyData.usage_reset_at);
-    let newUsage = keyData.daily_usage + 1;
-
-    // Reset usage if it's a new day
-    if (now.getTime() - resetDate.getTime() > 24 * 60 * 60 * 1000) {
-      newUsage = 1;
-      this.db['db'].prepare(`
-        UPDATE usercheck_keys
-        SET daily_usage = ?, usage_reset_at = ?, last_used = ?
-        WHERE user_id = ? AND api_key = ?
-      `).run(newUsage, now.toISOString(), now.toISOString(), userId, apiKey);
-    } else {
-      this.db['db'].prepare(`
-        UPDATE usercheck_keys
-        SET daily_usage = ?, last_used = ?
-        WHERE user_id = ? AND api_key = ?
-      `).run(newUsage, now.toISOString(), userId, apiKey);
-    }
+    this.db.updateUserCheckKeyUsage(userId, apiKey);
   }
 
   /**

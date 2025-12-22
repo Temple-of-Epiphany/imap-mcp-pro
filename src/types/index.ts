@@ -108,6 +108,7 @@ export interface SearchCriteria {
   since?: Date;
   before?: Date;
   seen?: boolean;
+  unreadOnly?: boolean;  // Issue #82: Convenience parameter (maps to seen: false)
   flagged?: boolean;
   answered?: boolean;
   draft?: boolean;

@@ -30,9 +30,10 @@ export function categoryTools(
       accountId: z.string().describe('Account ID'),
       folder: z.string().default('INBOX').describe('Folder to scan (default: INBOX)'),
       limit: z.number().optional().default(100).describe('Maximum number of emails to process (default: 100, max: 200)'),
+      unreadOnly: z.boolean().optional().default(false).describe('Process only unread emails (Issue #82)'),
       dryRun: z.boolean().optional().default(false).describe('Dry run mode - show matches without moving emails')
     }
-  }, withErrorHandling(async ({ accountId, folder, limit, dryRun }) => {
+  }, withErrorHandling(async ({ accountId, folder, limit, unreadOnly, dryRun }) => {
     const { userId } = getToolContext(db);
 
     // Enforce maximum limit to prevent token overflow (Issue #85)
@@ -57,8 +58,9 @@ export function categoryTools(
       };
     }
 
-    // Search for all recent emails (no criteria = all emails)
-    let allEmails = await imapService.searchEmails(accountId, folder, {});
+    // Search for emails (optionally unread only) - Issue #82
+    const searchCriteria = unreadOnly ? { unreadOnly: true } : {};
+    let allEmails = await imapService.searchEmails(accountId, folder, searchCriteria);
 
     // Limit to most recent emails if needed
     let emails = allEmails;

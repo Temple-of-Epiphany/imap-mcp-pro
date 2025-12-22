@@ -146,6 +146,8 @@ export function userTools(
         text: JSON.stringify({
           success: true,
           accountId: account.account_id,
+          accountEmail: username,  // Issue #81: Include email for easier identification
+          accountName: name,
           message: `Account "${name}" added successfully (encrypted)`,
         }, null, 2)
       }]

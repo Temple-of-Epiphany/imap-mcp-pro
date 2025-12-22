@@ -24,6 +24,7 @@ export function emailTools(
       since: z.string().optional().describe('Search emails since date (YYYY-MM-DD)'),
       before: z.string().optional().describe('Search emails before date (YYYY-MM-DD)'),
       seen: z.boolean().optional().describe('Filter by read/unread status'),
+      unreadOnly: z.boolean().optional().describe('Show only unread emails (convenience parameter, same as seen=false) - Issue #82'),
       flagged: z.boolean().optional().describe('Filter by flagged status'),
       limit: z.number().optional().default(50).describe('Maximum number of results (default: 50, max: 100 to prevent token limits)'),
     }
@@ -40,6 +41,7 @@ export function emailTools(
     if (searchCriteria.body) criteria.body = searchCriteria.body;
     if (searchCriteria.since) criteria.since = new Date(searchCriteria.since);
     if (searchCriteria.before) criteria.before = new Date(searchCriteria.before);
+    if (searchCriteria.unreadOnly !== undefined) criteria.unreadOnly = searchCriteria.unreadOnly;  // Issue #82
     if (searchCriteria.seen !== undefined) criteria.seen = searchCriteria.seen;
     if (searchCriteria.flagged !== undefined) criteria.flagged = searchCriteria.flagged;
 

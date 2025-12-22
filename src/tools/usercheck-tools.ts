@@ -33,16 +33,20 @@ export function userCheckTools(server: McpServer, db: DatabaseService, imapServi
       notes: z.string().optional().describe('Optional notes about this API key')
     }
   }, withErrorHandling(async ({ userId, apiKey, dailyLimit, notes }) => {
-    db['db'].prepare(`
-      INSERT INTO usercheck_keys (user_id, api_key, daily_limit, notes, is_active)
-      VALUES (?, ?, ?, ?, 1)
-    `).run(userId, apiKey, dailyLimit, notes || null);
+    // Issue #83: Use DatabaseService method instead of direct SQL
+    const result = db.createUserCheckKey({
+      user_id: userId,
+      api_key: apiKey,
+      daily_limit: dailyLimit,
+      notes
+    });
 
     return {
       content: [{
         type: 'text',
         text: JSON.stringify({
           success: true,
+          keyId: result.id,
           message: `UserCheck API key added for user ${userId}`,
           dailyLimit
         }, null, 2)
@@ -56,15 +60,8 @@ export function userCheckTools(server: McpServer, db: DatabaseService, imapServi
       userId: z.string().describe('User ID')
     }
   }, withErrorHandling(async ({ userId }) => {
-    const stmt = db['db'].prepare(`
-      SELECT id, api_key, is_active, daily_limit, daily_usage,
-             usage_reset_at, last_used, created_at, notes
-      FROM usercheck_keys
-      WHERE user_id = ?
-      ORDER BY created_at DESC
-    `);
-
-    const keys = stmt.all(userId);
+    // Issue #83: Use DatabaseService method instead of direct SQL
+    const keys = db.listUserCheckKeys(userId);
 
     return {
       content: [{
@@ -94,7 +91,8 @@ export function userCheckTools(server: McpServer, db: DatabaseService, imapServi
       keyId: z.number().describe('UserCheck key ID to delete')
     }
   }, withErrorHandling(async ({ keyId }) => {
-    db['db'].prepare('DELETE FROM usercheck_keys WHERE id = ?').run(keyId);
+    // Issue #83: Use DatabaseService method instead of direct SQL
+    db.deleteUserCheckKey(keyId);
 
     return {
       content: [{
