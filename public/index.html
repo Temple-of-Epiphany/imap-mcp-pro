@@ -121,6 +121,18 @@
                         <p class="text-gray-600 text-sm">Map categories to IMAP folders for filtering</p>
                     </div>
 
+                    <!-- Claude Setup Tile -->
+                    <div class="tile-card bg-white rounded-lg shadow-md p-6 border-2 border-transparent hover:border-indigo-500" onclick="showClaudeSetup()">
+                        <div class="flex items-center mb-4">
+                            <div class="text-4xl mr-4">🤖</div>
+                            <div>
+                                <h3 class="text-xl font-semibold text-gray-800">Claude Setup</h3>
+                                <p class="text-sm text-gray-500">Add to Claude Desktop</p>
+                            </div>
+                        </div>
+                        <p class="text-gray-600 text-sm">Configure Claude Desktop to use this MCP server</p>
+                    </div>
+
                     <!-- Rules Tile -->
                     <div class="tile-card bg-white rounded-lg shadow-md p-6 border-2 border-transparent hover:border-yellow-500 opacity-60" onclick="showRules()">
                         <div class="flex items-center mb-4">
@@ -445,6 +457,178 @@
                             <p class="text-sm text-gray-500 text-center py-8">Select an account to view categories</p>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <!-- Claude Setup View -->
+            <div id="claudeSetupView" class="hidden">
+                <div class="flex items-center mb-6">
+                    <button onclick="showDashboard()" class="text-blue-600 hover:text-blue-800 mr-4">
+                        ← Back to Dashboard
+                    </button>
+                </div>
+                <h2 class="text-3xl font-bold text-gray-900 mb-6">Add to Claude Desktop</h2>
+
+                <!-- Step 1: Locate config file -->
+                <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4">
+                        <span class="inline-flex items-center justify-center w-7 h-7 bg-indigo-600 text-white rounded-full text-sm font-bold mr-2">1</span>
+                        Open Your Claude Desktop Config File
+                    </h3>
+                    <p class="text-gray-600 mb-4">Find and open the configuration file for your operating system:</p>
+                    <div class="space-y-3">
+                        <div class="bg-gray-50 rounded-md p-4 border border-gray-200">
+                            <p class="text-sm font-semibold text-gray-700 mb-1">macOS</p>
+                            <code class="text-sm text-indigo-700 font-mono">~/Library/Application Support/Claude/claude_desktop_config.json</code>
+                        </div>
+                        <div class="bg-gray-50 rounded-md p-4 border border-gray-200">
+                            <p class="text-sm font-semibold text-gray-700 mb-1">Windows</p>
+                            <code class="text-sm text-indigo-700 font-mono">%APPDATA%\Claude\claude_desktop_config.json</code>
+                        </div>
+                        <div class="bg-gray-50 rounded-md p-4 border border-gray-200">
+                            <p class="text-sm font-semibold text-gray-700 mb-1">Linux</p>
+                            <code class="text-sm text-indigo-700 font-mono">~/.config/Claude/claude_desktop_config.json</code>
+                        </div>
+                    </div>
+                    <p class="text-sm text-gray-500 mt-3">If the file does not exist yet, create it (and the directory if needed).</p>
+                </div>
+
+                <!-- Step 2: Add configuration -->
+                <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4">
+                        <span class="inline-flex items-center justify-center w-7 h-7 bg-indigo-600 text-white rounded-full text-sm font-bold mr-2">2</span>
+                        Add the MCP Server Configuration
+                    </h3>
+                    <p class="text-gray-600 mb-4">Add the following JSON to your config file. If <code class="bg-gray-100 px-1 rounded text-sm">mcpServers</code> already exists, merge the <code class="bg-gray-100 px-1 rounded text-sm">imap</code> entry into it.</p>
+
+                    <!-- Basic config -->
+                    <div class="mb-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <p class="text-sm font-semibold text-gray-700">Basic Configuration</p>
+                            <button onclick="copyConfig('basicConfig')" class="text-xs bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700">Copy</button>
+                        </div>
+                        <pre id="basicConfig" class="bg-gray-900 text-green-400 rounded-md p-4 text-sm font-mono overflow-x-auto">{
+  "mcpServers": {
+    "imap": {
+      "command": "node",
+      "args": ["<span class='text-yellow-300'>~/.claude/mcp-servers/imap/dist/index.js</span>"],
+      "env": {
+        "MCP_USER_ID": "default",
+        "PORT": "4500"
+      }
+    }
+  }
+}</pre>
+                    </div>
+
+                    <!-- Multi-account config -->
+                    <div>
+                        <div class="flex items-center justify-between mb-2">
+                            <p class="text-sm font-semibold text-gray-700">Multi-Account Configuration (e.g. work + personal)</p>
+                            <button onclick="copyConfig('multiConfig')" class="text-xs bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700">Copy</button>
+                        </div>
+                        <pre id="multiConfig" class="bg-gray-900 text-green-400 rounded-md p-4 text-sm font-mono overflow-x-auto">{
+  "mcpServers": {
+    "imap-work": {
+      "command": "node",
+      "args": ["<span class='text-yellow-300'>~/.claude/mcp-servers/imap/dist/index.js</span>"],
+      "env": {
+        "MCP_USER_ID": "work",
+        "PORT": "4500"
+      }
+    },
+    "imap-personal": {
+      "command": "node",
+      "args": ["<span class='text-yellow-300'>~/.claude/mcp-servers/imap/dist/index.js</span>"],
+      "env": {
+        "MCP_USER_ID": "personal",
+        "PORT": "4501"
+      }
+    }
+  }
+}</pre>
+                    </div>
+
+                    <div class="mt-4 bg-yellow-50 border border-yellow-200 rounded-md p-4">
+                        <p class="text-sm text-yellow-800">
+                            <strong>Note:</strong> Replace <code class="bg-yellow-100 px-1 rounded">~/.claude/mcp-servers/imap/dist/index.js</code> with the actual path where IMAP MCP Pro is installed if you used a custom location.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Step 3: Restart Claude -->
+                <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4">
+                        <span class="inline-flex items-center justify-center w-7 h-7 bg-indigo-600 text-white rounded-full text-sm font-bold mr-2">3</span>
+                        Restart Claude Desktop
+                    </h3>
+                    <p class="text-gray-600 mb-3">Fully quit and relaunch Claude Desktop to load the new MCP configuration.</p>
+                    <p class="text-gray-600">On macOS: <strong>Claude → Quit Claude</strong>, then reopen from Applications.</p>
+                </div>
+
+                <!-- Step 4: Verify -->
+                <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4">
+                        <span class="inline-flex items-center justify-center w-7 h-7 bg-indigo-600 text-white rounded-full text-sm font-bold mr-2">4</span>
+                        Verify the Connection
+                    </h3>
+                    <p class="text-gray-600 mb-4">After restarting, try these prompts in Claude Desktop to verify everything is working:</p>
+                    <div class="space-y-2">
+                        <div class="bg-gray-50 rounded-md p-3 border border-gray-200 flex items-center justify-between">
+                            <code class="text-sm text-gray-800 font-mono">Show me my latest emails</code>
+                            <button onclick="copyText('Show me my latest emails')" class="text-xs text-gray-500 hover:text-gray-700 ml-4">Copy</button>
+                        </div>
+                        <div class="bg-gray-50 rounded-md p-3 border border-gray-200 flex items-center justify-between">
+                            <code class="text-sm text-gray-800 font-mono">List all my email accounts</code>
+                            <button onclick="copyText('List all my email accounts')" class="text-xs text-gray-500 hover:text-gray-700 ml-4">Copy</button>
+                        </div>
+                        <div class="bg-gray-50 rounded-md p-3 border border-gray-200 flex items-center justify-between">
+                            <code class="text-sm text-gray-800 font-mono">How many unread emails do I have?</code>
+                            <button onclick="copyText('How many unread emails do I have?')" class="text-xs text-gray-500 hover:text-gray-700 ml-4">Copy</button>
+                        </div>
+                    </div>
+                    <div class="mt-4 bg-blue-50 border border-blue-200 rounded-md p-4">
+                        <p class="text-sm text-blue-800">
+                            <strong>Tip:</strong> Make sure you have added at least one email account using the <button onclick="showAccounts()" class="underline font-medium">Accounts</button> section before testing.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Auto-configure panel -->
+                <div class="bg-white rounded-lg shadow-md p-6" id="autoConfigPanel">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-2">Auto-Configure Claude Desktop</h3>
+                    <p class="text-gray-600 mb-4">Automatically write the MCP entry to your Claude Desktop config file (macOS and Linux).</p>
+
+                    <!-- Status banner -->
+                    <div id="claudeSetupStatus" class="hidden mb-4 rounded-md p-4 text-sm"></div>
+
+                    <!-- Options -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">User ID</label>
+                            <input id="claudeSetupUserId" type="text" value="default" placeholder="default"
+                                class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <p class="text-xs text-gray-400 mt-1">Isolates your accounts from other users</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Web UI Port</label>
+                            <input id="claudeSetupPort" type="number" value="4500" placeholder="4500"
+                                class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <p class="text-xs text-gray-400 mt-1">Port this web interface runs on</p>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-3">
+                        <button onclick="checkClaudeSetupStatus()" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-md text-sm hover:bg-gray-300">
+                            Check Status
+                        </button>
+                        <button onclick="runClaudeAutoConfig()" class="bg-indigo-600 text-white px-5 py-2 rounded-md text-sm font-medium hover:bg-indigo-700">
+                            Configure Now
+                        </button>
+                    </div>
+
+                    <!-- Result detail -->
+                    <div id="claudeSetupResult" class="hidden mt-4 bg-gray-50 border border-gray-200 rounded-md p-4 text-sm font-mono text-gray-700 whitespace-pre-wrap"></div>
                 </div>
             </div>
 

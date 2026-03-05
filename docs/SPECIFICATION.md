@@ -107,7 +107,7 @@ IMAP MCP Pro is a Model Context Protocol (MCP) server that provides comprehensiv
         │                                │
    ┌────▼─────┐                   ┌─────▼────┐
    │SQLite DB │                   │Web UI    │
-   │(Encrypted│                   │(Port 3000│
+   │(Encrypted│                   │(Port 4500│
    │Accounts) │                   │/Optional)│
    └──────────┘                   └──────────┘
 ```
@@ -802,7 +802,7 @@ If UIDs > 50:  Automatically use chunked processing
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
 | `MCP_USER_ID` | User identifier for multi-tenant isolation | `default` | No |
-| `PORT` | Web UI server port | `3000` | No |
+| `PORT` | Web UI server port | `4500` | No |
 | `NODE_ENV` | Environment mode (development/production) | `production` | No |
 | `IMAP_MCP_VERSION` | Version identifier (auto-set by installer) | (from package.json) | No |
 
@@ -840,9 +840,9 @@ File: `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 
 ## API Endpoints
 
-### Web UI Server (Optional, Port 3000)
+### Web UI Server (Optional, Port 4500)
 
-**Base URL**: `http://localhost:3000`
+**Base URL**: `http://localhost:4500`
 
 #### Account Management
 

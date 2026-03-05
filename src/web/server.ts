@@ -28,7 +28,7 @@ export class WebUIServer {
   private defaultUserId: string;
   private authLimiter: any; // Rate limiter for auth endpoints
 
-  constructor(port: number = 3000) {
+  constructor(port: number = 4500) {
     this.app = express();
     this.port = port;
     this.db = new DatabaseService();
@@ -954,6 +954,117 @@ export class WebUIServer {
       }
     });
 
+    // Claude Desktop auto-configuration (macOS and Linux)
+    this.app.get('/api/claude-setup/status', async (req, res) => {
+      try {
+        const platform = os.platform();
+        if (platform !== 'darwin' && platform !== 'linux') {
+          return res.json({
+            success: true,
+            supported: false,
+            platform,
+            message: 'Auto-configuration is only supported on macOS and Linux'
+          });
+        }
+
+        const configPath = this.getClaudeConfigPath();
+        const serverPath = path.resolve(__dirname, '../index.js');
+        let configured = false;
+        let configExists = false;
+        let currentEntry: any = null;
+
+        try {
+          const raw = fs.readFileSync(configPath, 'utf-8');
+          const config = JSON.parse(raw);
+          configExists = true;
+          if (config.mcpServers?.imap) {
+            configured = true;
+            currentEntry = config.mcpServers.imap;
+          }
+        } catch {
+          // Config doesn't exist yet — that's fine
+        }
+
+        res.json({
+          success: true,
+          supported: true,
+          platform,
+          configPath,
+          serverPath,
+          configExists,
+          configured,
+          currentEntry
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to check status'
+        });
+      }
+    });
+
+    this.app.post('/api/claude-setup/configure', async (req, res) => {
+      try {
+        const platform = os.platform();
+        if (platform !== 'darwin' && platform !== 'linux') {
+          return res.status(400).json({
+            success: false,
+            error: `Auto-configuration is not supported on ${platform}. Please configure manually.`
+          });
+        }
+
+        const { userId, port } = req.body;
+        const configPath = this.getClaudeConfigPath();
+        const configDir = path.dirname(configPath);
+        const serverPath = path.resolve(__dirname, '../index.js');
+
+        // Create config directory if it doesn't exist
+        fs.mkdirSync(configDir, { recursive: true });
+
+        // Read existing config or start fresh
+        let config: any = {};
+        let wasExisting = false;
+        try {
+          const raw = fs.readFileSync(configPath, 'utf-8');
+          config = JSON.parse(raw);
+          wasExisting = true;
+        } catch {
+          config = {};
+        }
+
+        if (!config.mcpServers) {
+          config.mcpServers = {};
+        }
+
+        const entry: any = {
+          command: 'node',
+          args: [serverPath],
+          env: {
+            MCP_USER_ID: userId || 'default',
+            PORT: String(port || 4500)
+          }
+        };
+
+        config.mcpServers.imap = entry;
+
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+
+        res.json({
+          success: true,
+          configPath,
+          serverPath,
+          entry,
+          wasExisting,
+          message: 'Claude Desktop configuration updated. Restart Claude Desktop to apply.'
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to configure Claude Desktop'
+        });
+      }
+    });
+
     // Health check
     this.app.get('/api/health', (req, res) => {
       res.json({
@@ -1023,6 +1134,20 @@ export class WebUIServer {
     });
   }
 
+  private getClaudeConfigPath(): string {
+    const platform = os.platform();
+    switch (platform) {
+      case 'darwin':
+        return path.join(os.homedir(), 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json');
+      case 'linux':
+        return path.join(os.homedir(), '.config', 'Claude', 'claude_desktop_config.json');
+      case 'win32':
+        return path.join(os.homedir(), 'AppData', 'Roaming', 'Claude', 'claude_desktop_config.json');
+      default:
+        throw new Error(`Unsupported platform: ${platform}`);
+    }
+  }
+
   private formatBytes(bytes: number): string {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
@@ -1061,7 +1186,7 @@ export class WebUIServer {
 
 // CLI entry point
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const port = parseInt(process.env.PORT || '3000');
+  const port = parseInt(process.env.PORT || '4500');
   const server = new WebUIServer(port);
   server.start();
 }

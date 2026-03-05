@@ -11,6 +11,7 @@ function hideAllViews() {
   document.getElementById('dnsFirewallView').classList.add('hidden');
   document.getElementById('spamCheckView').classList.add('hidden');
   document.getElementById('categoriesView').classList.add('hidden');
+  document.getElementById('claudeSetupView').classList.add('hidden');
   document.getElementById('rulesView').classList.add('hidden');
 }
 
@@ -49,9 +50,134 @@ function showCategories() {
   loadCategoryAccounts();
 }
 
+function showClaudeSetup() {
+  hideAllViews();
+  document.getElementById('claudeSetupView').classList.remove('hidden');
+  checkClaudeSetupStatus();
+}
+
 function showRules() {
   hideAllViews();
   document.getElementById('rulesView').classList.remove('hidden');
+}
+
+// Claude Desktop Auto-Configuration
+async function checkClaudeSetupStatus() {
+  const statusEl = document.getElementById('claudeSetupStatus');
+  const resultEl = document.getElementById('claudeSetupResult');
+
+  statusEl.className = 'mb-4 rounded-md p-4 text-sm bg-blue-50 text-blue-800 border border-blue-200';
+  statusEl.textContent = 'Checking status...';
+  statusEl.classList.remove('hidden');
+  resultEl.classList.add('hidden');
+
+  try {
+    const resp = await fetch('/api/claude-setup/status');
+    const data = await resp.json();
+
+    if (!data.success) {
+      statusEl.className = 'mb-4 rounded-md p-4 text-sm bg-red-50 text-red-800 border border-red-200';
+      statusEl.textContent = 'Error: ' + data.error;
+      return;
+    }
+
+    if (!data.supported) {
+      statusEl.className = 'mb-4 rounded-md p-4 text-sm bg-yellow-50 text-yellow-800 border border-yellow-200';
+      statusEl.textContent = data.message + ' — use the manual steps above.';
+      return;
+    }
+
+    let detail = `Platform:    ${data.platform}\n`;
+    detail += `Config file: ${data.configPath}\n`;
+    detail += `Server path: ${data.serverPath}\n`;
+    detail += `Config exists: ${data.configExists}\n`;
+    detail += `IMAP MCP configured: ${data.configured}`;
+    if (data.configured && data.currentEntry) {
+      detail += '\n\nCurrent entry:\n' + JSON.stringify(data.currentEntry, null, 2);
+    }
+
+    resultEl.textContent = detail;
+    resultEl.classList.remove('hidden');
+
+    if (data.configured) {
+      statusEl.className = 'mb-4 rounded-md p-4 text-sm bg-green-50 text-green-800 border border-green-200';
+      statusEl.textContent = 'IMAP MCP Pro is already configured in Claude Desktop.';
+    } else {
+      statusEl.className = 'mb-4 rounded-md p-4 text-sm bg-yellow-50 text-yellow-800 border border-yellow-200';
+      statusEl.textContent = data.configExists
+        ? 'Claude Desktop config exists but IMAP MCP is not yet added.'
+        : 'Claude Desktop config file not found — it will be created.';
+    }
+  } catch (err) {
+    statusEl.className = 'mb-4 rounded-md p-4 text-sm bg-red-50 text-red-800 border border-red-200';
+    statusEl.textContent = 'Request failed: ' + err.message;
+  }
+}
+
+async function runClaudeAutoConfig() {
+  const statusEl = document.getElementById('claudeSetupStatus');
+  const resultEl = document.getElementById('claudeSetupResult');
+  const userId = document.getElementById('claudeSetupUserId').value.trim() || 'default';
+  const port = parseInt(document.getElementById('claudeSetupPort').value) || 4500;
+
+  statusEl.className = 'mb-4 rounded-md p-4 text-sm bg-blue-50 text-blue-800 border border-blue-200';
+  statusEl.textContent = 'Configuring...';
+  statusEl.classList.remove('hidden');
+  resultEl.classList.add('hidden');
+
+  try {
+    const resp = await fetch('/api/claude-setup/configure', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, port })
+    });
+    const data = await resp.json();
+
+    if (!data.success) {
+      statusEl.className = 'mb-4 rounded-md p-4 text-sm bg-red-50 text-red-800 border border-red-200';
+      statusEl.textContent = 'Failed: ' + data.error;
+      return;
+    }
+
+    statusEl.className = 'mb-4 rounded-md p-4 text-sm bg-green-50 text-green-800 border border-green-200';
+    statusEl.innerHTML = '✅ Claude Desktop configured successfully! <strong>Restart Claude Desktop</strong> to apply.';
+
+    let detail = `Config file: ${data.configPath}\n`;
+    detail += `Server path: ${data.serverPath}\n`;
+    detail += `Was existing: ${data.wasExisting}\n\n`;
+    detail += 'Written entry:\n' + JSON.stringify(data.entry, null, 2);
+    resultEl.textContent = detail;
+    resultEl.classList.remove('hidden');
+  } catch (err) {
+    statusEl.className = 'mb-4 rounded-md p-4 text-sm bg-red-50 text-red-800 border border-red-200';
+    statusEl.textContent = 'Request failed: ' + err.message;
+  }
+}
+
+function copyConfig(elementId) {
+  const pre = document.getElementById(elementId);
+  // Strip HTML tags (span highlights) to get plain text
+  const text = pre.innerText || pre.textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = pre.previousElementSibling.querySelector('button');
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    btn.classList.replace('bg-indigo-600', 'bg-green-600');
+    setTimeout(() => {
+      btn.textContent = orig;
+      btn.classList.replace('bg-green-600', 'bg-indigo-600');
+    }, 2000);
+  }).catch(() => {
+    alert('Copy failed. Please select and copy the text manually.');
+  });
+}
+
+function copyText(text) {
+  navigator.clipboard.writeText(text).then(() => {
+    // Visual feedback is minimal for inline copy buttons
+  }).catch(() => {
+    alert('Copy failed. Please select and copy the text manually.');
+  });
 }
 
 // Profile Management

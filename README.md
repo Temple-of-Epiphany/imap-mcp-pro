@@ -191,7 +191,7 @@ Add the IMAP MCP server to your Claude Desktop configuration file:
       "args": ["/path/to/ImapClient/dist/index.js"],
       "env": {
         "MCP_USER_ID": "default",
-        "PORT": "3000",
+        "PORT": "4500",
         "NODE_ENV": "production"
       }
     }
@@ -206,7 +206,7 @@ The following environment variables can be configured in your Claude Desktop con
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
 | `MCP_USER_ID` | User identifier for multi-tenant deployments. Isolates accounts and data per user. | `default` | No |
-| `PORT` | Port number for the Web UI server | `3000` | No |
+| `PORT` | Port number for the Web UI server | `4500` | No |
 | `NODE_ENV` | Node environment mode. Set to `development` for detailed error stack traces. | `production` | No |
 | `IMAP_MCP_VERSION` | Version identifier (automatically set by installer) | (package version) | No |
 
@@ -220,7 +220,7 @@ The following environment variables can be configured in your Claude Desktop con
       "args": ["/path/to/imap-mcp-pro/dist/index.js"],
       "env": {
         "MCP_USER_ID": "work",
-        "PORT": "3000"
+        "PORT": "4500"
       }
     },
     "imap-personal": {

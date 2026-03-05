@@ -11,7 +11,7 @@ import os from 'os';
 program
   .name('imap-setup')
   .description('IMAP MCP Server Setup Wizard')
-  .option('-p, --port <port>', 'Port for web UI', '3000')
+  .option('-p, --port <port>', 'Port for web UI', '4500')
   .option('--no-open', 'Do not open browser automatically')
   .option('--claude-setup', 'Setup Claude Desktop integration')
   .option('--skip-claude', 'Skip Claude Desktop integration')

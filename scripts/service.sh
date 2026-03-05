@@ -72,10 +72,10 @@ macos_status() {
         fi
 
         # Check if Web UI port is listening
-        if lsof -iTCP:3000 -sTCP:LISTEN -n -P 2>/dev/null | grep -q LISTEN; then
-            echo "Web UI: http://localhost:3000"
+        if lsof -iTCP:4500 -sTCP:LISTEN -n -P 2>/dev/null | grep -q LISTEN; then
+            echo "Web UI: http://localhost:4500"
         else
-            echo "Warning: Port 3000 not listening"
+            echo "Warning: Port 4500 not listening"
         fi
     else
         echo "Status: STOPPED"
