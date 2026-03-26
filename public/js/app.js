@@ -54,6 +54,18 @@ function showClaudeSetup() {
   hideAllViews();
   document.getElementById('claudeSetupView').classList.remove('hidden');
   checkClaudeSetupStatus();
+  loadServiceConfig();
+}
+
+async function loadServiceConfig() {
+  try {
+    const resp = await fetch('/api/service/config');
+    const data = await resp.json();
+    if (data.success && data.currentPort) {
+      document.getElementById('servicePortInput').placeholder = data.currentPort;
+      document.getElementById('servicePortInput').value = data.currentPort;
+    }
+  } catch {}
 }
 
 function showRules() {
@@ -156,6 +168,52 @@ async function runClaudeAutoConfig() {
   } catch (err) {
     statusEl.className = 'mb-4 rounded-md p-4 text-sm bg-red-50 text-red-800 border border-red-200';
     statusEl.textContent = 'Request failed: ' + err.message;
+  }
+}
+
+// Web UI Service Port
+async function applyServicePort() {
+  const statusEl = document.getElementById('servicePortStatus');
+  const port = parseInt(document.getElementById('servicePortInput').value);
+
+  if (!port || port < 1024 || port > 65535) {
+    statusEl.className = 'mb-4 rounded-md p-4 text-sm bg-red-50 text-red-800 border border-red-200';
+    statusEl.textContent = 'Enter a valid port number between 1024 and 65535.';
+    statusEl.classList.remove('hidden');
+    return;
+  }
+
+  statusEl.className = 'mb-4 rounded-md p-4 text-sm bg-blue-50 text-blue-800 border border-blue-200';
+  statusEl.textContent = `Applying port ${port} and restarting service...`;
+  statusEl.classList.remove('hidden');
+
+  try {
+    const resp = await fetch('/api/service/port', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ port })
+    });
+    const data = await resp.json();
+
+    if (!data.success) {
+      statusEl.className = 'mb-4 rounded-md p-4 text-sm bg-red-50 text-red-800 border border-red-200';
+      statusEl.textContent = 'Failed: ' + data.error;
+      return;
+    }
+
+    statusEl.className = 'mb-4 rounded-md p-4 text-sm bg-green-50 text-green-800 border border-green-200';
+    statusEl.innerHTML = `Service restarting on port <strong>${port}</strong>. Redirecting in 5 seconds...`;
+
+    setTimeout(() => {
+      window.location.href = `http://localhost:${port}`;
+    }, 5000);
+  } catch (err) {
+    // If the fetch fails, the service already restarted — redirect anyway
+    statusEl.className = 'mb-4 rounded-md p-4 text-sm bg-green-50 text-green-800 border border-green-200';
+    statusEl.innerHTML = `Service likely restarted. Redirecting to <strong>http://localhost:${port}</strong>...`;
+    setTimeout(() => {
+      window.location.href = `http://localhost:${port}`;
+    }, 3000);
   }
 }
 

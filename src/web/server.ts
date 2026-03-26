@@ -1066,6 +1066,138 @@ export class WebUIServer {
       }
     });
 
+    // Service port management (macOS LaunchAgent / Linux systemd)
+    this.app.get('/api/service/config', (req, res) => {
+      try {
+        const platform = os.platform();
+        const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', 'com.templeofepiphany.imap-mcp-pro.plist');
+        const systemdUserPath = path.join(os.homedir(), '.config', 'systemd', 'user', 'imap-mcp-pro.service');
+        const systemdSystemPath = '/etc/systemd/system/imap-mcp-pro.service';
+
+        let serviceFile: string | null = null;
+        let serviceType: string | null = null;
+
+        if (platform === 'darwin' && fs.existsSync(plistPath)) {
+          serviceFile = plistPath;
+          serviceType = 'launchagent';
+        } else if (platform === 'linux') {
+          if (fs.existsSync(systemdUserPath)) {
+            serviceFile = systemdUserPath;
+            serviceType = 'systemd-user';
+          } else if (fs.existsSync(systemdSystemPath)) {
+            serviceFile = systemdSystemPath;
+            serviceType = 'systemd-system';
+          }
+        }
+
+        res.json({
+          success: true,
+          platform,
+          serviceFile,
+          serviceType,
+          currentPort: this.port
+        });
+      } catch (error) {
+        res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to get service config' });
+      }
+    });
+
+    this.app.post('/api/service/port', async (req, res) => {
+      try {
+        const { port } = req.body;
+        const newPort = parseInt(port);
+        if (!newPort || newPort < 1024 || newPort > 65535) {
+          return res.status(400).json({ success: false, error: 'Port must be between 1024 and 65535' });
+        }
+
+        const platform = os.platform();
+
+        if (platform === 'darwin') {
+          const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', 'com.templeofepiphany.imap-mcp-pro.plist');
+          if (!fs.existsSync(plistPath)) {
+            return res.status(404).json({ success: false, error: 'LaunchAgent plist not found. Is the service installed?' });
+          }
+
+          // Read and update the plist PORT value
+          let content = fs.readFileSync(plistPath, 'utf-8');
+          // Replace existing PORT key/value pair, or inject before closing </dict>
+          if (content.includes('<key>PORT</key>')) {
+            content = content.replace(
+              /(<key>PORT<\/key>\s*<string>)[^<]*/,
+              `$1${newPort}`
+            );
+          } else {
+            content = content.replace(
+              /(<key>IMAP_MCP_VERSION<\/key>)/,
+              `<key>PORT</key>\n        <string>${newPort}</string>\n        $1`
+            );
+          }
+          fs.writeFileSync(plistPath, content, 'utf-8');
+
+          // Restart the LaunchAgent via a detached background script.
+          // We cannot call launchctl unload synchronously — it kills this process
+          // before launchctl load can run. The script runs after we respond.
+          const label = 'com.templeofepiphany.imap-mcp-pro';
+          const tmpScript = `/tmp/imap-mcp-restart-${Date.now()}.sh`;
+          fs.writeFileSync(tmpScript,
+            `#!/bin/bash\nsleep 1\nlaunchctl stop "${label}" 2>/dev/null || true\nlaunchctl unload "${plistPath}" 2>/dev/null || true\nlaunchctl load "${plistPath}"\nrm -f "${tmpScript}"\n`,
+            { mode: 0o755 }
+          );
+          const { spawn } = await import('child_process');
+          spawn('/bin/bash', [tmpScript], { detached: true, stdio: 'ignore' }).unref();
+
+          res.json({
+            success: true,
+            newPort,
+            plistPath,
+            message: `Service restarting on port ${newPort}. Reconnect at http://localhost:${newPort}`
+          });
+
+        } else if (platform === 'linux') {
+          const userPath = path.join(os.homedir(), '.config', 'systemd', 'user', 'imap-mcp-pro.service');
+          const systemPath = '/etc/systemd/system/imap-mcp-pro.service';
+          const serviceFile = fs.existsSync(userPath) ? userPath : systemPath;
+          const isUser = serviceFile === userPath;
+
+          if (!fs.existsSync(serviceFile)) {
+            return res.status(404).json({ success: false, error: 'Systemd service file not found. Is the service installed?' });
+          }
+
+          let content = fs.readFileSync(serviceFile, 'utf-8');
+          if (content.includes('Environment="PORT=')) {
+            content = content.replace(/Environment="PORT=[^"]*"/, `Environment="PORT=${newPort}"`);
+          } else {
+            content = content.replace(
+              /Environment="IMAP_MCP_VERSION=/,
+              `Environment="PORT=${newPort}"\nEnvironment="IMAP_MCP_VERSION=`
+            );
+          }
+          fs.writeFileSync(serviceFile, content, 'utf-8');
+
+          const systemctlCmd = isUser ? 'systemctl --user' : 'sudo systemctl';
+          const tmpScript = `/tmp/imap-mcp-restart-${Date.now()}.sh`;
+          fs.writeFileSync(tmpScript,
+            `#!/bin/bash\nsleep 1\n${systemctlCmd} daemon-reload\n${systemctlCmd} restart imap-mcp-pro\nrm -f "${tmpScript}"\n`,
+            { mode: 0o755 }
+          );
+          const { spawn } = await import('child_process');
+          spawn('/bin/bash', [tmpScript], { detached: true, stdio: 'ignore' }).unref();
+
+          res.json({
+            success: true,
+            newPort,
+            serviceFile,
+            message: `Service restarting on port ${newPort}. Reconnect at http://localhost:${newPort}`
+          });
+
+        } else {
+          res.status(400).json({ success: false, error: `Service port management not supported on ${platform}` });
+        }
+      } catch (error) {
+        res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to update service port' });
+      }
+    });
+
     // Health check
     this.app.get('/api/health', (req, res) => {
       res.json({

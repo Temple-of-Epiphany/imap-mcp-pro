@@ -192,6 +192,7 @@ if [ "$PLATFORM" = "darwin" ]; then
         -e "s|__CONFIG_DIR__|$CONFIG_DIR|g" \
         -e "s|LOG_DIR|$LOG_DIR|g" \
         -e "s|__MCP_USER_ID__|$(whoami)|g" \
+        -e "s|__WEB_PORT__|${WEB_PORT:-4500}|g" \
         -e "s|__IMAP_MCP_VERSION__|$VERSION|g" \
         templates/com.templeofepiphany.imap-mcp-pro.plist > "$SERVICE_FILE"
 
@@ -232,6 +233,7 @@ Environment="LOG_LEVEL=info"
 Environment="DATA_DIR=$DATA_DIR"
 Environment="CONFIG_DIR=$CONFIG_DIR"
 Environment="MCP_USER_ID=$(whoami)"
+Environment="PORT=${WEB_PORT:-4500}"
 Environment="IMAP_MCP_VERSION=$VERSION"
 
 [Install]

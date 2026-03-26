@@ -26,6 +26,8 @@
         <string>__CONFIG_DIR__</string>
         <key>MCP_USER_ID</key>
         <string>__MCP_USER_ID__</string>
+        <key>PORT</key>
+        <string>__WEB_PORT__</string>
         <key>IMAP_MCP_VERSION</key>
         <string>__IMAP_MCP_VERSION__</string>
     </dict>
