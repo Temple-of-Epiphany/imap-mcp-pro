@@ -99,6 +99,11 @@ async function checkClaudeSetupStatus() {
     resultEl.textContent = detail;
     resultEl.classList.remove('hidden');
 
+    // Pre-fill port input from the server's actual running port
+    if (data.currentPort) {
+      document.getElementById('claudeSetupPort').value = data.currentPort;
+    }
+
     if (data.configured) {
       statusEl.className = 'mb-4 rounded-md p-4 text-sm bg-green-50 text-green-800 border border-green-200';
       statusEl.textContent = 'IMAP MCP Pro is already configured in Claude Desktop.';

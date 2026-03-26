@@ -993,7 +993,8 @@ export class WebUIServer {
           serverPath,
           configExists,
           configured,
-          currentEntry
+          currentEntry,
+          currentPort: this.port
         });
       } catch (error) {
         res.status(500).json({
@@ -1041,7 +1042,7 @@ export class WebUIServer {
           args: [serverPath],
           env: {
             MCP_USER_ID: userId || 'default',
-            PORT: String(port || 4500)
+            PORT: String(port || this.port)
           }
         };
 
