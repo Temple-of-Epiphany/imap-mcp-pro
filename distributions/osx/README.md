@@ -85,7 +85,7 @@ Example `.env` file:
 ```bash
 DEVELOPER_ID_APP="Developer ID Application: Colin Bitterfield (G3FY7T45K8)"
 DEVELOPER_ID_INSTALLER="Developer ID Installer: Colin Bitterfield (G3FY7T45K8)"
-APPLE_ID="colin@bitterfield.com"
+APPLE_ID="colin.bitterfield@templeofepiphany.com"
 TEAM_ID="G3FY7T45K8"
 NOTARIZE_PASSWORD="xxxx-xxxx-xxxx-xxxx"
 ```
@@ -129,7 +129,7 @@ To avoid passing credentials as environment variables (recommended for local dev
 
 ```bash
 xcrun notarytool store-credentials "imap-mcp-pro-notarize" \
-    --apple-id "colin@bitterfield.com" \
+    --apple-id "colin.bitterfield@templeofepiphany.com" \
     --team-id  "G3FY7T45K8" \
     --password "xxxx-xxxx-xxxx-xxxx"
 ```

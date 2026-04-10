@@ -16,7 +16,7 @@
 #
 # One-time keychain profile setup:
 #   xcrun notarytool store-credentials "imap-mcp-pro-notarize" \
-#       --apple-id "colin@bitterfield.com" \
+#       --apple-id "colin.bitterfield@templeofepiphany.com" \
 #       --team-id  "G3FY7T45K8" \
 #       --password "xxxx-xxxx-xxxx-xxxx"   # App-specific password from appleid.apple.com
 #

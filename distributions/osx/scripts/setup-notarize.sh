@@ -19,7 +19,7 @@
 
 set -euo pipefail
 
-APPLE_ID_DEFAULT="colin@bitterfield.com"
+APPLE_ID_DEFAULT="colin.bitterfield@templeofepiphany.com"
 TEAM_ID_DEFAULT="G3FY7T45K8"
 PROFILE_NAME="imap-mcp-pro-notarize"
 
