@@ -285,7 +285,8 @@ INFOPLIST
 
 log_ok ".app bundle created: $APP_BUNDLE"
 
-# Stage the app into the control payload
+# Stage the app into the control payload (remove first to prevent double-nesting on rebuild)
+rm -rf "$PAYLOAD_CONTROL_DIR/apps/ImapMCPControl.app"
 cp -r "$APP_BUNDLE" "$PAYLOAD_CONTROL_DIR/apps/ImapMCPControl.app"
 log_ok "App staged in control payload."
 
