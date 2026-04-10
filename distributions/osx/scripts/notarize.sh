@@ -16,9 +16,11 @@
 #
 # One-time keychain profile setup:
 #   xcrun notarytool store-credentials "imap-mcp-pro-notarize" \
-#       --apple-id "your@apple.id" \
-#       --team-id  "YOUR_TEAM_ID" \
+#       --apple-id "colin@bitterfield.com" \
+#       --team-id  "G3FY7T45K8" \
 #       --password "xxxx-xxxx-xxxx-xxxx"   # App-specific password from appleid.apple.com
+#
+#   Or run: ./scripts/setup-notarize.sh
 #
 #   Get an app-specific password at: https://appleid.apple.com/account/manage
 #   (Security > App-Specific Passwords > Generate Password)

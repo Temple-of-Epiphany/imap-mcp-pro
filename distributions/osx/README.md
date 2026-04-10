@@ -83,10 +83,10 @@ Set these in your shell or in a `.env` file at `distributions/osx/.env` (gitigno
 Example `.env` file:
 
 ```bash
-DEVELOPER_ID_APP="Developer ID Application: Colin Bitterfield (ABC1234DEF)"
-DEVELOPER_ID_INSTALLER="Developer ID Installer: Colin Bitterfield (ABC1234DEF)"
+DEVELOPER_ID_APP="Developer ID Application: Colin Bitterfield (G3FY7T45K8)"
+DEVELOPER_ID_INSTALLER="Developer ID Installer: Colin Bitterfield (G3FY7T45K8)"
 APPLE_ID="colin@bitterfield.com"
-TEAM_ID="ABC1234DEF"
+TEAM_ID="G3FY7T45K8"
 NOTARIZE_PASSWORD="xxxx-xxxx-xxxx-xxxx"
 ```
 
@@ -129,8 +129,8 @@ To avoid passing credentials as environment variables (recommended for local dev
 
 ```bash
 xcrun notarytool store-credentials "imap-mcp-pro-notarize" \
-    --apple-id "your@apple.id" \
-    --team-id  "YOUR_TEAM_ID" \
+    --apple-id "colin@bitterfield.com" \
+    --team-id  "G3FY7T45K8" \
     --password "xxxx-xxxx-xxxx-xxxx"
 ```
 

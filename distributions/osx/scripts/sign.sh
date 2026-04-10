@@ -10,8 +10,8 @@
 # Signs the .app bundle and the final .pkg using Apple Developer ID certificates.
 #
 # Required environment variables (or set in .env):
-#   DEVELOPER_ID_APP        - e.g. "Developer ID Application: Colin Bitterfield (TEAMID)"
-#   DEVELOPER_ID_INSTALLER  - e.g. "Developer ID Installer: Colin Bitterfield (TEAMID)"
+#   DEVELOPER_ID_APP        - e.g. "Developer ID Application: Colin Bitterfield (G3FY7T45K8)"
+#   DEVELOPER_ID_INSTALLER  - e.g. "Developer ID Installer: Colin Bitterfield (G3FY7T45K8)"
 #
 # Certificate setup (one-time):
 #   1. Open Xcode > Settings > Accounts > Manage Certificates
