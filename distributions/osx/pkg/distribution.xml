@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  distribution.xml - IMAP MCP Pro productbuild Distribution Definition
+
+  Author: Colin Bitterfield
+  Email: colin@bitterfield.com
+  Date Created: 2026-04-09
+  Date Updated: 2026-04-09
+  Version: 1.0.0
+
+  Defines two component packages:
+    - imap-mcp-pro-server.pkg   : The server, bundled Node.js, and web UI
+    - imap-mcp-control.pkg      : The ImapMCPControl menu bar app
+-->
+<installer-gui-script minSpecVersion="2">
+    <title>IMAP MCP Pro</title>
+    <welcome file="welcome.html" mime-type="text/html"/>
+    <license file="license.html" mime-type="text/html"/>
+
+    <options
+        customize="never"
+        require-scripts="true"
+        hostArchitectures="arm64,x86_64"
+    />
+
+    <!-- Install to user home only; no system-wide or /Applications installs -->
+    <domains
+        enable_anywhere="false"
+        enable_currentUserHome="true"
+        enable_localSystem="false"
+    />
+
+    <!-- Component package references -->
+    <pkg-ref id="com.templeofepiphany.imap-mcp-pro.server" version="2.13.1">imap-mcp-pro-server.pkg</pkg-ref>
+    <pkg-ref id="com.templeofepiphany.imap-mcp-pro.control" version="2.13.1">imap-mcp-control.pkg</pkg-ref>
+
+    <!-- Installation choices outline -->
+    <choices-outline>
+        <line choice="com.templeofepiphany.imap-mcp-pro.server"/>
+        <line choice="com.templeofepiphany.imap-mcp-pro.control"/>
+    </choices-outline>
+
+    <!-- Server component: required, not user-deselectable -->
+    <choice
+        id="com.templeofepiphany.imap-mcp-pro.server"
+        title="IMAP MCP Pro Server"
+        description="The IMAP MCP Pro server with bundled Node.js runtime and web UI dashboard."
+        enabled="false"
+        selected="true"
+    >
+        <pkg-ref id="com.templeofepiphany.imap-mcp-pro.server"/>
+    </choice>
+
+    <!-- Menu bar app: optional, selected by default -->
+    <choice
+        id="com.templeofepiphany.imap-mcp-pro.control"
+        title="ImapMCPControl Menu Bar App"
+        description="A menu bar app for quick access to service status, controls, and the web UI."
+        enabled="true"
+        selected="true"
+    >
+        <pkg-ref id="com.templeofepiphany.imap-mcp-pro.control"/>
+    </choice>
+</installer-gui-script>

@@ -1,0 +1,131 @@
+#!/bin/bash
+# postinstall - IMAP MCP Pro Installer Post-install Script
+#
+# Author: Colin Bitterfield
+# Email: colin@bitterfield.com
+# Date Created: 2026-04-09
+# Date Updated: 2026-04-09
+# Version: 1.0.0
+#
+# Runs after package files are installed. Sets up the LaunchAgent,
+# installs the menu bar app, and opens the Web UI.
+
+set -e
+
+# ---------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------
+INSTALL_DIR="$HOME/.local/share/imap-mcp-pro"
+BUNDLED_NODE="$INSTALL_DIR/runtime/node/bin/node"
+LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
+PLIST_FILE="$LAUNCH_AGENTS/com.templeofepiphany.imap-mcp-pro.plist"
+PORT="${PORT:-4500}"
+VERSION="2.13.1"
+LOG_DIR="$INSTALL_DIR/logs"
+APPLICATIONS_DIR="$HOME/Applications"
+APP_NAME="ImapMCPControl.app"
+
+echo "Starting IMAP MCP Pro post-install configuration..." >&2
+
+# ---------------------------------------------------------------
+# Create required directories
+# ---------------------------------------------------------------
+mkdir -p "$LOG_DIR"
+mkdir -p "$LAUNCH_AGENTS"
+mkdir -p "$APPLICATIONS_DIR"
+
+echo "Directories created." >&2
+
+# ---------------------------------------------------------------
+# Verify the bundled Node binary exists
+# ---------------------------------------------------------------
+if [ ! -f "$BUNDLED_NODE" ]; then
+    echo "WARNING: Bundled Node.js not found at $BUNDLED_NODE" >&2
+    echo "         The service may not start correctly." >&2
+fi
+
+# ---------------------------------------------------------------
+# Write LaunchAgent plist
+# ---------------------------------------------------------------
+cat > "$PLIST_FILE" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.templeofepiphany.imap-mcp-pro</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${BUNDLED_NODE}</string>
+        <string>${INSTALL_DIR}/dist/web/server.js</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>${INSTALL_DIR}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>NODE_ENV</key><string>production</string>
+        <key>MCP_USER_ID</key><string>$(whoami)</string>
+        <key>PORT</key><string>${PORT}</string>
+        <key>IMAP_MCP_VERSION</key><string>${VERSION}</string>
+        <key>HOME</key><string>${HOME}</string>
+    </dict>
+    <key>StandardOutPath</key><string>${LOG_DIR}/web-ui.log</string>
+    <key>StandardErrorPath</key><string>${LOG_DIR}/web-ui-error.log</string>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key><false/>
+        <key>Crashed</key><true/>
+    </dict>
+    <key>ThrottleInterval</key><integer>30</integer>
+</dict>
+</plist>
+PLIST
+
+chmod 644 "$PLIST_FILE"
+echo "LaunchAgent plist written to: $PLIST_FILE" >&2
+
+# ---------------------------------------------------------------
+# Load the LaunchAgent
+# ---------------------------------------------------------------
+# Unload first in case of reinstall (ignore errors if not loaded)
+launchctl unload "$PLIST_FILE" 2>/dev/null || true
+launchctl load "$PLIST_FILE"
+echo "LaunchAgent loaded." >&2
+
+# ---------------------------------------------------------------
+# Install ImapMCPControl.app to ~/Applications
+# ---------------------------------------------------------------
+# The .app bundle is staged by pkgbuild in the payload directory
+STAGED_APP="$INSTALL_DIR/apps/$APP_NAME"
+if [ -d "$STAGED_APP" ]; then
+    # Remove existing app if present (reinstall)
+    if [ -d "$APPLICATIONS_DIR/$APP_NAME" ]; then
+        rm -rf "$APPLICATIONS_DIR/$APP_NAME"
+    fi
+    cp -r "$STAGED_APP" "$APPLICATIONS_DIR/$APP_NAME"
+    echo "ImapMCPControl.app installed to $APPLICATIONS_DIR" >&2
+
+    # Launch the menu bar app
+    open "$APPLICATIONS_DIR/$APP_NAME" 2>/dev/null || true
+    echo "ImapMCPControl.app launched." >&2
+else
+    echo "WARNING: Staged app not found at $STAGED_APP — skipping app install." >&2
+fi
+
+# ---------------------------------------------------------------
+# Open the Web UI after a short delay (background)
+# ---------------------------------------------------------------
+(sleep 5 && open "http://localhost:${PORT}") &
+echo "Web UI will open at http://localhost:${PORT} in 5 seconds." >&2
+
+# ---------------------------------------------------------------
+# Done
+# ---------------------------------------------------------------
+echo "" >&2
+echo "IMAP MCP Pro v${VERSION} installed successfully." >&2
+echo "  Install directory : $INSTALL_DIR" >&2
+echo "  Web UI            : http://localhost:${PORT}" >&2
+echo "  LaunchAgent plist : $PLIST_FILE" >&2
+echo "  Logs              : $LOG_DIR" >&2
+exit 0

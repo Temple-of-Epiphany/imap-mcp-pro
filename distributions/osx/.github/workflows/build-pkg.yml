@@ -1,0 +1,207 @@
+# build-pkg.yml - IMAP MCP Pro macOS Package Build Workflow
+#
+# Author: Colin Bitterfield
+# Email: colin@bitterfield.com
+# Date Created: 2026-04-09
+# Date Updated: 2026-04-09
+# Version: 1.0.0
+#
+# Triggered by:
+#   - Push of a version tag (v*)
+#   - Manual workflow dispatch (for testing)
+#
+# Required GitHub Secrets:
+#   DEVELOPER_ID_CERT_P12       Base64-encoded .p12 file containing both Developer ID certs
+#   DEVELOPER_ID_CERT_PASSWORD  Password for the .p12 file
+#   DEVELOPER_ID_APP            "Developer ID Application: Name (TEAMID)"
+#   DEVELOPER_ID_INSTALLER      "Developer ID Installer: Name (TEAMID)"
+#   APPLE_ID                    Apple ID email for notarization
+#   TEAM_ID                     10-char Apple Developer Team ID
+#   NOTARIZE_PASSWORD           App-specific password (from appleid.apple.com)
+#
+# To encode your .p12 for the secret:
+#   base64 -i certificate.p12 | pbcopy
+#
+# To export the .p12 from Keychain Access:
+#   1. Open Keychain Access
+#   2. Select both "Developer ID Application" and "Developer ID Installer" certs (with private keys)
+#   3. File > Export Items > choose .p12 format
+#   4. Set a strong export password (this becomes DEVELOPER_ID_CERT_PASSWORD)
+
+name: Build macOS Package
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      skip_notarize:
+        description: 'Skip notarization (faster, for testing)'
+        required: false
+        default: 'false'
+        type: boolean
+
+permissions:
+  contents: write  # needed to upload release assets
+
+jobs:
+  build-pkg:
+    name: Build, Sign, Notarize, DMG
+    runs-on: macos-latest
+
+    steps:
+      # ---------------------------------------------------------------
+      # Checkout repository
+      # ---------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for version tags
+
+      # ---------------------------------------------------------------
+      # Install Node.js (for TypeScript build step)
+      # ---------------------------------------------------------------
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # ---------------------------------------------------------------
+      # Install project dependencies
+      # ---------------------------------------------------------------
+      - name: Install dependencies
+        run: npm ci
+
+      # ---------------------------------------------------------------
+      # Import Developer ID certificates from base64 secret
+      # ---------------------------------------------------------------
+      - name: Import Developer ID certificates
+        if: ${{ secrets.DEVELOPER_ID_CERT_P12 != '' }}
+        env:
+          CERT_P12_BASE64: ${{ secrets.DEVELOPER_ID_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.DEVELOPER_ID_CERT_PASSWORD }}
+        run: |
+          # Decode the base64 certificate
+          echo "$CERT_P12_BASE64" | base64 --decode > /tmp/developer_id_cert.p12
+
+          # Create a temporary keychain
+          KEYCHAIN_NAME="imap-mcp-build.keychain"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_NAME"
+          security set-keychain-settings -lut 7200 "$KEYCHAIN_NAME"
+
+          # Add to keychain search list
+          security list-keychains -d user -s "$KEYCHAIN_NAME" $(security list-keychains -d user | xargs)
+
+          # Unlock the keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_NAME"
+
+          # Import the certificate
+          security import /tmp/developer_id_cert.p12 \
+            -k "$KEYCHAIN_NAME" \
+            -P "$CERT_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/productsign \
+            -f pkcs12
+
+          # Allow codesign and productsign to access the certificate without prompting
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign:,productsign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_NAME"
+
+          # Clean up temporary p12 file
+          rm -f /tmp/developer_id_cert.p12
+
+          echo "Certificates imported successfully."
+          security find-certificate -c "Developer ID" "$KEYCHAIN_NAME" || echo "Certificate listing failed — check cert name."
+
+      # ---------------------------------------------------------------
+      # Build the package
+      # ---------------------------------------------------------------
+      - name: Build macOS package
+        run: make -C distributions/osx build
+
+      # ---------------------------------------------------------------
+      # Sign the package (only when certificates are available)
+      # ---------------------------------------------------------------
+      - name: Sign package
+        if: ${{ secrets.DEVELOPER_ID_APP != '' }}
+        env:
+          DEVELOPER_ID_APP: ${{ secrets.DEVELOPER_ID_APP }}
+          DEVELOPER_ID_INSTALLER: ${{ secrets.DEVELOPER_ID_INSTALLER }}
+        run: make -C distributions/osx sign
+
+      # ---------------------------------------------------------------
+      # Notarize (skip if explicitly disabled or secrets not set)
+      # ---------------------------------------------------------------
+      - name: Notarize package
+        if: >-
+          ${{ secrets.APPLE_ID != '' &&
+              secrets.DEVELOPER_ID_APP != '' &&
+              github.event.inputs.skip_notarize != 'true' }}
+        env:
+          DEVELOPER_ID_APP: ${{ secrets.DEVELOPER_ID_APP }}
+          DEVELOPER_ID_INSTALLER: ${{ secrets.DEVELOPER_ID_INSTALLER }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+          NOTARIZE_PASSWORD: ${{ secrets.NOTARIZE_PASSWORD }}
+        run: make -C distributions/osx notarize
+
+      # ---------------------------------------------------------------
+      # Create DMG
+      # ---------------------------------------------------------------
+      - name: Create DMG
+        run: make -C distributions/osx dmg
+
+      # ---------------------------------------------------------------
+      # Upload artifacts for download
+      # ---------------------------------------------------------------
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: imap-mcp-pro-macos
+          path: |
+            distributions/osx/build/output/IMAP-MCP-Pro-*.pkg
+            distributions/osx/build/output/IMAP-MCP-Pro-*.dmg
+          retention-days: 30
+
+      # ---------------------------------------------------------------
+      # Upload to GitHub Release (only on version tag push)
+      # ---------------------------------------------------------------
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          OUTPUT_DIR="distributions/osx/build/output"
+          TAG="${GITHUB_REF_NAME}"
+
+          echo "Uploading release assets for $TAG..."
+
+          # Upload DMG (primary distribution)
+          if [ -f "$OUTPUT_DIR/IMAP-MCP-Pro-${VERSION}.dmg" ]; then
+            gh release upload "$TAG" \
+              "$OUTPUT_DIR/IMAP-MCP-Pro-${VERSION}.dmg" \
+              --clobber
+            echo "Uploaded DMG."
+          fi
+
+          # Upload PKG (direct installer, for advanced users)
+          if [ -f "$OUTPUT_DIR/IMAP-MCP-Pro-${VERSION}.pkg" ]; then
+            gh release upload "$TAG" \
+              "$OUTPUT_DIR/IMAP-MCP-Pro-${VERSION}.pkg" \
+              --clobber
+            echo "Uploaded PKG."
+          fi
+
+      # ---------------------------------------------------------------
+      # Clean up keychain
+      # ---------------------------------------------------------------
+      - name: Clean up keychain
+        if: always() && ${{ secrets.DEVELOPER_ID_CERT_P12 != '' }}
+        run: |
+          security delete-keychain "imap-mcp-build.keychain" 2>/dev/null || true
+          echo "Keychain cleaned up."

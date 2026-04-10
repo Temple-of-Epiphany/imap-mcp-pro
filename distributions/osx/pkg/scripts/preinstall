@@ -1,0 +1,63 @@
+#!/bin/bash
+# preinstall - IMAP MCP Pro Installer Pre-check Script
+#
+# Author: Colin Bitterfield
+# Email: colin@bitterfield.com
+# Date Created: 2026-04-09
+# Date Updated: 2026-04-09
+# Version: 1.0.0
+#
+# Runs before installation to verify system requirements.
+# Exits non-zero to abort installation if requirements are not met.
+
+set -e
+
+echo "Running IMAP MCP Pro pre-install checks..." >&2
+
+# ---------------------------------------------------------------
+# Check macOS version (requires 13.0 Ventura or later)
+# ---------------------------------------------------------------
+OS_VERSION_FULL=$(sw_vers -productVersion)
+OS_VERSION_MAJOR=$(echo "$OS_VERSION_FULL" | cut -d. -f1)
+
+if [ "$OS_VERSION_MAJOR" -lt 13 ]; then
+    echo "ERROR: macOS 13 (Ventura) or later is required." >&2
+    echo "       Your macOS version: $OS_VERSION_FULL" >&2
+    exit 1
+fi
+
+echo "macOS version check passed: $OS_VERSION_FULL" >&2
+
+# ---------------------------------------------------------------
+# Check available disk space (500MB minimum = 512000 KB)
+# ---------------------------------------------------------------
+FREE_KB=$(df -k "$HOME" | awk 'NR==2 {print $4}')
+REQUIRED_KB=512000  # 500 MB
+
+if [ "$FREE_KB" -lt "$REQUIRED_KB" ]; then
+    FREE_MB=$((FREE_KB / 1024))
+    echo "ERROR: At least 500MB of free disk space is required." >&2
+    echo "       Available: ${FREE_MB}MB" >&2
+    exit 1
+fi
+
+FREE_MB=$((FREE_KB / 1024))
+echo "Disk space check passed: ${FREE_MB}MB available" >&2
+
+# ---------------------------------------------------------------
+# Check that required directories are accessible
+# ---------------------------------------------------------------
+if [ ! -d "$HOME/Library/LaunchAgents" ]; then
+    mkdir -p "$HOME/Library/LaunchAgents" 2>/dev/null || {
+        echo "ERROR: Cannot create $HOME/Library/LaunchAgents" >&2
+        exit 1
+    }
+fi
+
+echo "Directory check passed." >&2
+
+# ---------------------------------------------------------------
+# All checks passed
+# ---------------------------------------------------------------
+echo "All pre-install checks passed. Proceeding with installation." >&2
+exit 0
