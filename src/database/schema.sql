@@ -62,6 +62,8 @@ CREATE TABLE IF NOT EXISTS accounts (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   last_connected TIMESTAMP,
   is_active BOOLEAN DEFAULT 1,
+  capabilities TEXT,                -- JSON: IMAP capability flags (RFC 9051, Issue #58)
+  capabilities_updated_at INTEGER,  -- Unix timestamp of last capability refresh
   FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
 

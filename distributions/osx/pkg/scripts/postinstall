@@ -2,13 +2,14 @@
 # postinstall - IMAP MCP Pro Installer Post-install Script
 #
 # Author: Colin Bitterfield
-# Email: colin@bitterfield.com
+# Email: colin.bitterfield@templeofepiphany.com
 # Date Created: 2026-04-09
-# Date Updated: 2026-04-09
-# Version: 1.0.0
+# Date Updated: 2026-04-10
+# Version: 1.3.0
 #
-# Runs after package files are installed. Sets up the LaunchAgent,
-# installs the menu bar app, and opens the Web UI.
+# Detects fresh install vs upgrade and takes the appropriate path:
+#   Fresh install : prompts for port, offers Claude Desktop setup
+#   Upgrade       : preserves existing port and Claude config, restarts service
 
 set -e
 
@@ -19,13 +20,47 @@ INSTALL_DIR="$HOME/.local/share/imap-mcp-pro"
 BUNDLED_NODE="$INSTALL_DIR/runtime/node/bin/node"
 LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
 PLIST_FILE="$LAUNCH_AGENTS/com.templeofepiphany.imap-mcp-pro.plist"
-PORT="${PORT:-4500}"
 VERSION="2.13.1"
 LOG_DIR="$INSTALL_DIR/logs"
 APPLICATIONS_DIR="$HOME/Applications"
 APP_NAME="ImapMCPControl.app"
+SYSTEM_USER="$(whoami)"
+CLAUDE_CONFIG="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+MCP_SERVER_JS="$INSTALL_DIR/dist/index.js"
 
-echo "Starting IMAP MCP Pro post-install configuration..." >&2
+# ---------------------------------------------------------------
+# Detect install vs upgrade
+# ---------------------------------------------------------------
+IS_UPGRADE=false
+EXISTING_PORT=""
+
+if [ -f "$PLIST_FILE" ]; then
+    IS_UPGRADE=true
+    # Preserve existing port
+    EXISTING_PORT=$(defaults read "$PLIST_FILE" EnvironmentVariables 2>/dev/null \
+        | grep -oE 'PORT = [0-9]+' | grep -oE '[0-9]+' || echo "")
+fi
+
+DEFAULT_PORT="${EXISTING_PORT:-4500}"
+
+if [ "$IS_UPGRADE" = true ]; then
+    echo "Upgrade detected (existing install found). Preserving settings." >&2
+    MODE_LABEL="Upgrading"
+else
+    echo "Fresh install detected." >&2
+    MODE_LABEL="Installing"
+fi
+
+echo "${MODE_LABEL} IMAP MCP Pro v${VERSION}..." >&2
+
+# ---------------------------------------------------------------
+# Stop existing service before overwriting files
+# ---------------------------------------------------------------
+if [ "$IS_UPGRADE" = true ]; then
+    echo "Stopping existing service..." >&2
+    launchctl unload "$PLIST_FILE" 2>/dev/null || true
+    sleep 1
+fi
 
 # ---------------------------------------------------------------
 # Create required directories
@@ -34,14 +69,51 @@ mkdir -p "$LOG_DIR"
 mkdir -p "$LAUNCH_AGENTS"
 mkdir -p "$APPLICATIONS_DIR"
 
-echo "Directories created." >&2
+# ---------------------------------------------------------------
+# Determine port
+# ---------------------------------------------------------------
+if [ "$IS_UPGRADE" = true ]; then
+    # Keep the existing port silently
+    PORT="$DEFAULT_PORT"
+    echo "Preserving port: $PORT" >&2
+else
+    # Fresh install — prompt user
+    PORT=$(osascript <<ASCRIPT 2>/dev/null
+tell application "System Events"
+    set result to display dialog "IMAP MCP Pro Web UI Port" & return & return & \
+        "Which port should the Web UI run on?" & return & \
+        "(Default: ${DEFAULT_PORT})" \
+        default answer "${DEFAULT_PORT}" \
+        with title "IMAP MCP Pro" \
+        buttons {"Cancel", "OK"} default button "OK"
+    return text returned of result
+end tell
+ASCRIPT
+    ) || PORT="$DEFAULT_PORT"
+
+    # Validate
+    if ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "$PORT" -lt 1024 ] || [ "$PORT" -gt 65535 ]; then
+        echo "Invalid port '$PORT', using default $DEFAULT_PORT" >&2
+        PORT="$DEFAULT_PORT"
+    fi
+    echo "Web UI port: $PORT" >&2
+fi
 
 # ---------------------------------------------------------------
-# Verify the bundled Node binary exists
+# Resolve which node binary to use
+# Prefer the bundled node (signed with entitlements in release builds).
+# Fall back to system node for unsigned/development installs where the
+# bundled binary may SIGTRAP under Hardened Runtime restrictions.
 # ---------------------------------------------------------------
-if [ ! -f "$BUNDLED_NODE" ]; then
-    echo "WARNING: Bundled Node.js not found at $BUNDLED_NODE" >&2
-    echo "         The service may not start correctly." >&2
+if "$BUNDLED_NODE" --version >/dev/null 2>&1; then
+    NODE_CMD="$BUNDLED_NODE"
+    echo "Using bundled node: $($BUNDLED_NODE --version)" >&2
+elif command -v node >/dev/null 2>&1; then
+    NODE_CMD="$(command -v node)"
+    echo "WARNING: Bundled node failed — using system node: $NODE_CMD ($($NODE_CMD --version))" >&2
+else
+    echo "WARNING: No usable node binary found — Claude Desktop config skipped." >&2
+    NODE_CMD=""
 fi
 
 # ---------------------------------------------------------------
@@ -64,7 +136,7 @@ cat > "$PLIST_FILE" <<PLIST
     <key>EnvironmentVariables</key>
     <dict>
         <key>NODE_ENV</key><string>production</string>
-        <key>MCP_USER_ID</key><string>$(whoami)</string>
+        <key>MCP_USER_ID</key><string>${SYSTEM_USER}</string>
         <key>PORT</key><string>${PORT}</string>
         <key>IMAP_MCP_VERSION</key><string>${VERSION}</string>
         <key>HOME</key><string>${HOME}</string>
@@ -83,49 +155,108 @@ cat > "$PLIST_FILE" <<PLIST
 PLIST
 
 chmod 644 "$PLIST_FILE"
-echo "LaunchAgent plist written to: $PLIST_FILE" >&2
+echo "LaunchAgent plist written." >&2
 
 # ---------------------------------------------------------------
 # Load the LaunchAgent
 # ---------------------------------------------------------------
-# Unload first in case of reinstall (ignore errors if not loaded)
-launchctl unload "$PLIST_FILE" 2>/dev/null || true
 launchctl load "$PLIST_FILE"
 echo "LaunchAgent loaded." >&2
 
 # ---------------------------------------------------------------
-# Install ImapMCPControl.app to ~/Applications
+# Configure Claude Desktop
 # ---------------------------------------------------------------
-# The .app bundle is staged by pkgbuild in the payload directory
-STAGED_APP="$INSTALL_DIR/apps/$APP_NAME"
-if [ -d "$STAGED_APP" ]; then
-    # Remove existing app if present (reinstall)
-    if [ -d "$APPLICATIONS_DIR/$APP_NAME" ]; then
-        rm -rf "$APPLICATIONS_DIR/$APP_NAME"
+CLAUDE_ALREADY_CONFIGURED=false
+if [ -f "$CLAUDE_CONFIG" ]; then
+    if grep -q "imap-mcp-pro" "$CLAUDE_CONFIG" 2>/dev/null; then
+        CLAUDE_ALREADY_CONFIGURED=true
     fi
-    cp -r "$STAGED_APP" "$APPLICATIONS_DIR/$APP_NAME"
-    echo "ImapMCPControl.app installed to $APPLICATIONS_DIR" >&2
+fi
 
-    # Launch the menu bar app
-    open "$APPLICATIONS_DIR/$APP_NAME" 2>/dev/null || true
-    echo "ImapMCPControl.app launched." >&2
+configure_claude() {
+    if [ -z "$NODE_CMD" ]; then
+        echo "WARNING: No node binary — Claude Desktop config skipped." >&2
+        return
+    fi
+    mkdir -p "$(dirname "$CLAUDE_CONFIG")"
+    "$NODE_CMD" -e "
+const fs = require('fs');
+const configPath  = process.argv[1];
+const serverJs    = process.argv[2];
+const bundledNode = process.argv[3];
+const userId      = process.argv[4];
+
+let config = {};
+try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch(e) {}
+if (!config.mcpServers) config.mcpServers = {};
+delete config.mcpServers['imap'];
+config.mcpServers['imap-mcp-pro'] = {
+  command: bundledNode,
+  args: [serverJs],
+  env: { MCP_USER_ID: userId }
+};
+fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+" "$CLAUDE_CONFIG" "$MCP_SERVER_JS" "$BUNDLED_NODE" "$SYSTEM_USER" >&2 || \
+        echo "WARNING: Could not update Claude Desktop config." >&2
+    echo "Claude Desktop configured." >&2
+}
+
+if [ "$IS_UPGRADE" = true ]; then
+    # On upgrade: silently update the Claude entry to refresh paths/version
+    # but only if it was already configured
+    if [ "$CLAUDE_ALREADY_CONFIGURED" = true ]; then
+        configure_claude
+        echo "Claude Desktop entry updated for new version." >&2
+    else
+        echo "Claude Desktop not previously configured — skipping." >&2
+    fi
+elif [ -f "$CLAUDE_CONFIG" ] || [ -d "$(dirname "$CLAUDE_CONFIG")" ]; then
+    # Fresh install with Claude Desktop present — ask
+    ADD_CLAUDE=$(osascript <<ASCRIPT 2>/dev/null
+tell application "System Events"
+    set result to display dialog "Claude Desktop detected." & return & return & \
+        "Add IMAP MCP Pro to Claude Desktop?" & return & return & \
+        "This lets Claude read and manage your email." \
+        with title "IMAP MCP Pro" \
+        buttons {"Skip", "Add to Claude"} default button "Add to Claude"
+    return button returned of result
+end tell
+ASCRIPT
+    ) || ADD_CLAUDE="Skip"
+
+    if [ "$ADD_CLAUDE" = "Add to Claude" ]; then
+        configure_claude
+        echo "Restart Claude Desktop to apply changes." >&2
+    else
+        echo "Skipping Claude Desktop configuration." >&2
+    fi
 else
-    echo "WARNING: Staged app not found at $STAGED_APP — skipping app install." >&2
+    echo "Claude Desktop not found — skipping MCP configuration." >&2
 fi
 
 # ---------------------------------------------------------------
-# Open the Web UI after a short delay (background)
+# Install ImapMCPControl.app to ~/Applications
 # ---------------------------------------------------------------
-(sleep 5 && open "http://localhost:${PORT}") &
-echo "Web UI will open at http://localhost:${PORT} in 5 seconds." >&2
+STAGED_APP="$INSTALL_DIR/apps/$APP_NAME"
+if [ -d "$STAGED_APP" ]; then
+    if [ -d "$APPLICATIONS_DIR/$APP_NAME" ]; then
+        osascript -e 'tell application "ImapMCPControl" to quit' 2>/dev/null || true
+        sleep 1
+        rm -rf "$APPLICATIONS_DIR/$APP_NAME"
+    fi
+    cp -r "$STAGED_APP" "$APPLICATIONS_DIR/$APP_NAME"
+    open "$APPLICATIONS_DIR/$APP_NAME" 2>/dev/null || true
+    echo "ImapMCPControl.app installed and launched." >&2
+else
+    echo "WARNING: Staged app not found at $STAGED_APP — skipping." >&2
+fi
 
 # ---------------------------------------------------------------
 # Done
 # ---------------------------------------------------------------
 echo "" >&2
-echo "IMAP MCP Pro v${VERSION} installed successfully." >&2
-echo "  Install directory : $INSTALL_DIR" >&2
-echo "  Web UI            : http://localhost:${PORT}" >&2
-echo "  LaunchAgent plist : $PLIST_FILE" >&2
-echo "  Logs              : $LOG_DIR" >&2
+echo "IMAP MCP Pro v${VERSION} ${MODE_LABEL} complete." >&2
+echo "  User    : $SYSTEM_USER" >&2
+echo "  Web UI  : http://localhost:${PORT}" >&2
+echo "  Logs    : $LOG_DIR" >&2
 exit 0

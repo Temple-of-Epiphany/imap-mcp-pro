@@ -2,7 +2,7 @@
 # setup-notarize.sh - Set up Keychain profile for Apple Notarytool
 #
 # Author: Colin Bitterfield
-# Email:  colin@bitterfield.com
+# Email:  colin.bitterfield@templeofepiphany.com
 # Date Created: 2026-04-09
 # Date Updated: 2026-04-09
 # Version: 1.0.0

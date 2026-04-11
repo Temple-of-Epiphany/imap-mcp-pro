@@ -2,7 +2,7 @@
 
 **Version:** 1.0.0
 **Author:** Colin Bitterfield
-**Contact:** colin@bitterfield.com
+**Contact:** colin.bitterfield@templeofepiphany.com
 **Date Created:** 2026-04-09
 **Date Updated:** 2026-04-09
 

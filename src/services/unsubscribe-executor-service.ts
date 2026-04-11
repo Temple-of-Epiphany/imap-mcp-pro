@@ -2,7 +2,7 @@
  * IMAP MCP Pro - Unsubscribe Executor Service
  *
  * Author: Colin Bitterfield
- * Email: colin@bitterfield.com
+ * Email: colin.bitterfield@templeofepiphany.com
  * Date Created: 2025-11-07
  * Date Updated: 2025-11-07
  * Version: 0.1

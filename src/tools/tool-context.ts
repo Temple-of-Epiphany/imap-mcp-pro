@@ -5,7 +5,7 @@
  * Critical for MSP multi-tenant deployments to prevent cross-user data access.
  *
  * Author: Colin Bitterfield
- * Email: colin@bitterfield.com
+ * Email: colin.bitterfield@templeofepiphany.com
  * Date: 2025-11-06
  * Version: 1.0.0
  *

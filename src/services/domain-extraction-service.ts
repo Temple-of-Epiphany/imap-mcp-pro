@@ -5,7 +5,7 @@
  * Uses regex patterns to extract domains from headers and body content.
  *
  * Author: Colin Bitterfield
- * Email: colin@bitterfield.com
+ * Email: colin.bitterfield@templeofepiphany.com
  * Version: 1.0.0
  */
 

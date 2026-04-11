@@ -1,7 +1,7 @@
 # Makefile - IMAP MCP Pro macOS Distribution Build
 #
 # Author: Colin Bitterfield
-# Email: colin@bitterfield.com
+# Email: colin.bitterfield@templeofepiphany.com
 # Date Created: 2026-04-09
 # Date Updated: 2026-04-09
 # Version: 1.0.0
@@ -14,13 +14,14 @@
 #   pkg        Alias for build
 #   dmg        Create DMG containing the .pkg
 #   release    Full pipeline: build + sign + notarize + dmg
+#   uninstall  Remove IMAP MCP Pro from the local machine
 #   clean      Remove all build artifacts
 
 SCRIPT_DIR := $(shell pwd)/scripts
 VERSION    := $(shell node -p "require('../../package.json').version" 2>/dev/null || echo "unknown")
 OUTPUT_DIR := $(shell pwd)/build/output
 
-.PHONY: help build sign notarize pkg dmg release clean
+.PHONY: help build sign notarize pkg dmg release uninstall clean
 
 # Default target
 help:
@@ -44,6 +45,9 @@ help:
 	@echo "    make pkg        Alias for 'make build'"
 	@echo ""
 	@echo "    make release    Full pipeline: build → sign → notarize → dmg"
+	@echo ""
+	@echo "    make uninstall  Remove IMAP MCP Pro from this machine"
+	@echo "                    (prompts before deleting account data)"
 	@echo ""
 	@echo "    make clean      Remove build/ directory"
 	@echo ""
@@ -90,7 +94,13 @@ release: build sign notarize dmg
 	@echo "    --title \"IMAP MCP Pro v$(VERSION)\""
 	@echo ""
 
+uninstall:
+	@echo "Uninstalling IMAP MCP Pro from this machine..."
+	@bash $(SCRIPT_DIR)/uninstall.sh
+
 clean:
 	@echo "Removing build artifacts..."
+	find build/ -type d -exec chmod u+w {} + 2>/dev/null || true
+	find build/ -type f -exec chmod u+w {} + 2>/dev/null || true
 	rm -rf build/
 	@echo "Clean complete."

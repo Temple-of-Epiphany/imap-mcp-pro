@@ -1,7 +1,7 @@
 # Chunked Bulk Operations - Solution for Large-Scale Email Processing
 
 **Author:** Colin Bitterfield
-**Email:** colin@bitterfield.com
+**Email:** colin.bitterfield@templeofepiphany.com
 **Date Created:** 2025-01-24
 **Version:** 1.0.0
 

@@ -4,7 +4,7 @@
  * Provides anti-spoofing detection through header analysis
  * Scoring scale: -100 (likely spoofed) to +100 (highly legitimate)
  *
- * @author Colin Bitterfield <colin@bitterfield.com>
+ * @author Colin Bitterfield <colin.bitterfield@templeofepiphany.com>
  * @version 0.1.0
  * @date_created 2025-11-06
  * @date_updated 2025-11-06

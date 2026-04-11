@@ -6,7 +6,7 @@
  * - Encrypted File - Fallback for standard mode
  *
  * Author: Colin Bitterfield
- * Email: colin@bitterfield.com
+ * Email: colin.bitterfield@templeofepiphany.com
  * Date Created: 2025-12-05
  * Date Updated: 2025-12-05
  * Version: 1.0.0

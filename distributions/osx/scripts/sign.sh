@@ -2,10 +2,10 @@
 # sign.sh - IMAP MCP Pro macOS Code Signing Script
 #
 # Author: Colin Bitterfield
-# Email: colin@bitterfield.com
+# Email: colin.bitterfield@templeofepiphany.com
 # Date Created: 2026-04-09
 # Date Updated: 2026-04-10
-# Version: 1.1.0
+# Version: 1.3.0
 #
 # Signs all payload binaries FIRST, then rebuilds .pkg files from the signed
 # payload, then productsigns the final package.
@@ -26,6 +26,7 @@ OUTPUT_DIR="$BUILD_DIR/output"
 APP_BUNDLE="$BUILD_DIR/ImapMCPControl.app"
 PAYLOAD_SERVER_DIR="$BUILD_DIR/payload/server"
 PAYLOAD_CONTROL_DIR="$BUILD_DIR/payload/control"
+NODE_ENTITLEMENTS="$OSX_DIR/pkg/entitlements/node-entitlements.plist"
 
 log_step() { echo ""; echo "===> $1"; }
 log_ok()   { echo "     OK: $1"; }
@@ -71,6 +72,11 @@ security find-certificate -c "$DEVELOPER_ID_INSTALLER" >/dev/null 2>&1 \
 
 log_ok "Certificates found."
 
+# Verify entitlements file
+[ -f "$NODE_ENTITLEMENTS" ] \
+    || die "Node entitlements file not found: $NODE_ENTITLEMENTS"
+log_ok "Entitlements file found."
+
 # ---------------------------------------------------------------
 # Verify build artifacts exist
 # ---------------------------------------------------------------
@@ -109,6 +115,8 @@ log_ok "Signed .app staged in control payload."
 
 # ---------------------------------------------------------------
 # Step 3: Sign bundled Node.js runtime binary
+# Node.js requires JIT entitlements under the Hardened Runtime.
+# Without them the signed binary receives SIGTRAP on startup.
 # ---------------------------------------------------------------
 log_step "Signing bundled Node.js binary"
 NODE_BINARY="$PAYLOAD_SERVER_DIR/runtime/node/bin/node"
@@ -117,9 +125,10 @@ if [ -f "$NODE_BINARY" ]; then
         --force \
         --timestamp \
         --options runtime \
+        --entitlements "$NODE_ENTITLEMENTS" \
         --sign "$DEVELOPER_ID_APP" \
         "$NODE_BINARY"
-    log_ok "Node binary signed."
+    log_ok "Node binary signed (with JIT entitlements)."
 else
     log_warn "Node binary not found at $NODE_BINARY — skipping."
 fi
@@ -134,10 +143,13 @@ log_step "Signing native binaries in node_modules"
 sign_binary() {
     local bin="$1"
     if [ -f "$bin" ] && file "$bin" | grep -qE "Mach-O|mach-o"; then
+        # .node native addons and standalone executables need the same
+        # JIT entitlements as the node binary itself.
         codesign \
             --force \
             --timestamp \
             --options runtime \
+            --entitlements "$NODE_ENTITLEMENTS" \
             --sign "$DEVELOPER_ID_APP" \
             "$bin" 2>/dev/null && echo "     Signed: ${bin#$PAYLOAD_SERVER_DIR/}" || \
             log_warn "Failed to sign: ${bin#$PAYLOAD_SERVER_DIR/}"
@@ -149,15 +161,16 @@ while IFS= read -r -d '' f; do
     sign_binary "$f"
 done < <(find "$PAYLOAD_SERVER_DIR/node_modules" -name "*.node" -print0 2>/dev/null)
 
-# Sign esbuild and other standalone native executables (not .node, not scripts)
+# Sign esbuild and other standalone native executables.
+# Uses -type f which follows symlinks (catches .bin/esbuild symlink target)
+# and matches hardlinks with spaces in names (esbuild 2, esbuild 3, etc.)
 while IFS= read -r -d '' f; do
-    # Skip symlinks (they point to real files already handled or handled below)
-    [ -L "$f" ] && continue
     sign_binary "$f"
-done < <(find "$PAYLOAD_SERVER_DIR/node_modules" \
-    \( -path "*/esbuild/bin/esbuild" \
-    -o -path "*/@esbuild/darwin-*/bin/esbuild" \
-    \) -print0 2>/dev/null)
+done < <(find \
+    "$PAYLOAD_SERVER_DIR/node_modules/esbuild" \
+    "$PAYLOAD_SERVER_DIR/node_modules/@esbuild" \
+    "$PAYLOAD_SERVER_DIR/node_modules/.bin" \
+    -type f -print0 2>/dev/null)
 
 log_ok "Native binary signing complete."
 
@@ -167,7 +180,7 @@ log_ok "Native binary signing complete."
 # ---------------------------------------------------------------
 log_step "Rebuilding component packages with signed payload"
 
-INSTALL_DEST="$HOME/.local/share/imap-mcp-pro"
+INSTALL_DEST=".local/share/imap-mcp-pro"
 SERVER_PKG="$OUTPUT_DIR/imap-mcp-pro-server.pkg"
 CONTROL_PKG="$OUTPUT_DIR/imap-mcp-control.pkg"
 FINAL_PKG="$OUTPUT_DIR/IMAP-MCP-Pro-${VERSION}.pkg"

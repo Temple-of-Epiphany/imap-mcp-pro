@@ -5,7 +5,7 @@
  * Implements RFC 9051 CAPABILITY command support
  *
  * Author: Colin Bitterfield
- * Email: colin@bitterfield.com
+ * Email: colin.bitterfield@templeofepiphany.com
  * Date Created: 2025-11-08
  * Version: 1.0
  */

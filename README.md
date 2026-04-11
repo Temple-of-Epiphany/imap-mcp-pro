@@ -70,53 +70,43 @@ IMAP MCP Pro supports multi-user configurations for Managed Service Providers (M
 ```
 
 **Contact for Commercial Licensing:**
-- Email: colin@bitterfield.com
+- Email: colin.bitterfield@templeofepiphany.com
 - Commercial license required for MSP/multi-tenant deployments
 - Single-user deployments remain under Apache 2.0 license
 
 ## Installation
 
-### Quick Install (Recommended)
+### macOS — Package Installer (Recommended)
 
-#### macOS/Linux:
-```bash
-curl -fsSL https://raw.githubusercontent.com/Temple-of-Epiphany/imap-mcp-pro/main/install.sh | bash
-```
+Download the latest `.dmg` from the [Releases page](https://github.com/Temple-of-Epiphany/imap-mcp-pro/releases):
 
-#### Windows (PowerShell as Administrator):
-```powershell
-iwr -useb https://raw.githubusercontent.com/Temple-of-Epiphany/imap-mcp-pro/main/install.ps1 | iex
-```
+1. Open `IMAP-MCP-Pro-x.x.x.dmg`
+2. Double-click the `.pkg` inside
+3. Follow the installer — it will:
+   - Prompt for the Web UI port (default: **4500**)
+   - Offer to configure **Claude Desktop** automatically (if installed)
+   - Install the **ImapMCPControl** menu bar app
+   - Register and start the background service
 
-### Install from GitHub Release
+After install the envelope icon appears in your menu bar. Use **Preferences…** (⌘,) to change settings at any time.
 
-To install a specific release version:
+**What gets installed:**
 
-```bash
-# Download latest release
-VERSION=$(curl -s https://api.github.com/repos/Temple-of-Epiphany/imap-mcp-pro/releases/latest | grep '"tag_name":' | sed -E 's/.*"v?([^"]+)".*/\1/')
-curl -L "https://github.com/Temple-of-Epiphany/imap-mcp-pro/archive/refs/tags/v${VERSION}.tar.gz" -o imap-mcp-pro.tar.gz
+| Path | Contents |
+|------|----------|
+| `~/.local/share/imap-mcp-pro/` | Server files, bundled Node.js runtime |
+| `~/Applications/ImapMCPControl.app` | Menu bar status/control app |
+| `~/Library/LaunchAgents/com.templeofepiphany.imap-mcp-pro.plist` | Background service definition |
+| `~/.imap-mcp/` | Database and encryption keys (created on first run) |
 
-# Extract
-tar -xzf imap-mcp-pro.tar.gz
-cd "imap-mcp-pro-${VERSION}"
+### macOS — Upgrade
 
-# Install and build
-make install
-```
+Run the same `.pkg` installer over an existing installation. The installer detects the previous version and:
+- Preserves your port setting and Claude Desktop configuration
+- Stops the service, replaces server files, then restarts automatically
+- Does **not** touch `~/.imap-mcp/` (your accounts and data)
 
-Or to install a specific version:
-
-```bash
-# Replace 1.0.0 with your desired version
-VERSION="1.0.0"
-curl -L "https://github.com/Temple-of-Epiphany/imap-mcp-pro/archive/refs/tags/v${VERSION}.tar.gz" -o imap-mcp-pro.tar.gz
-tar -xzf imap-mcp-pro.tar.gz
-cd "imap-mcp-pro-${VERSION}"
-make install
-```
-
-### Manual Installation
+### Linux / Manual Installation
 
 1. Clone the repository:
 ```bash
@@ -124,14 +114,15 @@ git clone https://github.com/Temple-of-Epiphany/imap-mcp-pro.git
 cd imap-mcp-pro
 ```
 
-2. Install dependencies:
+2. Install dependencies and build:
 ```bash
 npm install
+npm run build
 ```
 
-3. Build the project:
+3. Install and start the service:
 ```bash
-npm run build
+make install
 ```
 
 ## Account Setup
@@ -178,26 +169,25 @@ The setup wizard includes pre-configured settings for:
 
 ### Claude Desktop Configuration
 
-Add the IMAP MCP server to your Claude Desktop configuration file:
+**macOS pkg installer:** Claude Desktop is configured automatically during install. You can also manage it via **Preferences… → Claude Desktop Integration** in the menu bar app.
 
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+**Manual configuration** — edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
 
 ```json
 {
   "mcpServers": {
-    "imap": {
-      "command": "node",
-      "args": ["/path/to/ImapClient/dist/index.js"],
+    "imap-mcp-pro": {
+      "command": "/Users/YOUR_USERNAME/.local/share/imap-mcp-pro/runtime/node/bin/node",
+      "args": ["/Users/YOUR_USERNAME/.local/share/imap-mcp-pro/dist/index.js"],
       "env": {
-        "MCP_USER_ID": "default",
-        "PORT": "4500",
-        "NODE_ENV": "production"
+        "MCP_USER_ID": "YOUR_USERNAME"
       }
     }
   }
 }
 ```
+
+Restart Claude Desktop after any config change.
 
 ### Environment Variables
 
@@ -495,12 +485,85 @@ Processing 1700 unread emails to mark bulk marketing messages for deletion:
   - folders: Specific folders (optional)
   ```
 
+## Removal
+
+### macOS
+
+Use the menu bar app or run from the project directory:
+
+```bash
+# Interactive uninstall (prompts before removing data)
+make uninstall
+
+# Or run the script directly
+distributions/osx/scripts/uninstall.sh
+```
+
+The uninstaller:
+- Stops and removes the LaunchAgent
+- Removes `~/Applications/ImapMCPControl.app`
+- Removes `~/.local/share/imap-mcp-pro/`
+- Forgets pkgutil receipts
+- **Prompts** before removing `~/.imap-mcp/` (your accounts and data)
+- **Prompts** before removing the Claude Desktop MCP entry
+
+### Linux
+
+```bash
+make uninstall
+```
+
+---
+
+## Backup and Restore
+
+Your data lives in `~/.imap-mcp/` and consists of:
+
+| File | Contents |
+|------|----------|
+| `data.db` | SQLite database — all accounts, settings, and history |
+| `.encryption-key` | AES-256 encryption key for stored passwords |
+| `.key` | Secondary key file |
+
+> **Important:** A backup without the key files cannot decrypt stored passwords. Always back up the entire `~/.imap-mcp/` directory together.
+
+### Backup
+
+**Menu bar app:** Preferences… → Database → **Backup**  
+Saves a `.zip` containing the database and both key files.
+
+**Command line:**
+```bash
+# Save to ~/imap-mcp-pro-backup-YYYY-MM-DD.zip
+make backup
+
+# Save to a specific path
+scripts/backup.sh /path/to/backup.zip
+```
+
+### Restore
+
+**Menu bar app:** Preferences… → Database → **Restore**  
+Select a `.zip` backup — the service stops, data is replaced, service restarts.
+
+**Command line:**
+```bash
+make restore FILE=/path/to/backup.zip
+
+# Or directly
+scripts/restore.sh /path/to/backup.zip
+```
+
+The restore script stops the service before replacing files and restarts it automatically when done.
+
+---
+
 ## Security
 
-- Credentials are encrypted using AES-256-CBC encryption
-- Encryption keys are stored separately in `~/.imap-mcp/.key`
-- Account configurations are stored in `~/.imap-mcp/accounts.json`
-- Never commit or share your encryption key or account configurations
+- Credentials are encrypted using AES-256-GCM encryption
+- Encryption keys are stored separately in `~/.imap-mcp/`
+- Database is stored at `~/.imap-mcp/data.db`
+- Never commit or share your encryption keys or database
 
 ## Development
 

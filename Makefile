@@ -2,11 +2,11 @@
 # Cross-platform installation and service management
 #
 # Author: Colin Bitterfield
-# Email: colin@bitterfield.com
+# Email: colin.bitterfield@templeofepiphany.com
 # Date: 2025-11-06
 # Version: 1.0.0
 
-.PHONY: help install uninstall start stop restart status logs update test build clean
+.PHONY: help install uninstall start stop restart status logs update test build clean backup restore
 
 # Detect OS
 UNAME_S := $(shell uname -s 2>/dev/null || echo "Windows")
@@ -88,6 +88,8 @@ help:
 	@echo "  make logs       - View service logs"
 	@echo "  make update     - Update to latest release"
 	@echo "  make build      - Build the project"
+	@echo "  make backup     - Backup database and keys to a zip file"
+	@echo "  make restore    - Restore database and keys from a zip file"
 	@echo "  make test       - Run tests"
 	@echo "  make clean      - Clean build artifacts"
 	@echo ""
@@ -224,6 +226,12 @@ update-internal:
 	echo "==========================================="; \
 	echo ""; \
 	echo "Run 'make status' to verify the service"
+
+backup:
+	@bash scripts/backup.sh
+
+restore:
+	@bash scripts/restore.sh $(FILE)
 
 test:
 	@echo "Running tests..."

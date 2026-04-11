@@ -161,6 +161,24 @@ export class DatabaseService {
       console.error('[DatabaseService] FATAL: Schema initialization failed:', error);
       throw error;  // Don't swallow this error - it's critical
     }
+
+    // Additive column migrations — safe to run on both new and existing databases.
+    // SQLite does not support IF NOT EXISTS on ALTER TABLE, so we catch the
+    // "duplicate column name" error and continue.
+    const columnMigrations = [
+      'ALTER TABLE accounts ADD COLUMN capabilities TEXT',
+      'ALTER TABLE accounts ADD COLUMN capabilities_updated_at INTEGER',
+    ];
+    for (const sql of columnMigrations) {
+      try {
+        this.db.exec(sql);
+      } catch (e: any) {
+        if (!e?.message?.includes('duplicate column name')) {
+          console.error('[DatabaseService] Migration warning:', e?.message);
+        }
+        // Column already exists — skip silently
+      }
+    }
   }
 
   // ===================

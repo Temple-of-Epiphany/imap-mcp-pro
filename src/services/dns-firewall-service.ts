@@ -5,7 +5,7 @@
  * Caches results to minimize DNS queries.
  *
  * Author: Colin Bitterfield
- * Email: colin@bitterfield.com
+ * Email: colin.bitterfield@templeofepiphany.com
  * Version: 1.0.0
  */
 

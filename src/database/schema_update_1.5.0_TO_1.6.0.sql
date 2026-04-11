@@ -2,7 +2,7 @@
 -- Date: 2025-12-22
 -- Description: Add Quick Categories for email organization (Issue #71)
 -- Author: Colin Bitterfield
--- Email: colin@bitterfield.com
+-- Email: colin.bitterfield@templeofepiphany.com
 
 -- Quick Categories for email filtering/organization
 -- Stores simple keyword-based rules for automatic email categorization

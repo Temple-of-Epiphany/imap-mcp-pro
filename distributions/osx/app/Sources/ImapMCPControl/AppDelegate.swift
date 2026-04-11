@@ -1,7 +1,7 @@
 // AppDelegate.swift - IMAP MCP Control Application Delegate
 //
 // Author: Colin Bitterfield
-// Email: colin@bitterfield.com
+// Email: colin.bitterfield@templeofepiphany.com
 // Date Created: 2026-04-09
 // Date Updated: 2026-04-09
 // Version: 1.0.0

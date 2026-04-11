@@ -5,7 +5,7 @@
  * Issue #71: Quick Categories implementation
  *
  * Author: Colin Bitterfield
- * Email: colin@bitterfield.com
+ * Email: colin.bitterfield@templeofepiphany.com
  * Date: 2025-12-22
  * Version: 0.1
  */

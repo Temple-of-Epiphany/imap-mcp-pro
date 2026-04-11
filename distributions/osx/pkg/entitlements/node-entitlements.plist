@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    node-entitlements.plist - Hardened Runtime Entitlements for Node.js
+
+    Author: Colin Bitterfield
+    Email: colin.bitterfield@templeofepiphany.com
+    Date Created: 2026-04-10
+    Date Updated: 2026-04-10
+    Version: 1.0.0
+
+    Node.js requires JIT and unsigned executable memory entitlements to run
+    under the macOS Hardened Runtime. Without these, the signed binary will
+    receive SIGTRAP on startup when running within a signed/notarized package.
+
+    References:
+      - https://developer.apple.com/documentation/security/hardened_runtime
+      - https://nodejs.org/en/download/package-manager (notarization notes)
+-->
+<plist version="1.0">
+<dict>
+    <!-- Required: Node.js uses JIT compilation for V8 -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+
+    <!-- Required: V8 needs to mark memory as executable at runtime -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!-- Required: Node.js loads native .node addons not signed by Apple -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+</dict>
+</plist>

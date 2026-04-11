@@ -1,6 +1,6 @@
 // IMAP MCP Pro - Tile-based Dashboard UI
 // Author: Colin Bitterfield
-// Email: colin@bitterfield.com
+// Email: colin.bitterfield@templeofepiphany.com
 // Version: 2.13.0
 
 // View Management

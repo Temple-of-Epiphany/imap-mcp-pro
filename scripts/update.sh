@@ -1,6 +1,6 @@
 #!/bin/bash
 # IMAP MCP Pro - Update Script
-# Author: Colin Bitterfield <colin@bitterfield.com>
+# Author: Colin Bitterfield <colin.bitterfield@templeofepiphany.com>
 # Date: 2025-11-06
 # Version: 1.0.0
 

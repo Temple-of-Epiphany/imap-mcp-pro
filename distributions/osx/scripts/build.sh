@@ -2,7 +2,7 @@
 # build.sh - IMAP MCP Pro macOS Distribution Build Script
 #
 # Author: Colin Bitterfield
-# Email: colin@bitterfield.com
+# Email: colin.bitterfield@templeofepiphany.com
 # Date Created: 2026-04-09
 # Date Updated: 2026-04-09
 # Version: 1.0.0
@@ -213,7 +213,57 @@ fi
 # Copy package.json
 cp "$PROJECT_DIR/package.json" "$SERVER_DEST/package.json"
 
-log_ok "Server payload assembled."
+log_ok "Server payload assembled (initial copy)."
+
+# ---------------------------------------------------------------
+# Step 6b: Rebuild native node addons against bundled Node.js
+# The project's node_modules are compiled for the system Node
+# version. If the bundled Node version differs (e.g. v22 vs v24),
+# native .node files will fail to load. Rebuild them here using
+# the bundled node binary so they match the runtime ABI.
+# ---------------------------------------------------------------
+log_step "Rebuilding native addons against bundled Node.js v${NODE_VERSION}"
+
+# Select arch-specific node root for headers (node-gyp needs them)
+ARCH=$(uname -m)
+if [ "$ARCH" = "arm64" ]; then
+    NODE_BUILD_ROOT="$NODE_ARM64_ROOT"
+else
+    NODE_BUILD_ROOT="$NODE_X64_ROOT"
+fi
+
+echo "     Build arch : $ARCH"
+echo "     Node headers: $NODE_BUILD_ROOT"
+
+# Verify the bundled node can execute before we rely on it
+if ! "$RUNTIME_BIN/node" --version >/dev/null 2>&1; then
+    die "Bundled node binary failed smoke test: $RUNTIME_BIN/node"
+fi
+
+# Run npm rebuild inside the server payload using the bundled node.
+# --nodedir tells node-gyp where to find the bundled node headers.
+# We set PATH so any child node processes also use the bundled node.
+#
+# NOTE: We invoke npm-cli.js directly rather than the npm shebang wrapper,
+# because the project's package.json ("type":"module") is an ancestor of
+# the bundled node's bin/ directory — node would treat the CJS npm shebang
+# script as ES module and fail with "require is not defined".
+# npm-cli.js lives under lib/node_modules/npm/ which has its own CJS
+# package.json, so it loads correctly.
+NPM_CLI="$PAYLOAD_SERVER_DIR/runtime/node/lib/node_modules/npm/bin/npm-cli.js"
+(
+    cd "$SERVER_DEST"
+    export PATH="$RUNTIME_BIN:$PATH"
+    "$RUNTIME_BIN/node" "$NPM_CLI" rebuild \
+        --nodedir="$NODE_BUILD_ROOT" 2>&1 | sed 's/^/     /'
+) || die "npm rebuild failed — native addons could not be compiled for bundled Node v${NODE_VERSION}"
+
+echo "     Verifying better-sqlite3 loads with bundled node..."
+"$RUNTIME_BIN/node" -e "require('$SERVER_DEST/node_modules/better-sqlite3')" \
+    && log_ok "better-sqlite3 loads OK with bundled Node v${NODE_VERSION}." \
+    || die "better-sqlite3 failed to load with bundled node after rebuild."
+
+log_ok "Native addons rebuilt for bundled Node.js v${NODE_VERSION}."
 
 # ---------------------------------------------------------------
 # Step 7: Build Swift menu bar app
@@ -229,7 +279,19 @@ log_ok "Swift binary built: $SWIFT_BINARY"
 cd "$OSX_DIR"
 
 # ---------------------------------------------------------------
-# Step 8: Assemble .app bundle
+# Step 8: Generate app icon
+# ---------------------------------------------------------------
+log_step "Generating AppIcon.icns"
+ICON_DIR="$BUILD_DIR/icon"
+mkdir -p "$ICON_DIR"
+swift "$SCRIPT_DIR/generate-icon.swift" "$ICON_DIR" 2>&1 | sed 's/^/     /'
+if [ ! -f "$ICON_DIR/AppIcon.icns" ]; then
+    log_warn "Icon generation failed — app will use default icon."
+fi
+log_ok "AppIcon.icns generated."
+
+# ---------------------------------------------------------------
+# Step 9: Assemble .app bundle
 # ---------------------------------------------------------------
 log_step "Assembling ImapMCPControl.app bundle"
 APP_BUNDLE="$BUILD_DIR/ImapMCPControl.app"
@@ -245,6 +307,11 @@ mkdir -p "$APP_RESOURCES"
 cp "$SWIFT_BINARY" "$APP_MACOS/ImapMCPControl"
 chmod +x "$APP_MACOS/ImapMCPControl"
 
+# Copy icon
+if [ -f "$ICON_DIR/AppIcon.icns" ]; then
+    cp "$ICON_DIR/AppIcon.icns" "$APP_RESOURCES/AppIcon.icns"
+fi
+
 # Write Info.plist
 cat > "$APP_CONTENTS/Info.plist" <<INFOPLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -259,6 +326,8 @@ cat > "$APP_CONTENTS/Info.plist" <<INFOPLIST
     <string>IMAP MCP Control</string>
     <key>CFBundleExecutable</key>
     <string>ImapMCPControl</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleVersion</key>
     <string>${VERSION}</string>
     <key>CFBundleShortVersionString</key>
@@ -295,13 +364,15 @@ log_ok "App staged in control payload."
 # ---------------------------------------------------------------
 log_step "Building imap-mcp-pro-server.pkg"
 SERVER_PKG="$OUTPUT_DIR/imap-mcp-pro-server.pkg"
-INSTALL_DEST_SERVER="$HOME/.local/share/imap-mcp-pro"
+# Relative path — distribution.xml uses enable_currentUserHome so the
+# installer prepends $HOME. An absolute path would cause double-nesting.
+INSTALL_DEST=".local/share/imap-mcp-pro"
 
 pkgbuild \
     --root "$PAYLOAD_SERVER_DIR" \
     --identifier "com.templeofepiphany.imap-mcp-pro.server" \
     --version "$VERSION" \
-    --install-location "$INSTALL_DEST_SERVER" \
+    --install-location "$INSTALL_DEST" \
     --scripts "$OSX_DIR/pkg/scripts" \
     "$SERVER_PKG"
 
@@ -312,13 +383,12 @@ log_ok "Server component package: $SERVER_PKG"
 # ---------------------------------------------------------------
 log_step "Building imap-mcp-control.pkg"
 CONTROL_PKG="$OUTPUT_DIR/imap-mcp-control.pkg"
-INSTALL_DEST_CONTROL="$HOME/.local/share/imap-mcp-pro"
 
 pkgbuild \
     --root "$PAYLOAD_CONTROL_DIR" \
     --identifier "com.templeofepiphany.imap-mcp-pro.control" \
     --version "$VERSION" \
-    --install-location "$INSTALL_DEST_CONTROL" \
+    --install-location "$INSTALL_DEST" \
     "$CONTROL_PKG"
 
 log_ok "Control app component package: $CONTROL_PKG"

@@ -4,7 +4,7 @@
  * Functional Integration Test for IMAP MCP Pro
  *
  * Author: Colin Bitterfield
- * Email: colin@bitterfield.com
+ * Email: colin.bitterfield@templeofepiphany.com
  * Version: 0.1.0
  * Date Created: 2025-11-17
  * Date Updated: 2025-11-17

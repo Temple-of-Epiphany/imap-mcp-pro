@@ -1,10 +1,10 @@
 // StatusMenuController.swift - IMAP MCP Control Status Menu Bar Controller
 //
 // Author: Colin Bitterfield
-// Email: colin@bitterfield.com
+// Email: colin.bitterfield@templeofepiphany.com
 // Date Created: 2026-04-09
-// Date Updated: 2026-04-09
-// Version: 1.0.0
+// Date Updated: 2026-04-10
+// Version: 1.1.0
 //
 // NSStatusItem-based menu bar controller. Polls LaunchAgent status every 5 seconds
 // and provides controls for the IMAP MCP Pro service.
@@ -21,6 +21,13 @@ class StatusMenuController: NSObject {
         string: "~/Library/LaunchAgents/com.templeofepiphany.imap-mcp-pro.plist"
     ).expandingTildeInPath
     private let releasesURL = "https://github.com/Temple-of-Epiphany/imap-mcp-pro/releases"
+    private lazy var preferencesController: PreferencesWindowController = {
+        let controller = PreferencesWindowController()
+        controller.onSettingsChanged = { [weak self] in
+            DispatchQueue.main.async { self?.buildMenu() }
+        }
+        return controller
+    }()
 
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -40,10 +47,14 @@ class StatusMenuController: NSObject {
         let running = isServiceRunning()
         let port = readPortFromPlist()
 
-        // Update status item title
+        // Update status item icon — envelope.fill when running, envelope when stopped
         if let button = statusItem.button {
-            button.title = running ? "🟢 IMAP MCP" : "⚫ IMAP MCP"
-            button.font = NSFont.systemFont(ofSize: 13)
+            let symbolName = running ? "envelope.fill" : "envelope"
+            if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "IMAP MCP Pro") {
+                image.isTemplate = true  // adapts to light/dark mode automatically
+                button.image = image
+            }
+            button.title = ""
         }
 
         let menu = NSMenu()
@@ -87,6 +98,15 @@ class StatusMenuController: NSObject {
         )
         webUIItem.target = self
         menu.addItem(webUIItem)
+
+        // Preferences
+        let prefsItem = NSMenuItem(
+            title: "Preferences…",
+            action: #selector(openPreferences),
+            keyEquivalent: ","
+        )
+        prefsItem.target = self
+        menu.addItem(prefsItem)
 
         // Start / Stop service (toggled based on state)
         if running {
@@ -176,6 +196,10 @@ class StatusMenuController: NSObject {
         if let url = URL(string: releasesURL) {
             NSWorkspace.shared.open(url)
         }
+    }
+
+    @objc private func openPreferences() {
+        preferencesController.showWindow()
     }
 
     @objc private func quitApp() {
