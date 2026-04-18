@@ -105,6 +105,41 @@ export class DatabaseService {
   }
 
   /**
+   * Public access to underlying Database (used by adjacent services that
+   * need to share the connection — e.g. ResultsService).
+   */
+  getDb(): Database.Database {
+    return this.db;
+  }
+
+  /**
+   * Public encryption helpers that reuse the AES-256-GCM key.
+   * Used by ResultsService and FileExportService.
+   */
+  encryptString(plaintext: string): EncryptedData {
+    return this.encrypt(plaintext);
+  }
+
+  decryptString(encrypted: string, ivHex: string): string {
+    return this.decrypt(encrypted, ivHex);
+  }
+
+  encryptBuffer(plaintext: Buffer): { ciphertext: Buffer; iv: string; authTag: string } {
+    const iv = crypto.randomBytes(16);
+    const cipher = crypto.createCipheriv(this.algorithm, this.encryptionKey, iv);
+    const enc = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+    const authTag = (cipher as any).getAuthTag() as Buffer;
+    return { ciphertext: enc, iv: iv.toString('hex'), authTag: authTag.toString('hex') };
+  }
+
+  decryptBuffer(ciphertext: Buffer, ivHex: string, authTagHex: string): Buffer {
+    const iv = Buffer.from(ivHex, 'hex');
+    const decipher = crypto.createDecipheriv(this.algorithm, this.encryptionKey, iv);
+    (decipher as any).setAuthTag(Buffer.from(authTagHex, 'hex'));
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  }
+
+  /**
    * Encrypt sensitive data using AES-256-GCM
    */
   private encrypt(plaintext: string): EncryptedData {
