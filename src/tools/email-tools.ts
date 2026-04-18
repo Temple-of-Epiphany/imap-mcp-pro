@@ -2,14 +2,25 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ImapService } from '../services/imap-service.js';
 import { DatabaseService } from '../services/database-service.js';
 import { SmtpService } from '../services/smtp-service.js';
+import { ResultsService } from '../services/results-service.js';
+import { WorkerPool } from '../utils/worker-pool.js';
 import { z } from 'zod';
 import { withErrorHandling, AccountNotFoundError } from '../utils/error-handler.js';
+import {
+  maybeStoreAsHandle,
+  ResponseModeSchema,
+  StorageTypeSchema,
+} from './result-envelope.js';
+import { getToolContext } from './tool-context.js';
+import { ContextReductionConfig as Cfg } from '../config/context-reduction.js';
 
 export function emailTools(
   server: McpServer,
   imapService: ImapService,
   db: DatabaseService,
-  smtpService: SmtpService
+  smtpService: SmtpService,
+  results?: ResultsService,
+  _workerPool?: WorkerPool
 ): void {
   // Search emails tool
   server.registerTool('imap_search_emails', {
