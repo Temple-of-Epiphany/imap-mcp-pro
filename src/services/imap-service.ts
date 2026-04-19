@@ -37,6 +37,8 @@ import {
   MailboxStatus
 } from '../types/index.js';
 import { LRUCache } from '../utils/memory-manager.js';
+import { WorkerPool } from '../utils/worker-pool.js';
+import { ContextReductionConfig as Cfg } from '../config/context-reduction.js';
 
 export class ImapService {
   private activeConnections: Map<string, ImapFlow> = new Map();
@@ -44,6 +46,7 @@ export class ImapService {
   private accountStore: Map<string, ImapAccount> = new Map();
   private capabilitiesCache: Map<string, { capabilities: ServerCapabilities; timestamp: number }> = new Map();
   private db?: any; // Optional DatabaseService for auto-capability storage (Issue #58)
+  private workerPool?: WorkerPool;
 
   // Level 3: Operation queue with size limit (Issue #22 - prevent unbounded growth)
   private operationQueue: QueuedOperation[] = [];
@@ -65,6 +68,98 @@ export class ImapService {
 
     // Start operation queue processor (Issue #21)
     this.startQueueProcessor();
+  }
+
+  /**
+   * Register a worker pool for offloading CPU-bound parsing (Phase D).
+   * When set, simpleParser calls route to the worker instead of blocking
+   * the main event loop. Must be called once at startup.
+   */
+  setWorkerPool(pool: WorkerPool): void {
+    this.workerPool = pool;
+  }
+
+  /**
+   * Parse a raw RFC822 buffer via the worker pool when available;
+   * fall back to inline simpleParser when the pool is unset or unhealthy.
+   * The shape returned is normalised so callers can access the same fields
+   * whether parsing happened on the main thread or off-thread.
+   */
+  private async parseRfc822(raw: Buffer, opts: {
+    wantText?: boolean;
+    wantHtml?: boolean;
+    previewChars?: number;
+  } = {}): Promise<{
+    subject?: string;
+    from?: string;
+    to?: string;
+    messageId?: string;
+    inReplyTo?: string;
+    date?: Date;
+    textContent: string;
+    htmlContent: string;
+    attachments: Array<{ filename: string; contentType: string; size: number }>;
+  }> {
+    const wantText = opts.wantText ?? true;
+    const wantHtml = opts.wantHtml ?? true;
+    const previewChars = opts.previewChars ?? Cfg.PREVIEW_CHARS;
+
+    if (this.workerPool) {
+      try {
+        const res = await this.workerPool.run<any>({
+          type: 'parse-rfc822',
+          payload: {
+            raw,
+            wantText,
+            wantHtml,
+            previewChars,
+            attachmentMaxBytes: Cfg.ATTACHMENT_MAX_BYTES,
+          },
+        });
+        return {
+          subject: res.subject,
+          from: res.from,
+          to: res.to,
+          messageId: res.messageId,
+          inReplyTo: undefined,
+          date: res.date ? new Date(res.date) : undefined,
+          textContent: wantText ? (res.fullText ?? res.textPreview ?? '') : (res.textPreview ?? ''),
+          htmlContent: wantHtml ? (res.fullHtml ?? res.htmlPreview ?? '') : (res.htmlPreview ?? ''),
+          attachments: (res.attachments ?? []).map((a: any) => ({
+            filename: a.filename,
+            contentType: a.contentType ?? 'application/octet-stream',
+            size: a.size ?? 0,
+          })),
+        };
+      } catch (e) {
+        console.error('[ImapService] worker parse failed, falling back to inline:', (e as Error)?.message);
+      }
+    }
+
+    const parsed = await simpleParser(raw);
+    const parsedFrom = parsed.from;
+    const fromText = parsedFrom && 'value' in parsedFrom && Array.isArray(parsedFrom.value)
+      ? parsedFrom.value[0]?.address || ''
+      : (parsedFrom && 'text' in parsedFrom ? parsedFrom.text : '') || '';
+    const parsedTo = parsed.to;
+    const toText = parsedTo && 'value' in parsedTo && Array.isArray(parsedTo.value)
+      ? parsedTo.value.map((t: any) => t.address || '').join(', ')
+      : (parsedTo && 'text' in parsedTo && parsedTo.text ? parsedTo.text : '');
+    return {
+      subject: parsed.subject,
+      from: fromText,
+      to: toText,
+      messageId: parsed.messageId,
+      inReplyTo: parsed.inReplyTo,
+      date: parsed.date,
+      textContent: parsed.text || '',
+      htmlContent: parsed.html || '',
+      attachments: parsed.attachments?.map((att: any) => ({
+        filename: att.filename || 'unnamed',
+        contentType: att.contentType ?? 'application/octet-stream',
+        size: att.size ?? 0,
+      })) || [],
+    };
   }
 
   /**
@@ -803,35 +898,20 @@ export class ImapService {
         throw new Error(`Email with UID ${uid} not found`);
       }
 
-      // Parse email body
-      const parsed = await simpleParser(message.source as Buffer);
-
-      const parsedFrom = parsed.from;
-      const fromText = parsedFrom && 'value' in parsedFrom && Array.isArray(parsedFrom.value)
-        ? parsedFrom.value[0]?.address || ''
-        : (parsedFrom && 'text' in parsedFrom ? parsedFrom.text : '') || '';
-
-      const parsedTo = parsed.to;
-      const toText = parsedTo && 'value' in parsedTo && Array.isArray(parsedTo.value)
-        ? parsedTo.value.map((t: any) => t.address || '')
-        : (parsedTo && 'text' in parsedTo && parsedTo.text ? [parsedTo.text] : []);
+      const parsed = await this.parseRfc822(message.source as Buffer, { wantText: true, wantHtml: true });
 
       return {
         uid,
         flags: message.flags ? Array.from(message.flags) : [],
-        from: fromText,
-        to: toText,
+        from: parsed.from || '',
+        to: parsed.to ? parsed.to.split(', ').filter(Boolean) : [],
         subject: parsed.subject || '',
         messageId: parsed.messageId || '',
         inReplyTo: parsed.inReplyTo,
         date: parsed.date || new Date(),
-        textContent: parsed.text || '',
-        htmlContent: parsed.html || '',
-        attachments: parsed.attachments?.map((att: any) => ({
-          filename: att.filename || 'unnamed',
-          contentType: att.contentType,
-          size: att.size
-        })) || []
+        textContent: parsed.textContent,
+        htmlContent: parsed.htmlContent,
+        attachments: parsed.attachments
       };
     }, `getEmailContent(${folderName}, ${uid})`);
   }
@@ -870,6 +950,19 @@ export class ImapService {
           });
         }
       } else {
+        // Collect raw sources first so we can parse them in parallel via the worker pool.
+        const envelopes: Array<{
+          uid: number;
+          flags: string[];
+          from: string;
+          to: string[];
+          subject: string;
+          messageId: string;
+          inReplyTo?: string;
+          date: Date;
+          source?: Buffer;
+        }> = [];
+
         for await (const msg of client.fetch(uids.join(','), {
           uid: true,
           flags: true,
@@ -877,27 +970,16 @@ export class ImapService {
           source: fields === 'full'
         }, { uid: true })) {
           if (fields === 'full' && msg.source) {
-            const parsed = await simpleParser(msg.source as Buffer);
-            const parsedFrom = parsed.from;
-            const fromText = parsedFrom && 'value' in parsedFrom && Array.isArray(parsedFrom.value)
-              ? parsedFrom.value[0]?.address || ''
-              : (parsedFrom && 'text' in parsedFrom ? parsedFrom.text : '') || '';
-            const parsedTo = parsed.to;
-            const toText = parsedTo && 'value' in parsedTo && Array.isArray(parsedTo.value)
-              ? parsedTo.value.map((t: any) => t.address || '')
-              : (parsedTo && 'text' in parsedTo && parsedTo.text ? [parsedTo.text] : []);
-
-            results.push({
+            envelopes.push({
               uid: msg.uid,
               flags: msg.flags ? Array.from(msg.flags) : [],
-              from: fromText,
-              to: toText,
-              subject: parsed.subject || '',
-              messageId: parsed.messageId || '',
-              inReplyTo: parsed.inReplyTo,
-              date: parsed.date || new Date(),
-              textContent: parsed.text || '',
-              htmlContent: parsed.html || ''
+              from: msg.envelope?.from?.[0]?.address || '',
+              to: msg.envelope?.to?.map(t => t.address || '') || [],
+              subject: msg.envelope?.subject || '',
+              messageId: msg.envelope?.messageId || '',
+              inReplyTo: msg.envelope?.inReplyTo,
+              date: msg.envelope?.date || new Date(),
+              source: msg.source as Buffer,
             });
           } else {
             results.push({
@@ -909,6 +991,29 @@ export class ImapService {
               messageId: msg.envelope?.messageId || '',
               inReplyTo: msg.envelope?.inReplyTo,
               date: msg.envelope?.date || new Date()
+            });
+          }
+        }
+
+        if (fields === 'full' && envelopes.length) {
+          // Parse bodies in parallel via the worker pool (fallback to inline).
+          const parsed = await Promise.all(envelopes.map(e =>
+            this.parseRfc822(e.source as Buffer, { wantText: true, wantHtml: true })
+          ));
+          for (let i = 0; i < envelopes.length; i++) {
+            const e = envelopes[i];
+            const p = parsed[i];
+            results.push({
+              uid: e.uid,
+              flags: e.flags,
+              from: p.from || e.from,
+              to: p.to ? p.to.split(', ').filter(Boolean) : e.to,
+              subject: p.subject || e.subject,
+              messageId: p.messageId || e.messageId,
+              inReplyTo: p.inReplyTo ?? e.inReplyTo,
+              date: p.date || e.date,
+              textContent: p.textContent,
+              htmlContent: p.htmlContent,
             });
           }
         }

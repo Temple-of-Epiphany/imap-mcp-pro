@@ -53,6 +53,61 @@ function toIsoDate(d: Date | string | undefined): string | undefined {
   return d instanceof Date ? d.toISOString() : d;
 }
 
+/**
+ * Threshold at which row summarisation is worth offloading to a worker.
+ * Below this, the postMessage round-trip costs more than the work saved.
+ */
+const WORKER_SUMMARIZE_THRESHOLD = 200;
+
+/**
+ * Build summary rows from raw email objects. Routes through the worker pool
+ * for large sets to keep the event loop responsive; falls back to inline
+ * summarization when the pool is unset or the batch is small.
+ */
+async function summarizeEmails(
+  emails: any[],
+  opts: { fields: 'headers' | 'body' | 'full' },
+  workerPool?: WorkerPool
+): Promise<StoredResultRowSummary[]> {
+  const wantBody = opts.fields !== 'headers';
+  if (workerPool && emails.length >= WORKER_SUMMARIZE_THRESHOLD) {
+    try {
+      const summarized = await workerPool.run<any[]>({
+        type: 'summarize-rows',
+        payload: { rows: emails, previewChars: Cfg.PREVIEW_CHARS },
+      });
+      return summarized.map((s, i) => ({
+        ...s,
+        messageId: emails[i]?.messageId,
+        inReplyTo: emails[i]?.inReplyTo,
+        ...(wantBody ? {
+          textContent: emails[i]?.textContent,
+          htmlContent: emails[i]?.htmlContent,
+        } : {}),
+      })) as StoredResultRowSummary[];
+    } catch (e) {
+      console.error('[email-tools] worker summarize failed, falling back to inline:', (e as Error)?.message);
+    }
+  }
+  return emails.map((email: any) => ({
+    uid: email.uid,
+    subject: email.subject,
+    from: email.from,
+    to: toAddress(email.to),
+    date: toIsoDate(email.date),
+    flags: email.flags,
+    messageId: email.messageId,
+    inReplyTo: email.inReplyTo,
+    ...(wantBody ? {
+      textContent: email.textContent,
+      htmlContent: email.htmlContent,
+      preview: typeof email.textContent === 'string'
+        ? email.textContent.slice(0, Cfg.PREVIEW_CHARS)
+        : undefined,
+    } : {}),
+  }));
+}
+
 export function emailTools(
   server: McpServer,
   imapService: ImapService,
@@ -61,7 +116,6 @@ export function emailTools(
   results?: ResultsService,
   workerPool?: WorkerPool
 ): void {
-  void workerPool; // wired in Phase D/E
   // Search emails tool
   server.registerTool('imap_search_emails', {
     description:
@@ -644,23 +698,7 @@ export function emailTools(
     const userId = results ? resolveUserId(db) : null;
     if (results && userId && shouldUseHandle(responseMode, emails.length)) {
       // Handle mode: store the full rows (no per-body truncation) and return a handle.
-      const rows: StoredResultRowSummary[] = emails.map((email: any) => ({
-        uid: email.uid,
-        subject: email.subject,
-        from: email.from,
-        to: toAddress(email.to),
-        date: toIsoDate(email.date),
-        flags: email.flags,
-        messageId: email.messageId,
-        inReplyTo: email.inReplyTo,
-        ...(fields !== 'headers' ? {
-          textContent: email.textContent,
-          htmlContent: email.htmlContent,
-          preview: typeof email.textContent === 'string'
-            ? email.textContent.slice(0, Cfg.PREVIEW_CHARS)
-            : undefined,
-        } : {}),
-      }));
+      const rows = await summarizeEmails(emails, { fields }, workerPool);
       return maybeStoreAsHandle({
         userId,
         accountId,
@@ -1202,23 +1240,7 @@ export function emailTools(
     const modeOrDefault: ResponseModeOpt = responseMode ?? 'handle';
     const userId = results ? resolveUserId(db) : null;
     if (results && userId && shouldUseHandle(modeOrDefault, emails.length)) {
-      const rows: StoredResultRowSummary[] = emails.map((email: any) => ({
-        uid: email.uid,
-        subject: email.subject,
-        from: email.from,
-        to: toAddress(email.to),
-        date: toIsoDate(email.date),
-        flags: email.flags,
-        messageId: email.messageId,
-        inReplyTo: email.inReplyTo,
-        ...(fields !== 'headers' ? {
-          textContent: email.textContent,
-          htmlContent: email.htmlContent,
-          preview: typeof email.textContent === 'string'
-            ? email.textContent.slice(0, Cfg.PREVIEW_CHARS)
-            : undefined,
-        } : {}),
-      }));
+      const rows = await summarizeEmails(emails, { fields }, workerPool);
       return maybeStoreAsHandle({
         userId,
         accountId,

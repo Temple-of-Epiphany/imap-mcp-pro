@@ -42,6 +42,7 @@ const workerScriptUrl = pathToFileURL(workerScriptPath);
 const workerPool = new WorkerPool({ workerScript: workerScriptUrl });
 
 const imapService = new ImapService(db); // Pass db for auto-capability storage (Issue #58)
+imapService.setWorkerPool(workerPool); // Phase D: offload simpleParser to worker threads
 const smtpService = new SmtpService();
 
 // Register all tools (results service + worker pool now available)
