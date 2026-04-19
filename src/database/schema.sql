@@ -247,3 +247,65 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
+
+-- Cached tool results (resource handle pattern) - v1.7.0
+-- See schema_update_1.6.0_TO_1.7.0.sql
+CREATE TABLE IF NOT EXISTS tool_results (
+  result_id          TEXT PRIMARY KEY,
+  user_id            TEXT NOT NULL,
+  account_id         TEXT,
+  tool_name          TEXT NOT NULL,
+  folder             TEXT,
+  params_json        TEXT NOT NULL,
+  summary_json       TEXT NOT NULL,
+  storage_mode       TEXT NOT NULL CHECK(storage_mode IN ('inline','file')),
+  storage_type       TEXT NOT NULL CHECK(storage_type IN ('temp','persistent')) DEFAULT 'temp',
+  rows_json          BLOB,
+  rows_iv            TEXT,
+  file_path          TEXT,
+  file_size_bytes    INTEGER,
+  row_count          INTEGER NOT NULL,
+  schema_version     INTEGER NOT NULL DEFAULT 1,
+  created_at         INTEGER NOT NULL,
+  expires_at         INTEGER,
+  last_accessed_at   INTEGER NOT NULL,
+  access_count       INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+  FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE SET NULL,
+  CHECK (
+    (storage_mode = 'inline' AND rows_json IS NOT NULL AND rows_iv IS NOT NULL
+       AND file_path IS NULL)
+    OR
+    (storage_mode = 'file'   AND file_path IS NOT NULL AND file_size_bytes IS NOT NULL
+       AND rows_json IS NULL AND rows_iv IS NULL)
+  ),
+  CHECK (
+    (storage_type = 'persistent' AND expires_at IS NULL)
+    OR
+    (storage_type = 'temp'       AND expires_at IS NOT NULL)
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_tool_results_user          ON tool_results(user_id);
+CREATE INDEX IF NOT EXISTS idx_tool_results_user_created  ON tool_results(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tool_results_expires       ON tool_results(expires_at);
+CREATE INDEX IF NOT EXISTS idx_tool_results_tool          ON tool_results(user_id, tool_name);
+CREATE INDEX IF NOT EXISTS idx_tool_results_storage_type  ON tool_results(user_id, storage_type);
+
+CREATE TABLE IF NOT EXISTS result_attachments (
+  attachment_id      TEXT PRIMARY KEY,
+  result_id          TEXT NOT NULL,
+  message_uid        INTEGER,
+  filename           TEXT NOT NULL,
+  content_type       TEXT,
+  size_bytes         INTEGER NOT NULL,
+  file_path          TEXT NOT NULL,
+  file_iv            TEXT NOT NULL,
+  checksum_sha256    TEXT,
+  skipped            INTEGER NOT NULL DEFAULT 0,
+  created_at         INTEGER NOT NULL,
+  FOREIGN KEY (result_id) REFERENCES tool_results(result_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_result_attachments_result   ON result_attachments(result_id);
+CREATE INDEX IF NOT EXISTS idx_result_attachments_msg_uid  ON result_attachments(result_id, message_uid);
