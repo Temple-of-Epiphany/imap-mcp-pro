@@ -5,6 +5,22 @@ import { SmtpService } from '../services/smtp-service.js';
 import { z } from 'zod';
 import { withErrorHandling, AccountNotFoundError } from '../utils/error-handler.js';
 
+/**
+ * Parse a date-only string (YYYY-MM-DD) as midnight in the local timezone.
+ * `new Date("2026-04-01")` interprets the string as UTC midnight, which on
+ * non-UTC systems shifts the date by the TZ offset (e.g. -07:00 turns
+ * 2026-04-01 into 2026-03-31T17:00Z). For IMAP SINCE/BEFORE semantics the
+ * caller intends a calendar day in their own timezone, so parse components
+ * explicitly. Full ISO timestamps fall through to the Date constructor.
+ *
+ * Issue #91.
+ */
+function parseDateOnly(input: string): Date {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(input);
+  if (!m) return new Date(input);
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
 export function emailTools(
   server: McpServer,
   imapService: ImapService,
@@ -39,8 +55,8 @@ export function emailTools(
     if (searchCriteria.to) criteria.to = searchCriteria.to;
     if (searchCriteria.subject) criteria.subject = searchCriteria.subject;
     if (searchCriteria.body) criteria.body = searchCriteria.body;
-    if (searchCriteria.since) criteria.since = new Date(searchCriteria.since);
-    if (searchCriteria.before) criteria.before = new Date(searchCriteria.before);
+    if (searchCriteria.since) criteria.since = parseDateOnly(searchCriteria.since);
+    if (searchCriteria.before) criteria.before = parseDateOnly(searchCriteria.before);
     if (searchCriteria.unreadOnly !== undefined) criteria.unreadOnly = searchCriteria.unreadOnly;  // Issue #82
     if (searchCriteria.seen !== undefined) criteria.seen = searchCriteria.seen;
     if (searchCriteria.flagged !== undefined) criteria.flagged = searchCriteria.flagged;
