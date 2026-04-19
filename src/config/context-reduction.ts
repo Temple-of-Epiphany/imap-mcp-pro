@@ -26,6 +26,10 @@ export const ContextReductionConfig = Object.freeze({
   FILE_THRESHOLD:          intEnv('IMAP_MCP_FILE_THRESHOLD', 500),
   INLINE_BYTE_BUDGET:      intEnv('IMAP_MCP_INLINE_BYTE_BUDGET', 256 * 1024),
 
+  // Per-call caps
+  INLINE_LIMIT_CAP:        intEnv('IMAP_MCP_INLINE_LIMIT_CAP', 100),      // max rows a tool may return inline
+  HANDLE_LIMIT_CAP:        intEnv('IMAP_MCP_HANDLE_LIMIT_CAP', 10_000),   // max rows a tool may stash in a handle
+
   // TTL / quotas
   RESULT_TTL_MS:           intEnv('IMAP_MCP_RESULT_TTL_MS', 2 * 60 * 60 * 1000), // 2h
   MAX_RESULTS_PER_USER:    intEnv('IMAP_MCP_MAX_RESULTS_PER_USER', 50),

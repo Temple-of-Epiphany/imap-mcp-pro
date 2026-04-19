@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ImapService } from '../services/imap-service.js';
 import { DatabaseService } from '../services/database-service.js';
 import { SmtpService } from '../services/smtp-service.js';
-import { ResultsService } from '../services/results-service.js';
+import { ResultsService, StoredResultRowSummary } from '../services/results-service.js';
 import { WorkerPool } from '../utils/worker-pool.js';
 import { z } from 'zod';
 import { withErrorHandling, AccountNotFoundError } from '../utils/error-handler.js';
@@ -14,17 +14,61 @@ import {
 import { getToolContext } from './tool-context.js';
 import { ContextReductionConfig as Cfg } from '../config/context-reduction.js';
 
+type ResponseModeOpt = 'auto' | 'inline' | 'handle' | 'file' | undefined;
+type StorageTypeOpt = 'temp' | 'persistent' | undefined;
+
+function resolveUserId(db: DatabaseService): string | null {
+  try {
+    return getToolContext(db).userId;
+  } catch {
+    return null;
+  }
+}
+
+function shouldUseHandle(mode: ResponseModeOpt, n: number): boolean {
+  if (mode === 'inline') return false;
+  if (mode === 'handle' || mode === 'file') return true;
+  return n > Cfg.INLINE_THRESHOLD;
+}
+
+function capLimit(requested: number | undefined, fallback: number, mode: ResponseModeOpt): number {
+  const want = requested ?? fallback;
+  const cap = mode === 'inline' || mode === undefined || mode === 'auto'
+    ? Cfg.INLINE_LIMIT_CAP
+    : Cfg.HANDLE_LIMIT_CAP;
+  // For 'auto', we still honor HANDLE cap since we may promote to handle.
+  const effectiveCap = mode === 'auto' || mode === undefined
+    ? Cfg.HANDLE_LIMIT_CAP
+    : cap;
+  return Math.min(want, effectiveCap);
+}
+
+function toAddress(to: string | string[] | undefined): string | undefined {
+  if (to === undefined) return undefined;
+  return Array.isArray(to) ? to.join(', ') : to;
+}
+
+function toIsoDate(d: Date | string | undefined): string | undefined {
+  if (!d) return undefined;
+  return d instanceof Date ? d.toISOString() : d;
+}
+
 export function emailTools(
   server: McpServer,
   imapService: ImapService,
   db: DatabaseService,
   smtpService: SmtpService,
   results?: ResultsService,
-  _workerPool?: WorkerPool
+  workerPool?: WorkerPool
 ): void {
+  void workerPool; // wired in Phase D/E
   // Search emails tool
   server.registerTool('imap_search_emails', {
-    description: 'Search for emails in a folder. Default limit is 50 to prevent token overflow. Use search criteria to narrow results for large folders.',
+    description:
+      'Search for emails in a folder. Default limit is 50. ' +
+      'Inline mode (default for small results) caps at 100 to prevent token overflow; ' +
+      "set responseMode='handle' or 'file' to return a resultId for larger sets (up to 10,000). " +
+      "Use imap_results action='get' to page through handle results.",
     inputSchema: {
       accountId: z.string().describe('Account ID'),
       folder: z.string().default('INBOX').describe('Folder name (default: INBOX)'),
@@ -37,14 +81,15 @@ export function emailTools(
       seen: z.boolean().optional().describe('Filter by read/unread status'),
       unreadOnly: z.boolean().optional().describe('Show only unread emails (convenience parameter, same as seen=false) - Issue #82'),
       flagged: z.boolean().optional().describe('Filter by flagged status'),
-      limit: z.number().optional().default(50).describe('Maximum number of results (default: 50, max: 100 to prevent token limits)'),
+      limit: z.number().optional().default(50).describe(
+        'Maximum number of results. Capped at 100 in inline mode, 10,000 in handle/file mode.'
+      ),
+      responseMode: ResponseModeSchema,
+      storageType: StorageTypeSchema,
     }
-  }, withErrorHandling(async ({ accountId, folder, limit, ...searchCriteria }) => {
+  }, withErrorHandling(async ({ accountId, folder, limit, responseMode, storageType, ...searchCriteria }) => {
     const criteria: any = {};
-
-    // Enforce maximum limit to prevent token overflow (Issue #85)
-    const maxLimit = 100;
-    const effectiveLimit = Math.min(limit || 50, maxLimit);
+    const effectiveLimit = capLimit(limit, 50, responseMode);
 
     if (searchCriteria.from) criteria.from = searchCriteria.from;
     if (searchCriteria.to) criteria.to = searchCriteria.to;
@@ -59,16 +104,50 @@ export function emailTools(
     const messages = await imapService.searchEmails(accountId, folder, criteria);
     const limitedMessages = messages.slice(0, effectiveLimit);
 
-    // Build warnings
-    const warnings = [];
-    if (limit && limit > maxLimit) {
-      warnings.push(`Requested limit ${limit} exceeds maximum ${maxLimit}. Returning ${maxLimit} results to prevent token overflow.`);
+    // Decide: handle or inline?
+    const userId = results ? resolveUserId(db) : null;
+    if (results && userId && shouldUseHandle(responseMode, limitedMessages.length)) {
+      const rows: StoredResultRowSummary[] = limitedMessages.map(m => ({
+        uid: m.uid,
+        subject: m.subject,
+        from: m.from,
+        to: toAddress(m.to as any),
+        date: toIsoDate(m.date),
+        flags: m.flags,
+      }));
+      return maybeStoreAsHandle({
+        userId,
+        accountId,
+        toolName: 'imap_search_emails',
+        folder,
+        params: { accountId, folder, limit: effectiveLimit, ...searchCriteria },
+        rows,
+        responseMode,
+        storageType,
+        results,
+        extra: {
+          totalFound: messages.length,
+          returned: limitedMessages.length,
+        },
+      });
+    }
+
+    // Inline / backward-compatible response
+    const warnings: string[] = [];
+    if (limit && limit > Cfg.INLINE_LIMIT_CAP && (responseMode === 'inline' || responseMode === undefined || responseMode === 'auto')) {
+      warnings.push(
+        `Requested limit ${limit} exceeds inline cap ${Cfg.INLINE_LIMIT_CAP}. ` +
+        `Returning ${effectiveLimit} results; pass responseMode='handle' to fetch up to ${Cfg.HANDLE_LIMIT_CAP}.`
+      );
     }
     if (messages.length > effectiveLimit) {
-      warnings.push(`Found ${messages.length} emails but returning only ${effectiveLimit}. Use search criteria (from, subject, since, etc.) to narrow results.`);
+      warnings.push(
+        `Found ${messages.length} emails but returning only ${effectiveLimit}. ` +
+        `Use search criteria to narrow results, or pass responseMode='handle' to store the full set.`
+      );
     }
     if (messages.length > 500) {
-      warnings.push(`Large folder detected (${messages.length} emails). Consider using bulk operations with chunking for better performance.`);
+      warnings.push(`Large folder detected (${messages.length} emails). Consider responseMode='file' for very large sets.`);
     }
 
     return {
@@ -247,20 +326,48 @@ export function emailTools(
 
   // Get latest emails tool
   server.registerTool('imap_get_latest_emails', {
-    description: 'Get the latest emails from a folder',
+    description:
+      'Get the latest emails from a folder. ' +
+      "Pass responseMode='handle' to return a resultId for large counts instead of inlining.",
     inputSchema: {
       accountId: z.string().describe('Account ID'),
       folder: z.string().default('INBOX').describe('Folder name'),
       count: z.number().default(10).describe('Number of emails to retrieve'),
+      responseMode: ResponseModeSchema,
+      storageType: StorageTypeSchema,
     }
-  }, withErrorHandling(async ({ accountId, folder, count }) => {
+  }, withErrorHandling(async ({ accountId, folder, count, responseMode, storageType }) => {
+    const effectiveCount = capLimit(count, 10, responseMode);
     const messages = await imapService.searchEmails(accountId, folder, {});
-    
+
     // Sort by date descending and take the latest
     const sortedMessages = messages
       .sort((a, b) => b.date.getTime() - a.date.getTime())
-      .slice(0, count);
-    
+      .slice(0, effectiveCount);
+
+    const userId = results ? resolveUserId(db) : null;
+    if (results && userId && shouldUseHandle(responseMode, sortedMessages.length)) {
+      const rows: StoredResultRowSummary[] = sortedMessages.map(m => ({
+        uid: m.uid,
+        subject: m.subject,
+        from: m.from,
+        to: toAddress(m.to as any),
+        date: toIsoDate(m.date),
+        flags: m.flags,
+      }));
+      return maybeStoreAsHandle({
+        userId,
+        accountId,
+        toolName: 'imap_get_latest_emails',
+        folder,
+        params: { accountId, folder, count: effectiveCount },
+        rows,
+        responseMode,
+        storageType,
+        results,
+      });
+    }
+
     return {
       content: [{
         type: 'text',
@@ -492,14 +599,18 @@ export function emailTools(
   // Level 2: Bulk get emails tool
   // AUTO-CHUNKING: Automatically uses chunked processing for >50 UIDs
   server.registerTool('imap_bulk_get_emails', {
-    description: 'Bulk fetch multiple emails at once. Automatically uses chunked processing for >50 UIDs to prevent timeouts.',
+    description:
+      'Bulk fetch multiple emails at once. Automatically uses chunked processing for >50 UIDs. ' +
+      "Pass responseMode='handle' or 'file' to avoid token-budget truncation on large sets.",
     inputSchema: {
       accountId: z.string().describe('Account ID'),
       folder: z.string().default('INBOX').describe('Folder name'),
       uids: z.array(z.number()).describe('Array of email UIDs to fetch'),
       fields: z.enum(['headers', 'full', 'body']).default('headers').describe('Fields to fetch: headers (metadata only), body (with text), or full (everything)'),
+      responseMode: ResponseModeSchema,
+      storageType: StorageTypeSchema,
     }
-  }, withErrorHandling(async ({ accountId, folder, uids, fields }) => {
+  }, withErrorHandling(async ({ accountId, folder, uids, fields, responseMode, storageType }) => {
     if (uids.length === 0) {
       return {
         content: [{
@@ -520,7 +631,6 @@ export function emailTools(
     // Automatically use chunked processing for large operations
     if (uids.length > AUTO_CHUNK_THRESHOLD) {
       console.error(`[MCP] Auto-chunking fetch: ${uids.length} UIDs > ${AUTO_CHUNK_THRESHOLD} threshold`);
-
       emails = await imapService.bulkGetEmailsChunked(accountId, folder, uids, fields, {
         chunkSize: 100,
         onProgress: (processed, total) => {
@@ -528,11 +638,47 @@ export function emailTools(
         }
       });
     } else {
-      // Use standard bulk operation for small batches
       emails = await imapService.bulkGetEmails(accountId, folder, uids, fields);
     }
 
-    // Limit content for response size
+    const userId = results ? resolveUserId(db) : null;
+    if (results && userId && shouldUseHandle(responseMode, emails.length)) {
+      // Handle mode: store the full rows (no per-body truncation) and return a handle.
+      const rows: StoredResultRowSummary[] = emails.map((email: any) => ({
+        uid: email.uid,
+        subject: email.subject,
+        from: email.from,
+        to: toAddress(email.to),
+        date: toIsoDate(email.date),
+        flags: email.flags,
+        messageId: email.messageId,
+        inReplyTo: email.inReplyTo,
+        ...(fields !== 'headers' ? {
+          textContent: email.textContent,
+          htmlContent: email.htmlContent,
+          preview: typeof email.textContent === 'string'
+            ? email.textContent.slice(0, Cfg.PREVIEW_CHARS)
+            : undefined,
+        } : {}),
+      }));
+      return maybeStoreAsHandle({
+        userId,
+        accountId,
+        toolName: 'imap_bulk_get_emails',
+        folder,
+        params: { accountId, folder, uids, fields },
+        rows,
+        responseMode,
+        storageType,
+        results,
+        extra: {
+          totalRequested: uids.length,
+          chunked: uids.length > AUTO_CHUNK_THRESHOLD,
+        },
+      });
+    }
+
+    // Inline path: truncate bodies for token budget (backward compatible).
     const limitedEmails = emails.map((email: any) => ({
       ...email,
       textContent: email.textContent?.substring(0, 5000),
@@ -1018,15 +1164,19 @@ export function emailTools(
   }));
 
   server.registerTool('imap_bulk_get_emails_chunked', {
-    description: 'Bulk fetch emails with chunking for large operations (1000+ messages). Processes in chunks to avoid timeouts and circuit breaker trips.',
+    description:
+      'Bulk fetch emails with chunking for large operations (1000+ messages). ' +
+      "Defaults responseMode='handle' so large fetches don't blow the token budget.",
     inputSchema: {
       accountId: z.string().describe('Account ID'),
       folder: z.string().default('INBOX').describe('Folder name'),
       uids: z.array(z.number()).describe('Array of email UIDs to fetch'),
       fields: z.enum(['headers', 'full', 'body']).default('headers').describe('Fields to fetch: headers (metadata only), body (with text), or full (everything)'),
       chunkSize: z.number().optional().default(100).describe('Number of emails to process per chunk (default: 100)'),
+      responseMode: ResponseModeSchema,
+      storageType: StorageTypeSchema,
     }
-  }, withErrorHandling(async ({ accountId, folder, uids, fields, chunkSize }) => {
+  }, withErrorHandling(async ({ accountId, folder, uids, fields, chunkSize, responseMode, storageType }) => {
     if (uids.length === 0) {
       return {
         content: [{
@@ -1048,7 +1198,41 @@ export function emailTools(
       }
     });
 
-    // Limit content for response size
+    // This tool is explicitly for large sets; default to handle storage when available.
+    const modeOrDefault: ResponseModeOpt = responseMode ?? 'handle';
+    const userId = results ? resolveUserId(db) : null;
+    if (results && userId && shouldUseHandle(modeOrDefault, emails.length)) {
+      const rows: StoredResultRowSummary[] = emails.map((email: any) => ({
+        uid: email.uid,
+        subject: email.subject,
+        from: email.from,
+        to: toAddress(email.to),
+        date: toIsoDate(email.date),
+        flags: email.flags,
+        messageId: email.messageId,
+        inReplyTo: email.inReplyTo,
+        ...(fields !== 'headers' ? {
+          textContent: email.textContent,
+          htmlContent: email.htmlContent,
+          preview: typeof email.textContent === 'string'
+            ? email.textContent.slice(0, Cfg.PREVIEW_CHARS)
+            : undefined,
+        } : {}),
+      }));
+      return maybeStoreAsHandle({
+        userId,
+        accountId,
+        toolName: 'imap_bulk_get_emails_chunked',
+        folder,
+        params: { accountId, folder, uids, fields, chunkSize },
+        rows,
+        responseMode: modeOrDefault,
+        storageType,
+        results,
+        extra: { totalRequested: uids.length },
+      });
+    }
+
     const limitedEmails = emails.map((email: any) => ({
       ...email,
       textContent: email.textContent?.substring(0, 5000),
