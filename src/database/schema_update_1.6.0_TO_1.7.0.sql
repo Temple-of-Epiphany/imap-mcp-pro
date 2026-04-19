@@ -27,7 +27,22 @@ CREATE TABLE IF NOT EXISTS tool_results (
   last_accessed_at   INTEGER NOT NULL,
   access_count       INTEGER NOT NULL DEFAULT 0,
   FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
-  FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE SET NULL
+  FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE SET NULL,
+  -- Enforce that storage_mode values never leave required columns null:
+  --   inline rows live in rows_json+rows_iv; file rows live on disk with file_path+file_size_bytes.
+  CHECK (
+    (storage_mode = 'inline' AND rows_json IS NOT NULL AND rows_iv IS NOT NULL
+       AND file_path IS NULL)
+    OR
+    (storage_mode = 'file'   AND file_path IS NOT NULL AND file_size_bytes IS NOT NULL
+       AND rows_json IS NULL AND rows_iv IS NULL)
+  ),
+  -- storage_type='persistent' implies no expires_at; 'temp' requires one.
+  CHECK (
+    (storage_type = 'persistent' AND expires_at IS NULL)
+    OR
+    (storage_type = 'temp'       AND expires_at IS NOT NULL)
+  )
 );
 
 CREATE INDEX IF NOT EXISTS idx_tool_results_user          ON tool_results(user_id);

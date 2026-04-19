@@ -133,7 +133,7 @@ export function resultTools(
                   .filter((u): u is number => u !== null);
                 const allAttachments: any[] = [];
                 for (const uid of uids) {
-                  const list = results.listAttachments(resultId, uid);
+                  const list = results.listAttachments(ctx.userId, resultId, uid);
                   for (const a of list) {
                     allAttachments.push({
                       attachmentId: a.attachment_id,

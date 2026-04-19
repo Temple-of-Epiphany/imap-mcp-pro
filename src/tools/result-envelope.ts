@@ -78,7 +78,6 @@ function asMcpText(obj: unknown): McpTextResult {
 export async function maybeStoreAsHandle(opts: MaybeStoreOpts): Promise<McpTextResult> {
   const mode: ResponseMode = opts.responseMode ?? 'auto';
   const n = opts.rows.length;
-  const sizeBytes = JSON.stringify(opts.rows).length;
 
   // Decide effective mode
   let effective: 'inline' | 'handle' | 'file';
@@ -89,13 +88,17 @@ export async function maybeStoreAsHandle(opts: MaybeStoreOpts): Promise<McpTextR
   } else if (mode === 'file') {
     effective = 'file';
   } else {
-    // auto
-    if (n > Cfg.FILE_THRESHOLD || sizeBytes > Cfg.INLINE_BYTE_BUDGET * 4) {
+    // auto - only pay for size calculation when count alone is ambiguous
+    if (n > Cfg.FILE_THRESHOLD) {
       effective = 'file';
-    } else if (n > Cfg.INLINE_THRESHOLD || sizeBytes > Cfg.INLINE_BYTE_BUDGET) {
+    } else if (n > Cfg.INLINE_THRESHOLD) {
       effective = 'handle';
     } else {
-      effective = 'inline';
+      // Small row count: measure bytes to catch e.g. 5 huge rows
+      const sizeBytes = JSON.stringify(opts.rows).length;
+      if (sizeBytes > Cfg.INLINE_BYTE_BUDGET * 4) effective = 'file';
+      else if (sizeBytes > Cfg.INLINE_BYTE_BUDGET) effective = 'handle';
+      else effective = 'inline';
     }
   }
 

@@ -273,7 +273,7 @@ export class ResultsService {
     opts: { limit?: number; toolName?: string; storageType?: StorageType } = {}
   ): StoredResultEnvelope[] {
     const limit = opts.limit ?? 20;
-    const params: any[] = [userId];
+    const params: (string | number)[] = [userId];
     let where = 'user_id = ?';
     if (opts.toolName) {
       where += ' AND tool_name = ?';
@@ -377,7 +377,7 @@ export class ResultsService {
     return attachmentId;
   }
 
-  listAttachments(resultId: string, messageUid?: number): Array<{
+  listAttachments(userId: string, resultId: string, messageUid?: number): Array<{
     attachment_id: string;
     message_uid: number | null;
     filename: string;
@@ -388,20 +388,25 @@ export class ResultsService {
     checksum_sha256: string | null;
     skipped: number;
   }> {
+    // User-isolation: ensure the caller owns the result before returning
+    // any attachment rows. Joining through tool_results prevents user A from
+    // enumerating user B's attachments by guessing a resultId.
     if (messageUid !== undefined) {
       return this.db.getDb().prepare(`
-        SELECT attachment_id, message_uid, filename, content_type, size_bytes,
-               file_path, file_iv, checksum_sha256, skipped
-        FROM result_attachments
-        WHERE result_id = ? AND message_uid = ?
-      `).all(resultId, messageUid) as any;
+        SELECT a.attachment_id, a.message_uid, a.filename, a.content_type,
+               a.size_bytes, a.file_path, a.file_iv, a.checksum_sha256, a.skipped
+        FROM result_attachments a
+        INNER JOIN tool_results r ON r.result_id = a.result_id
+        WHERE a.result_id = ? AND a.message_uid = ? AND r.user_id = ?
+      `).all(resultId, messageUid, userId) as any;
     }
     return this.db.getDb().prepare(`
-      SELECT attachment_id, message_uid, filename, content_type, size_bytes,
-             file_path, file_iv, checksum_sha256, skipped
-      FROM result_attachments
-      WHERE result_id = ?
-    `).all(resultId) as any;
+      SELECT a.attachment_id, a.message_uid, a.filename, a.content_type,
+             a.size_bytes, a.file_path, a.file_iv, a.checksum_sha256, a.skipped
+      FROM result_attachments a
+      INNER JOIN tool_results r ON r.result_id = a.result_id
+      WHERE a.result_id = ? AND r.user_id = ?
+    `).all(resultId, userId) as any;
   }
 
   // ---------- internals ----------

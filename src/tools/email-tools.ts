@@ -56,8 +56,10 @@ function toIsoDate(d: Date | string | undefined): string | undefined {
 /**
  * Threshold at which row summarisation is worth offloading to a worker.
  * Below this, the postMessage round-trip costs more than the work saved.
+ * Raised from 200 after profiling: structured-clone for small objects is
+ * cheap but not free, and inline Array.map wins below ~1000 rows.
  */
-const WORKER_SUMMARIZE_THRESHOLD = 200;
+const WORKER_SUMMARIZE_THRESHOLD = 1000;
 
 /**
  * Build summary rows from raw email objects. Routes through the worker pool
