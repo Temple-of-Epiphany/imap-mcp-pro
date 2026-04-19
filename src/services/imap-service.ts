@@ -13,6 +13,7 @@
 import { ImapFlow } from 'imapflow';
 import type { FetchMessageObject, MailboxObject, ListResponse } from 'imapflow';
 import { simpleParser } from 'mailparser';
+import { getProviderByEmail } from '../providers/email-providers.js';
 import {
   ImapAccount,
   EmailMessage,
@@ -366,13 +367,40 @@ export class ImapService {
       const errorMessage = error instanceof Error ? error.message : String(error);
       let failureReason = errorMessage;
 
+      // Issue #91: Some providers disable IMAP at the account level (not
+      // auth-denied but service-disabled). Surface a provider-specific hint
+      // using the email-providers directory when possible.
+      const lower = errorMessage.toLowerCase();
+      const imapDisabled =
+        lower.includes('imap access is disabled') ||
+        lower.includes('imap is disabled') ||
+        lower.includes('web login required') ||
+        lower.includes('[alert] please log in') ||
+        (lower.includes('authenticationfailed') && lower.includes('imap'));
+
+      const provider = getProviderByEmail(account.user);
+
+      if (imapDisabled) {
+        const helpSuffix = provider?.helpUrl
+          ? ` Enable IMAP in ${provider.displayName} settings: ${provider.helpUrl}`
+          : ' Enable IMAP access in your provider settings (typically under account security or forwarding settings).';
+        failureReason = `IMAP access disabled for ${account.user}`;
+        const enhancedError = new Error(`${failureReason}.${helpSuffix}`);
+        enhancedError.name = 'ImapDisabledError';
+        this.recordCircuitBreakerFailure(accountId, failureReason);
+        throw enhancedError;
+      }
+
       // Enhance error message for authentication failures
-      if (errorMessage.toLowerCase().includes('auth') ||
-          errorMessage.toLowerCase().includes('invalid credentials') ||
-          errorMessage.toLowerCase().includes('login') ||
-          errorMessage.toLowerCase().includes('authentication failed')) {
+      if (lower.includes('auth') ||
+          lower.includes('invalid credentials') ||
+          lower.includes('login') ||
+          lower.includes('authentication failed')) {
         failureReason = `Authentication failed for ${account.user}`;
-        const enhancedError = new Error(`${failureReason}. Please verify your password. Many providers (Gmail, Yahoo, Outlook, etc.) require app-specific passwords instead of your regular account password.`);
+        const appPwHint = provider?.requiresAppPassword && provider?.helpUrl
+          ? ` ${provider.displayName} requires an app-specific password; generate one at ${provider.helpUrl}.`
+          : ' Many providers (Gmail, Yahoo, Outlook, etc.) require app-specific passwords instead of your regular account password.';
+        const enhancedError = new Error(`${failureReason}. Please verify your password.${appPwHint}`);
         enhancedError.name = 'AuthenticationError';
         this.recordCircuitBreakerFailure(accountId, failureReason);
         throw enhancedError;
