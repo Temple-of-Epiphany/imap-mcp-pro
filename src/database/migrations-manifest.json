@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "1.7.0",
+  "description": "Release-indexed manifest of schema migrations. Each entry is applied in order via the `schema_version` ledger. A migration is complete when its `to` version is present in the ledger.",
+  "migrations": [
+    {
+      "from": "1.0.0",
+      "to": "1.1.0",
+      "file": "schema_update_1.0.0_TO_1.1.0.sql",
+      "description": "Add subscription management tables"
+    },
+    {
+      "from": "1.1.0",
+      "to": "1.2.0",
+      "file": "schema_update_1.1.0_TO_1.2.0.sql",
+      "description": "Add unsubscribe execution tracking"
+    },
+    {
+      "from": "1.2.0",
+      "to": "1.3.0",
+      "file": "schema_update_1.2.0_TO_1.3.0.sql",
+      "description": "Release 1.3.0 additions"
+    },
+    {
+      "from": "1.3.0",
+      "to": "1.4.0",
+      "file": "schema_update_1.3.0_TO_1.4.0.sql",
+      "description": "Release 1.4.0 additions"
+    },
+    {
+      "from": "1.4.0",
+      "to": "1.5.0",
+      "file": "schema_update_1.4.0_TO_1.5.0.sql",
+      "description": "Release 1.5.0 additions"
+    },
+    {
+      "from": "1.5.0",
+      "to": "1.6.0",
+      "file": "schema_update_1.5.0_TO_1.6.0.sql",
+      "description": "Release 1.6.0 additions"
+    },
+    {
+      "from": "1.6.0",
+      "to": "1.7.0",
+      "file": "schema_update_1.6.0_TO_1.7.0.sql",
+      "rollbackFile": "schema_update_1.6.0_TO_1.7.0.down.sql",
+      "description": "Add tool_results + result_attachments cache for MCP context reduction (PR #94)"
+    }
+  ]
+}

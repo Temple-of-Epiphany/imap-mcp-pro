@@ -6,7 +6,7 @@
 # Date: 2025-11-06
 # Version: 1.0.0
 
-.PHONY: help install uninstall start stop restart status logs update test build clean backup restore
+.PHONY: help install uninstall start stop restart status logs update test build clean backup restore migrate migrate-status migrate-rollback migrate-dry-run
 
 # Detect OS
 UNAME_S := $(shell uname -s 2>/dev/null || echo "Windows")
@@ -232,6 +232,18 @@ backup:
 
 restore:
 	@bash scripts/restore.sh $(FILE)
+
+migrate:
+	@npm run migrate
+
+migrate-status:
+	@npm run migrate:status
+
+migrate-dry-run:
+	@npm run migrate:dry-run
+
+migrate-rollback:
+	@npm run migrate:rollback -- $(N)
 
 test:
 	@echo "Running tests..."

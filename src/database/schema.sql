@@ -14,6 +14,11 @@ CREATE TABLE IF NOT EXISTS schema_version (
   description TEXT
 );
 
+-- schema.sql is a monolithic "current state" snapshot. When it runs on a fresh
+-- DB it establishes the full schema up to the version below. The individual
+-- schema_update_X.Y.Z_TO_X.Y.Z.sql files are for incremental upgrades of
+-- databases that were created at an earlier version.
+-- Keep these stamps in lockstep with migrations-manifest.json.
 INSERT OR IGNORE INTO schema_version (version, description)
 VALUES ('1.0.0', 'Initial schema with MSP multi-tenant support');
 
@@ -22,6 +27,21 @@ VALUES ('1.1.0', 'Add subscription management tables');
 
 INSERT OR IGNORE INTO schema_version (version, description)
 VALUES ('1.2.0', 'Add unsubscribe execution tracking');
+
+INSERT OR IGNORE INTO schema_version (version, description)
+VALUES ('1.3.0', 'Release 1.3.0 additions');
+
+INSERT OR IGNORE INTO schema_version (version, description)
+VALUES ('1.4.0', 'Release 1.4.0 additions');
+
+INSERT OR IGNORE INTO schema_version (version, description)
+VALUES ('1.5.0', 'Release 1.5.0 additions');
+
+INSERT OR IGNORE INTO schema_version (version, description)
+VALUES ('1.6.0', 'Release 1.6.0 additions');
+
+INSERT OR IGNORE INTO schema_version (version, description)
+VALUES ('1.7.0', 'Add tool_results + result_attachments cache for MCP context reduction (PR #94)');
 
 -- Users/Organizations for MSP architecture
 CREATE TABLE IF NOT EXISTS users (
