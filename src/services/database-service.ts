@@ -36,6 +36,7 @@ import {
   DatabaseConfig,
   EncryptedData
 } from '../types/database-types.js';
+import { MigrationService } from './migration-service.js';
 
 export class DatabaseService {
   private db: Database.Database;
@@ -180,7 +181,8 @@ export class DatabaseService {
    * Initialize database schema
    */
   private initializeSchema(): void {
-    const schemaPath = path.join(__dirname, '../database/schema.sql');
+    const schemaDir = path.join(__dirname, '../database');
+    const schemaPath = path.join(schemaDir, 'schema.sql');
 
     if (!fs.existsSync(schemaPath)) {
       throw new Error(`Schema file not found: ${schemaPath}`);
@@ -188,13 +190,14 @@ export class DatabaseService {
 
     const schema = fs.readFileSync(schemaPath, 'utf-8');
 
-    // Execute entire schema at once - better-sqlite3 handles multi-statement execution
+    // schema.sql uses CREATE TABLE IF NOT EXISTS throughout, so it's safe to
+    // run on both new and existing databases.
     try {
       this.db.exec(schema);
-      console.error('[DatabaseService] Schema initialized successfully');
+      console.error('[DatabaseService] Base schema applied');
     } catch (error) {
       console.error('[DatabaseService] FATAL: Schema initialization failed:', error);
-      throw error;  // Don't swallow this error - it's critical
+      throw error;
     }
 
     // Additive column migrations — safe to run on both new and existing databases.
@@ -211,9 +214,34 @@ export class DatabaseService {
         if (!e?.message?.includes('duplicate column name')) {
           console.error('[DatabaseService] Migration warning:', e?.message);
         }
-        // Column already exists — skip silently
       }
     }
+
+    // Issue #36/#37: run versioned schema_update_*.sql migrations that haven't
+    // been recorded in schema_version yet. Each migration is one transaction.
+    // Disabled by IMAP_MCP_SKIP_MIGRATIONS=1 for debug scenarios.
+    if (process.env.IMAP_MCP_SKIP_MIGRATIONS !== '1') {
+      const migrator = new MigrationService(this.db, schemaDir);
+      const result = migrator.migrate({
+        onStep: (s) => console.error(`[DatabaseService] Applying migration ${s.fromVersion} -> ${s.toVersion} (${s.fileName})`),
+      });
+      if (result.failed) {
+        console.error(
+          `[DatabaseService] FATAL: migration ${result.failed.file} failed: ${result.failed.error}`
+        );
+        throw new Error(`Migration ${result.failed.file} failed: ${result.failed.error}`);
+      }
+      if (result.applied.length) {
+        console.error(`[DatabaseService] Applied ${result.applied.length} migration(s)`);
+      }
+    }
+  }
+
+  /**
+   * Return migration status without applying anything. Used by the CLI.
+   */
+  getMigrationService(): MigrationService {
+    return new MigrationService(this.db, path.join(__dirname, '../database'));
   }
 
   // ===================
