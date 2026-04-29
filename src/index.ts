@@ -12,6 +12,8 @@ import { FileExportService } from './services/file-export-service.js';
 import { ResultsService } from './services/results-service.js';
 import { WorkerPool } from './utils/worker-pool.js';
 import { registerTools } from './tools/index.js';
+import { dispatchCli, EXIT_CODES } from './config/cli.js';
+import { loadConfig, ConfigError } from './config/loader.js';
 
 // Silence any package version output to stdout
 const originalWrite = process.stdout.write.bind(process.stdout);
@@ -24,6 +26,28 @@ const originalWrite = process.stdout.write.bind(process.stdout);
 };
 
 dotenv.config();
+
+// Short-circuit CLI flags (--print-config-schema, --validate-config). Each
+// handler exits the process; if none matched, dispatchCli returns true.
+await dispatchCli({}).catch((e: unknown) => {
+  if (e instanceof ConfigError) {
+    process.stderr.write(`${e.message}\n`);
+    process.exit(EXIT_CODES.CONFIG_ERROR);
+  }
+  throw e;
+});
+
+// Load and validate config for normal startup. Phase 3 will wire this
+// through to the services; Phase 2 ensures misconfiguration fails fast.
+try {
+  loadConfig();
+} catch (e) {
+  if (e instanceof ConfigError) {
+    process.stderr.write(`${e.message}\n`);
+    process.exit(EXIT_CODES.CONFIG_ERROR);
+  }
+  throw e;
+}
 
 const server = new McpServer({
   name: 'imap-mcp-pro',
