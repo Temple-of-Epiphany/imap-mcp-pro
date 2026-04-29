@@ -36,6 +36,19 @@ export const EXIT_CODES = {
 } as const;
 
 /**
+ * Write to stdout and wait for the OS to drain the buffer before exiting.
+ * Without this, large outputs (e.g. the tools manifest) can be truncated
+ * because process.exit terminates before async writes finish.
+ */
+async function writeAndExit(text: string, code: number): Promise<never> {
+  await new Promise<void>((resolve) => {
+    if (process.stdout.write(text, 'utf8')) resolve();
+    else process.stdout.once('drain', () => resolve());
+  });
+  process.exit(code);
+}
+
+/**
  * Inspect argv, dispatch to the appropriate short-circuit handler, and exit.
  * Returns true if the process should continue with normal startup, false if
  * a short-circuit handler ran (caller should exit).
@@ -63,8 +76,7 @@ export async function dispatchCli(opts: DispatcherOptions = {}): Promise<boolean
       name: 'ServerConfig',
       $refStrategy: 'none',
     });
-    process.stdout.write(JSON.stringify(schema, null, 2) + '\n');
-    process.exit(EXIT_CODES.OK);
+    await writeAndExit(JSON.stringify(schema, null, 2) + '\n', EXIT_CODES.OK);
   }
 
   if (flags.validateOnly) {
@@ -96,8 +108,7 @@ export async function dispatchCli(opts: DispatcherOptions = {}): Promise<boolean
       process.exit(EXIT_CODES.DEPENDENCY_ERROR);
     }
     const manifest = await opts.printToolsManifestHandler();
-    process.stdout.write(JSON.stringify(manifest, null, 2) + '\n');
-    process.exit(EXIT_CODES.OK);
+    await writeAndExit(JSON.stringify(manifest, null, 2) + '\n', EXIT_CODES.OK);
   }
 
   return true;
