@@ -36,3 +36,8 @@ temp/
 
 # User configuration (contains sensitive data)
 .imap-mcp/
+
+# Claude Desktop Extension build artifacts (Phase 4)
+dxt/build/
+*.mcpb
+*.mcpb.sha256
