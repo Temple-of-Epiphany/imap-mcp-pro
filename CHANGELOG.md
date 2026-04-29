@@ -5,6 +5,59 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.14.0] - 2026-04-29
+
+### Anthropic SDK Alignment & Claude Desktop Extension (.mcpb)
+
+Major initiative aligning the server with the official `@modelcontextprotocol/sdk` (Node) and shipping a Claude Desktop Extension (`.mcpb`). End users can now install via Settings → Extensions and configure through a native settings panel — no terminal or JSON config required. Tracker: #102.
+
+#### ✨ Added
+
+- **Claude Desktop Extension packaging** (#106, closes #79)
+  - `dxt/manifest.template.json` — DXT 0.1 manifest with `server.type: "node"`, full `user_config` panel (data dir, log level, allowed attachment dirs, encryption key, max attachment size, auto-create sent folder, user ID), and 81-tool catalog merged at build time.
+  - `dxt/build.mjs` — 8-step build script: build → stage → prune → rebuild native deps → assets → tools manifest → zip → SHA-256.
+  - `dxt/icon.png` — 256×256 derived from existing `AppIcon.icns`.
+  - Build artifact: `dxt/build/imap-mcp-pro-{version}-{platform}.mcpb`.
+  - Build verified on macOS arm64 (35.84 MB archive).
+- **Configuration surface refactor** (#104)
+  - `src/config/server-config.ts` — Zod schema for 32 fields across 8 groups, every field with type, description, default, and validation bounds.
+  - `src/config/loader.ts` — multi-source loader (CLI > env > file > defaults), YAML/TOML/JSON config files, provenance tracking per leaf.
+  - `src/config/cli.ts` — short-circuit dispatcher with documented exit codes.
+  - New CLI flags: `--print-config-schema`, `--validate-config`, `--print-tools-manifest`.
+- **Three-stage startup hardening** (#105, closes #80)
+  - `src/startup.ts` — `timeStage()` orchestrator with structured ISO-timestamped stderr logs.
+  - Pre-handshake budget enforced at 2s (verified 12 ms on reference hardware).
+  - Documented exit codes (1=CONFIG, 2=DATABASE, 3=DEPENDENCY, 4=PERMISSION).
+  - Explicit MCP capability negotiation: `{ tools: { listChanged: false } }`.
+- **SDK upgrade** (#103) — `@modelcontextprotocol/sdk@^1.15.1 → ^1.22.0`. Brings `registerTool` accepting `ZodType<object>`, SEP-986 tool name format, SEP-1319 typecheck fixes, SEP-1034/1330 elicitation defaults.
+- **Audit deliverable** — `docs/sdk_audit_2026-04-29.md` with full inventory of imports, tool catalog, env vars, and pre-handshake hot-spots.
+- **Documentation** (#107)
+  - `EXAMPLES.md` — seven worked Claude conversation transcripts.
+  - `docs/ARCHITECTURE.md` — contributor reference: layout, startup stages, response-shape policy, tool-add recipe, migration recipe.
+  - `README.md` — Claude Desktop Extension install instructions, troubleshooting section with per-platform log paths, doc index.
+
+#### 🔧 Changed
+
+- `src/index.ts` refactored to use the three-stage startup orchestrator. All existing behavior preserved; structured logs added.
+- `dotenv.config()` still runs before config loader so local `.env` files continue to populate `process.env`.
+
+#### 🛡️ Backward compatibility
+
+Every `IMAP_MCP_*` env var documented before this release maps to a `ServerConfig` field via `ENV_VAR_MAPPING`. Also `MCP_USER_ID` and `CLAUDE_DESKTOP_EXTENSION`. **No breaking changes for existing users.** Verified by running `--validate-config` against existing setups. Migration guide: see `MIGRATION.md`.
+
+#### ⚠️ Known cap
+
+SDK pin held at `1.22.0` (not the latest `1.29.0`) — versions `1.23.0+` introduced Zod v3/v4 dual-support conditional types that overflow TypeScript's type-checker recursion with our 80-tool registration surface. Bisected; documented in the SDK audit. Path forward: migrate this project to Zod v4, or add explicit type annotations at each `registerTool` call site. Tracked as a post-release follow-up.
+
+#### 🧪 Testing
+
+- Build clean (`npm run build`)
+- Server starts under SDK 1.22, all 81 tools register, handshake completes, SIGTERM clean
+- All four config sources (default/file/env/cli) round-trip correctly with provenance
+- Bad enum config exits with code 1 and clear error
+- `.mcpb` archive structure validated (`unzip -l`); server runs from extracted layout
+- Migration system applied 1.2.0 → 1.7.0 cleanly on a real database
+
 ## [2.11.0] - 2025-11-07
 
 ### Automated Unsubscribe Execution

@@ -1,0 +1,102 @@
+{
+  "dxt_version": "0.1",
+  "name": "imap-mcp-pro",
+  "display_name": "IMAP MCP Pro",
+  "version": "__VERSION__",
+  "description": "Production-grade IMAP & SMTP integration for Claude Desktop. Connect any IMAP account, search and triage at scale, send messages with attachments, and run spam/domain checks via the UserCheck integration.",
+  "long_description": "IMAP MCP Pro turns Claude Desktop into a full-featured email client. It connects to any standard IMAP server (Gmail, Outlook, Fastmail, iCloud, Dovecot, etc.), supports multiple accounts per user, and exposes 80+ tools for searching, reading, sending, organizing, and analyzing email — including bulk operations on tens of thousands of messages without blowing your token budget thanks to the resource-handle response system.\n\nKey capabilities:\n- Multi-account IMAP via secure encrypted credential storage (AES-256-GCM)\n- Send mail through SMTP with backward-compatible attachment handling\n- Bulk search/move/copy/delete with auto-chunking and worker-pool parsing\n- Three-tier response (inline / handle / file-backed) keeps results small\n- UserCheck integration for spam-sender detection\n- DNS firewall checks for outbound link safety\n- 80+ MCP tools — every IMAP4rev2 (RFC 9051) operation we use is implemented\n\nThis extension installs a self-contained Node runtime and stores credentials in your OS keyring when run as a Claude Desktop extension.",
+  "author": {
+    "name": "Colin Bitterfield",
+    "email": "colin.bitterfield@templeofepiphany.com",
+    "url": "https://github.com/cbitterfield"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Temple-of-Epiphany/imap-mcp-pro"
+  },
+  "homepage": "https://github.com/Temple-of-Epiphany/imap-mcp-pro",
+  "documentation": "https://github.com/Temple-of-Epiphany/imap-mcp-pro#readme",
+  "support": "https://github.com/Temple-of-Epiphany/imap-mcp-pro/issues",
+  "icon": "icon.png",
+  "screenshots": [],
+  "keywords": ["email", "imap", "smtp", "mailbox", "mcp", "spam", "outlook", "gmail"],
+  "license": "MIT",
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": ["darwin", "win32", "linux"]
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "server/dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/dist/index.js"],
+      "env": {
+        "CLAUDE_DESKTOP_EXTENSION": "true",
+        "IMAP_MCP_DATABASE_PATH": "${user_config.database_path}/data.db",
+        "IMAP_MCP_LOG_LEVEL": "${user_config.log_level}",
+        "IMAP_MCP_ALLOWED_ATTACHMENT_DIRS": "${user_config.allowed_attachment_dirs}",
+        "IMAP_MCP_ENCRYPTION_KEY": "${user_config.encryption_key}",
+        "IMAP_MCP_ATTACHMENT_MAX_BYTES": "${user_config.max_attachment_size_bytes}",
+        "IMAP_MCP_AUTO_CREATE_SENT_FOLDER": "${user_config.auto_create_sent_folder}",
+        "MCP_USER_ID": "${user_config.mcp_user_id}"
+      }
+    }
+  },
+  "tools": [],
+  "user_config": {
+    "database_path": {
+      "type": "directory",
+      "title": "Data Directory",
+      "description": "Where IMAP MCP Pro stores its SQLite database, staged uploads, and result cache. Choose a writable location.",
+      "default": "${HOME}/.imap-mcp-pro",
+      "required": true
+    },
+    "encryption_key": {
+      "type": "string",
+      "title": "Encryption Key (optional)",
+      "description": "Master key for credential storage. Leave blank to use the system keyring (recommended on Claude Desktop).",
+      "sensitive": true,
+      "required": false
+    },
+    "allowed_attachment_dirs": {
+      "type": "directory",
+      "title": "Allowed Attachment Directories",
+      "description": "Directories the server may read attachments from for path-based attachment sends. Add only directories that contain files you want to send. Empty list disables the feature.",
+      "multiple": true,
+      "default": [],
+      "required": false
+    },
+    "log_level": {
+      "type": "string",
+      "title": "Log Level",
+      "description": "Verbosity of server logs. Logs are captured by Claude Desktop at ~/Library/Logs/Claude/mcp-server-imap-mcp-pro.log (macOS).",
+      "enum": ["DEBUG", "INFO", "WARNING", "ERROR"],
+      "default": "INFO",
+      "required": true
+    },
+    "max_attachment_size_bytes": {
+      "type": "number",
+      "title": "Maximum Attachment Size (bytes)",
+      "description": "Reject attachments larger than this value in bytes. Default 25 MiB.",
+      "default": 26214400,
+      "min": 1048576,
+      "max": 104857600,
+      "required": true
+    },
+    "auto_create_sent_folder": {
+      "type": "boolean",
+      "title": "Auto-Create Sent Folder",
+      "description": "Create a Sent folder automatically if one cannot be detected via RFC 6154 SPECIAL-USE.",
+      "default": false,
+      "required": false
+    },
+    "mcp_user_id": {
+      "type": "string",
+      "title": "User ID",
+      "description": "Username for tool-context resolution (multi-tenant deployments). Single-user installs can leave as 'default'.",
+      "default": "default",
+      "required": true
+    }
+  }
+}
