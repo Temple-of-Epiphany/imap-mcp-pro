@@ -76,6 +76,25 @@ IMAP MCP Pro supports multi-user configurations for Managed Service Providers (M
 
 ## Installation
 
+### Claude Desktop Extension (.mcpb) — Recommended for end users
+
+The fastest path to a working setup is to install IMAP MCP Pro as a **Claude Desktop Extension** (`.mcpb`). This bundles everything (Node runtime, dependencies, native modules) into one archive and renders a native settings panel in Claude Desktop — no terminal, no JSON editing.
+
+1. Download the latest `.mcpb` for your platform from the [Releases page](https://github.com/Temple-of-Epiphany/imap-mcp-pro/releases) (e.g. `imap-mcp-pro-2.14.0-macos-arm64.mcpb`).
+2. In Claude Desktop, open **Settings → Extensions → Install Extension…** and select the downloaded file.
+3. Fill in the settings panel that appears:
+   - **Data Directory** — where to store the database and cache (default: `~/.imap-mcp-pro`)
+   - **Log Level** — `INFO` is fine for day-to-day; `DEBUG` for troubleshooting
+   - **Maximum Attachment Size** — default 25 MiB
+   - **Allowed Attachment Directories** — *optional*, only needed for path-based attachment sends
+   - **Encryption Key** — leave blank to use the system keyring (recommended)
+   - **User ID** — `default` for single-user installs
+4. Click **Enable**. Run a quick test by asking Claude `What IMAP accounts do I have?`.
+
+To add accounts after install, ask Claude to use `imap_add_account_auto` (with provider auto-detection) or use the Web UI: `imap-setup` from the command line.
+
+To upgrade, download a newer `.mcpb` and re-install — your data directory is preserved.
+
 ### macOS — Package Installer (Recommended)
 
 Download the latest `.dmg` from the [Releases page](https://github.com/Temple-of-Epiphany/imap-mcp-pro/releases):
@@ -658,6 +677,58 @@ The server automatically configures SMTP settings based on your IMAP provider. I
   - Host: imap.mail.yahoo.com
   - Port: 993
   - Requires app-specific password
+
+## Troubleshooting
+
+### Where do logs go?
+
+Claude Desktop captures the server's stderr to per-server log files:
+
+| Platform | Path |
+|---|---|
+| macOS | `~/Library/Logs/Claude/mcp-server-imap-mcp-pro.log` |
+| Windows | `%APPDATA%\Claude\logs\mcp-server-imap-mcp-pro.log` |
+| Linux | `~/.local/state/Claude/logs/mcp-server-imap-mcp-pro.log` |
+
+Look for lines like `[startup] stage=pre-handshake outcome=ok duration_ms=12` to confirm the server is starting cleanly. If pre-handshake exceeds 2 s, you'll see an `outcome=warning` line.
+
+### Common failures
+
+**"Configuration valid" but tools fail at runtime**
+Run `node /path/to/server/dist/index.js --validate-config` (or via the .mcpb extension's bundled server). It prints every resolved value and flags filesystem permission issues separately from schema errors.
+
+**Database errors on startup (exit 2)**
+Usually permissions on the data directory. Check `database.path` from `--validate-config` — the parent directory must be writable.
+
+**Tools return "warming up" responses on first call**
+Background services are still initializing (post-handshake stage). Wait a few seconds and retry. If it persists, check the log for an `outcome=error` line.
+
+**Server appears unresponsive in Claude Desktop**
+Most often a pre-handshake timeout. Confirm with `--validate-config` first; if that's OK, check the log for the pre-handshake `duration_ms` — anything over 2000 will time out.
+
+**Configuration not picking up env var**
+Run `--validate-config` and look at the `[source]` tag next to the field. Sources, highest precedence first: `cli` > `env` > `file` > `default`. If `[default]` is shown when you expected `[env]`, the env var name may be wrong — see the canonical mapping in `src/config/server-config.ts:ENV_VAR_MAPPING`.
+
+### Inspecting the config schema
+
+```bash
+node dist/index.js --print-config-schema | jq .
+```
+
+Returns the full JSON Schema for `ServerConfig` — type, defaults, descriptions, validation bounds for every field.
+
+### Inspecting the tool catalog
+
+```bash
+node dist/index.js --print-tools-manifest | jq '.tools | length'
+```
+
+## Documentation
+
+- [`EXAMPLES.md`](./EXAMPLES.md) — worked Claude conversation transcripts for common workflows
+- [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — codebase map, startup stages, response-shape policy, contributor guide
+- [`docs/sdk_audit_2026-04-29.md`](./docs/sdk_audit_2026-04-29.md) — MCP SDK alignment audit
+- RFC 9051 (IMAP4rev2) full text in `rfc/rfc9051.txt`
 
 ## License
 
