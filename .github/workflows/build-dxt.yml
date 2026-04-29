@@ -1,0 +1,115 @@
+name: Build .mcpb extension
+
+# Triggers:
+#   - tag push matching v*.*.* — produces release artifacts
+#   - manual workflow_dispatch — produces preview artifacts (no release upload)
+#
+# Builds a Claude Desktop Extension (.mcpb) for each supported platform via
+# dxt/build.mjs. better-sqlite3 ships native bindings, so each platform must
+# build its own archive.
+#
+# Phase 6 (#108) of the SDK alignment & .mcpb tracker (#102).
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write  # needed for release upload
+
+jobs:
+  build:
+    name: Build (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14         # arm64
+            label: macos-arm64
+          - os: macos-13         # x86_64
+            label: macos-x64
+          - os: windows-latest
+            label: windows-x64
+          - os: ubuntu-latest
+            label: linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build .mcpb
+        run: node dxt/build.mjs
+
+      - name: Verify artifact exists
+        shell: bash
+        run: |
+          ls -la dxt/build/*.mcpb
+          ls -la dxt/build/*.mcpb.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcpb-${{ matrix.label }}
+          path: |
+            dxt/build/*.mcpb
+            dxt/build/*.mcpb.sha256
+          retention-days: 30
+
+  release:
+    name: Attach to GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout (for release notes)
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-artifacts
+
+      - name: Flatten artifacts
+        run: |
+          mkdir -p release-files
+          find dist-artifacts -type f \( -name '*.mcpb' -o -name '*.mcpb.sha256' \) -exec cp {} release-files/ \;
+          ls -la release-files/
+
+      - name: Build release notes preamble
+        run: |
+          {
+            echo '## Claude Desktop Extension (.mcpb)'
+            echo ''
+            echo 'Per-platform `.mcpb` archives. SHA-256 checksums are in the matching `.sha256` files.'
+            echo ''
+            echo 'To install: open Claude Desktop → Settings → Extensions → Install Extension… and choose the `.mcpb` for your platform.'
+            echo ''
+            echo '### Checksums'
+            echo ''
+            echo '```'
+            cat release-files/*.sha256 || true
+            echo '```'
+            echo ''
+            echo 'Full changelog: see [CHANGELOG.md](./CHANGELOG.md).'
+          } > release-body.md
+
+      - name: Create / update release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-files/*
+          body_path: release-body.md
+          draft: false
+          prerelease: false
+          # Append to existing notes if the release already exists
+          append_body: true
