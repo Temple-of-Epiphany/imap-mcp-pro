@@ -320,9 +320,16 @@ export class ImapService {
         console.error(`[IMAP] Connection error for account ${accountId}:`, err.message);
         this.updateConnectionState(accountId, ConnectionState.ERROR);
 
-        // Capture failure reason for circuit breaker
-        const errorReason = err.message || 'Connection error';
-        this.recordCircuitBreakerFailure(accountId, errorReason);
+        // Note: we deliberately do NOT trip the circuit breaker on transient
+        // socket events. Idle disconnects are normal for many IMAP servers
+        // (Hostinger, Yahoo, some Dovecot configs drop connections aggressively),
+        // and the auto-reconnect path absorbs them. Tripping the breaker here
+        // produced a false-positive OPEN state with `failedOperations: 0`
+        // because connection-level errors bypass recordOperationMetric.
+        //
+        // Hard failures during connection establishment (auth, IMAP-disabled,
+        // DNS, etc.) still trip the breaker via the catch-block in connect()
+        // below, and so do operations that exhaust withRetry.
 
         // Attempt reconnect
         this.scheduleReconnect(accountId);
@@ -1470,6 +1477,16 @@ export class ImapService {
     cb.lastFailureTime = new Date();
     cb.successCount = 0;
 
+    // Keep operation metrics in sync with the breaker so users can correlate
+    // a tripped breaker with a non-zero failedOperations count. (Previously
+    // connect()-time terminal failures bumped only the breaker, leaving the
+    // metric stuck at 0 — confusing during diagnosis.)
+    if (metadata.metrics) {
+      metadata.metrics.failedOperations++;
+      metadata.metrics.totalOperations++;
+      metadata.metrics.lastOperationTime = new Date();
+    }
+
     // Store the failure reason for better diagnostics
     if (!cb.lastFailureReason) {
       (cb as any).lastFailureReason = reason;
@@ -1510,6 +1527,65 @@ export class ImapService {
       cb.lastStateChange = new Date();
       console.error(`[CircuitBreaker] CLOSED for account ${accountId} (${cb.successCount} successes)`);
     }
+  }
+
+  /**
+   * Manually reset the circuit breaker for an account back to CLOSED with
+   * zero counters. Used by the imap_reset_circuit_breaker tool when a user
+   * wants immediate recovery rather than waiting on the timeout.
+   * Returns the previous state for diagnostics.
+   */
+  resetCircuitBreaker(accountId: string): {
+    previousState: string;
+    failureCountBefore: number;
+    lastFailureReason?: string;
+  } | null {
+    const metadata = this.connectionMetadata.get(accountId);
+    if (!metadata?.circuitBreaker) return null;
+    const cb = metadata.circuitBreaker;
+    const previous = {
+      previousState: cb.state,
+      failureCountBefore: cb.failureCount,
+      lastFailureReason: (cb as any).lastFailureReason as string | undefined,
+    };
+    cb.state = CircuitState.CLOSED;
+    cb.failureCount = 0;
+    cb.successCount = 0;
+    cb.lastStateChange = new Date();
+    delete (cb as any).lastFailureReason;
+    console.error(
+      `[CircuitBreaker] manually reset for account ${accountId} ` +
+      `(was ${previous.previousState}, ${previous.failureCountBefore} failures)`
+    );
+    return previous;
+  }
+
+  /** Read-only snapshot of breaker state (for the metrics/diagnostic tool). */
+  getCircuitBreakerState(accountId: string): {
+    state: string;
+    failureCount: number;
+    successCount: number;
+    failureThreshold: number;
+    successThreshold: number;
+    timeoutMs: number;
+    lastFailureTime: string | null;
+    lastFailureReason: string | null;
+    lastStateChange: string | null;
+  } | null {
+    const metadata = this.connectionMetadata.get(accountId);
+    if (!metadata?.circuitBreaker) return null;
+    const cb = metadata.circuitBreaker;
+    return {
+      state: cb.state,
+      failureCount: cb.failureCount,
+      successCount: cb.successCount,
+      failureThreshold: cb.config.failureThreshold,
+      successThreshold: cb.config.successThreshold,
+      timeoutMs: cb.config.timeout,
+      lastFailureTime: cb.lastFailureTime ? cb.lastFailureTime.toISOString() : null,
+      lastFailureReason: (cb as any).lastFailureReason ?? null,
+      lastStateChange: cb.lastStateChange ? cb.lastStateChange.toISOString() : null,
+    };
   }
 
   // ==================

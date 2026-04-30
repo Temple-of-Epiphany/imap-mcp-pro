@@ -5,6 +5,58 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.16.0] - 2026-04-30
+
+### Hardened Claude Desktop install path
+
+This release makes the `.mcpb` extension actually install and run inside Claude Desktop on macOS — the v2.15.0 build was blocked by macOS library validation rejecting our locally-built `better_sqlite3.node` (different Apple Team ID from Anthropic's). Switching to `node:sqlite` removes the native binding entirely; the runtime now inherits Claude Desktop's process signature and loads cleanly.
+
+Tool count: 91 → 93.
+
+#### 🛠️ Changed
+
+- **`better-sqlite3` → `node:sqlite`** (Node 22.5+ built-in). Same SQLite file format → existing `~/.imap-mcp/data.db` opens transparently with no migration required. The native binding ships inside Node itself, sidestepping the library-validation rejection that affects any third-party `.node` in a hardened/notarized macOS app. Issue #117 (long-running bulk-operation persistence) leans on this.
+  - `database-service.ts` — `import { DatabaseSync } from 'node:sqlite'` replaces `import Database from 'better-sqlite3'`. All 33 SQL `@param` placeholders converted to `$param` (node:sqlite doesn't accept the `@`-prefix).
+  - `migration-service.ts` — `db.transaction(fn)` (better-sqlite3 specific) replaced with a manual `BEGIN / COMMIT / ROLLBACK` helper.
+  - `results-service.ts`, `append-retry-service.ts` — BLOB-read sites now coerce `Uint8Array` (node:sqlite return type for BLOB) to `Buffer` before `.toString('hex')`.
+  - `attachment-staging-service.ts`, `database-service.ts` — `stmt.all() as T[]` casts updated to `as unknown as T[]` for the stricter `Record<string, SQLOutputValue>[]` return type.
+  - `dxt/build.mjs` — `npm rebuild better-sqlite3 --runtime=electron --target=...` step removed (no native deps to rebuild).
+  - `better-sqlite3` and `@types/better-sqlite3` removed from dependencies.
+
+- **DXT manifest spec compliance** — multiple validation errors when installing the v2.15.0 `.mcpb`:
+  - `dxt_version: "0.1"` → `manifest_version: "0.3"` (current spec).
+  - `tools[]` entries no longer include `inputSchema` (DXT spec only allows `name` + `description`; full schemas are served via runtime `tools/list`).
+  - `user_config.log_level` no longer uses `enum` (the `string`/`number`/`boolean`/`directory`/`file` types are the only valid `type` values; enums are surfaced via description).
+  - `dxt/build.mjs` updated accordingly.
+
+- **MCP tool annotations** for all 91 → 93 tools. Drives Claude Desktop's "Tool Permissions" UI: tools appear under **Read-only** vs **Write/delete** groups based on `readOnlyHint` and `destructiveHint`; tools that hit external systems (IMAP/SMTP/UserCheck/DNS) also carry `openWorldHint: true`.
+  - New `src/tools/annotations.ts` — central table mapping every tool name to `{ readOnlyHint, destructiveHint, idempotentHint?, openWorldHint? }`.
+  - `src/tools/index.ts` transparently injects annotations on every `server.registerTool` call — no churn across the 12 tool files.
+
+- **Build script bundle pruning** — `dxt/build.mjs` now drops `electron` and `@electron/*` from the bundled `node_modules` (kept as a devDep for native-binding rebuild experiments). Bundle size: 33 MB.
+
+#### 🐛 Fixed
+
+- **Circuit breaker false-positive OPEN state** (Issue #116). Hostinger and other providers that aggressively close idle IMAP connections were tripping the breaker via the `client.on('error')` socket-event handler — even though the auto-reconnect path absorbed every event. Fix: don't increment the breaker on transient socket events; only on hard failures (auth, IMAP-disabled, all-retries-exhausted).
+- **Circuit breaker / metrics inconsistency** — `recordCircuitBreakerFailure` now also bumps `metadata.metrics.failedOperations` and `totalOperations` so a tripped breaker always correlates with a non-zero failure count in `imap_get_metrics` output.
+- **`imap_append_message` (PR from WP4 in v2.15.0) — already shipped, noting here for completeness:** ImapFlow's `append(path, content, flags?, idate?)` takes flags + idate as positional args, not as a single options object. The wrapper had been silently failing for every prior caller.
+
+#### ✨ Added
+
+- **`imap_get_circuit_breaker`** — read-only diagnostic returning the per-account breaker state, failure count, threshold, last-failure reason, and timeout. Use to understand why operations are being blocked when `imap_get_metrics` shows zero failures.
+- **`imap_reset_circuit_breaker`** — destructive tool that manually resets the breaker to CLOSED with zero counters. Useful when the 60s `setTimeout` HALF_OPEN transition feels too slow.
+- **MCP tool annotations** — all 93 tools categorized; Claude Desktop's Tool Permissions UI now groups them automatically.
+
+#### 📦 Distribution
+
+- `.mcpb` install path verified end-to-end on macOS arm64. Server reports `serverInfo: { name: "imap-mcp-pro", version: "2.16.0" }` to Claude Desktop, all 93 tools are listed via `tools/list`, and tool calls succeed against a live `~/.imap-mcp/data.db`.
+
+#### 🛡️ Backward compatibility
+
+- No schema changes (DB stays at 1.10.0).
+- All env vars from v2.15.0 continue to work.
+- All tool surfaces preserved; +2 new diagnostic tools.
+
 ## [2.15.0] - 2026-04-30
 
 ### v2.0 Reliability & Attachments — full ship

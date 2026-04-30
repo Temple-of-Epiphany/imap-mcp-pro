@@ -97,6 +97,8 @@ function pruneNodeModules() {
     'typescript',
     'tsx',
     'nodemon',
+    'electron',           // 300+ MB — only used as a devDep for testing
+    '@electron',          // any sub-packages
   ];
   for (const d of drop) {
     rmrf(path.join(nm, d));
@@ -122,16 +124,18 @@ function pruneNodeModules() {
 }
 pruneNodeModules();
 
-// 4. Rebuild native modules for the target platform.
-// On a macOS arm64 host this is a no-op for arm64 builds, but ensures
-// better-sqlite3 has freshly-built bindings. Skip with --skip-rebuild.
-if (!skipRebuild) {
-  try {
-    run('npm rebuild better-sqlite3', { cwd: serverDir });
-  } catch (e) {
-    log(`WARN: better-sqlite3 rebuild failed (${e.message}); bindings as-shipped will be used`);
-  }
-}
+// 4. Native module rebuild — no longer needed.
+//
+// We migrated from better-sqlite3 to node:sqlite (Node 22.5+ built-in)
+// in v2.16. node:sqlite ships inside Node itself, so its native binding
+// inherits the host process's code signature. This means it loads cleanly
+// inside macOS-hardened apps like Claude Desktop, where third-party
+// .node binaries are rejected by library-validation regardless of which
+// Electron headers they were built against.
+//
+// If a future native dep gets reintroduced, mirror the previous
+// `npm rebuild --runtime=electron --target=...` pattern here.
+void skipRebuild;
 
 // 5. Copy assets
 cpr(path.join(dxtDir, 'icon.png'), path.join(buildDir, 'icon.png'));
@@ -158,10 +162,13 @@ try {
   process.exit(1);
 }
 
+// Per the MCPB manifest spec (manifest v0.3), tools entries take only
+// `name` and `description`. The full inputSchema lives on the server
+// itself and is fetched via tools/list at runtime; the manifest is just
+// for the extension store / settings UI.
 manifest.tools = toolsManifest.tools.map((t) => ({
   name: t.name,
   description: t.description ?? '',
-  inputSchema: t.inputSchema ?? { type: 'object' },
 }));
 
 log(`merged ${manifest.tools.length} tools into manifest`);

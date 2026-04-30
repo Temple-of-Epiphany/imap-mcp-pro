@@ -19,6 +19,28 @@ import { capabilityTools } from './capability-tools.js';
 import { dnsFirewallTools } from './dns-firewall-tools.js';
 import { categoryTools } from './category-tools.js';
 import { resultTools } from './result-tools.js';
+import { getAnnotations } from './annotations.js';
+
+/**
+ * Wrap server.registerTool so every call gets MCP annotations injected
+ * from our central table. Drives Claude Desktop's "Tool permissions" UI
+ * (Read-only / Write-delete groups). Restored on every registerTools()
+ * invocation so we don't leak the wrapper across re-registrations.
+ *
+ * Caller-supplied annotations (if any) win on a per-key basis — the
+ * central table only fills in keys the call site didn't already set.
+ */
+function withAnnotations<T extends McpServer>(server: T): () => void {
+  const original = (server as any).registerTool.bind(server);
+  (server as any).registerTool = (name: string, config: any, handler: any) => {
+    const merged = {
+      ...config,
+      annotations: { ...getAnnotations(name), ...(config?.annotations ?? {}) },
+    };
+    return original(name, merged, handler);
+  };
+  return () => { (server as any).registerTool = original; };
+}
 
 export function registerTools(
   server: McpServer,
@@ -31,6 +53,11 @@ export function registerTools(
   appendRetry?: AppendRetryService,
   staging?: AttachmentStagingService
 ): void {
+  // Inject MCP annotations on every registerTool call (drives Claude
+  // Desktop's Tool Permissions UI). Restored after the registration phase
+  // so re-entrant calls (e.g. from buildToolsManifest) start fresh.
+  const restoreRegisterTool = withAnnotations(server);
+
   // Register user & database management tools (v2.6.0 - SQLite3 integration)
   userTools(server, db);
 
@@ -69,4 +96,6 @@ export function registerTools(
 
   // Register meta/discovery tools
   metaTools(server);
+
+  restoreRegisterTool();
 }

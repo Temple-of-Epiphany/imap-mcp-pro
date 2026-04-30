@@ -1,5 +1,5 @@
 {
-  "dxt_version": "0.1",
+  "manifest_version": "0.3",
   "name": "imap-mcp-pro",
   "display_name": "IMAP MCP Pro",
   "version": "__VERSION__",
@@ -70,8 +70,7 @@
     "log_level": {
       "type": "string",
       "title": "Log Level",
-      "description": "Verbosity of server logs. Logs are captured by Claude Desktop at ~/Library/Logs/Claude/mcp-server-imap-mcp-pro.log (macOS).",
-      "enum": ["DEBUG", "INFO", "WARNING", "ERROR"],
+      "description": "Server log verbosity. One of: DEBUG, INFO, WARNING, ERROR. Logs are captured by Claude Desktop at ~/Library/Logs/Claude/mcp-server-imap-mcp-pro.log (macOS) or %APPDATA%\\Claude\\logs\\ (Windows).",
       "default": "INFO",
       "required": true
     },

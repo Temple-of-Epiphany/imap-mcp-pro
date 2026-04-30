@@ -26,7 +26,21 @@
 
 import fs from 'fs';
 import path from 'path';
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
+
+/** Run `body` inside a SQLite transaction. node:sqlite has no built-in
+ * transaction wrapper (better-sqlite3 had `db.transaction(fn)`), so we
+ * roll our own: BEGIN -> body() -> COMMIT, or ROLLBACK on throw. */
+function runInTransaction(db: DatabaseSync, body: () => void): void {
+  db.exec('BEGIN');
+  try {
+    body();
+    db.exec('COMMIT');
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch { /* ignore — original error wins */ }
+    throw e;
+  }
+}
 
 export interface MigrationStep {
   file: string;          // Absolute path to the .sql file
@@ -65,7 +79,7 @@ function compareSemver(a: string, b: string): number {
 
 export class MigrationService {
   constructor(
-    private db: Database.Database,
+    private db: DatabaseSync,
     private migrationsDir: string
   ) {}
 
@@ -154,8 +168,7 @@ export class MigrationService {
 
       const sql = fs.readFileSync(step.file, 'utf-8');
       try {
-        // better-sqlite3 exposes `transaction()` that wraps a function in BEGIN/COMMIT.
-        const run = this.db.transaction(() => {
+        runInTransaction(this.db, () => {
           this.db.exec(sql);
           this.db
             .prepare(
@@ -167,7 +180,6 @@ export class MigrationService {
               `Auto-applied from ${step.fileName}`
             );
         });
-        run();
         result.applied.push({
           fromVersion: step.fromVersion,
           toVersion: step.toVersion,
@@ -220,13 +232,12 @@ export class MigrationService {
       }
       const sql = fs.readFileSync(step.rollbackFile, 'utf-8');
       try {
-        const run = this.db.transaction(() => {
+        runInTransaction(this.db, () => {
           this.db.exec(sql);
           this.db
             .prepare('DELETE FROM schema_version WHERE version = ?')
             .run(step.toVersion);
         });
-        run();
         out.rolledBack.push({
           toVersion: step.toVersion,
           file: path.basename(step.rollbackFile),

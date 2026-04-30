@@ -10,7 +10,7 @@
  * Date: 2025-11-05
  */
 
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -39,7 +39,7 @@ import {
 import { MigrationService } from './migration-service.js';
 
 export class DatabaseService {
-  private db: Database.Database;
+  private db: DatabaseSync;
   private encryptionKey: Buffer;
   private algorithm = 'aes-256-gcm';
 
@@ -52,10 +52,12 @@ export class DatabaseService {
       fs.mkdirSync(dbDir, { recursive: true });
     }
 
-    // Initialize database
-    this.db = new Database(dbPath, {
-      verbose: config?.verbose ? console.log : undefined
-    });
+    // node:sqlite — same SQLite file format as better-sqlite3, so the
+    // existing DB at dbPath opens transparently. Native module ships with
+    // Node and inherits the host process's code signature, so it loads
+    // inside macOS-hardened apps like Claude Desktop where third-party
+    // .node binaries get rejected by library-validation.
+    this.db = new DatabaseSync(dbPath);
 
     // Set up encryption key
     this.encryptionKey = this.getOrCreateEncryptionKey(dbDir);
@@ -109,7 +111,7 @@ export class DatabaseService {
    * Public access to underlying Database (used by adjacent services that
    * need to share the connection — e.g. ResultsService).
    */
-  getDb(): Database.Database {
+  getDb(): DatabaseSync {
     return this.db;
   }
 
@@ -251,7 +253,7 @@ export class DatabaseService {
   createUser(user: Omit<User, 'created_at' | 'updated_at'>): User {
     const stmt = this.db.prepare(`
       INSERT INTO users (user_id, username, email, organization, is_active, metadata)
-      VALUES (@user_id, @username, @email, @organization, @is_active, @metadata)
+      VALUES ($user_id, $username, $email, $organization, $is_active, $metadata)
     `);
 
     stmt.run({
@@ -280,7 +282,7 @@ export class DatabaseService {
 
   listUsers(): User[] {
     const stmt = this.db.prepare('SELECT * FROM users WHERE is_active = 1 ORDER BY username');
-    return stmt.all() as User[];
+    return stmt.all() as unknown as User[];
   }
 
   updateUser(userId: string, updates: Partial<User>): void {
@@ -288,30 +290,30 @@ export class DatabaseService {
     const values: any = { user_id: userId };
 
     if (updates.username !== undefined) {
-      fields.push('username = @username');
+      fields.push('username = $username');
       values.username = updates.username;
     }
     if (updates.email !== undefined) {
-      fields.push('email = @email');
+      fields.push('email = $email');
       values.email = updates.email;
     }
     if (updates.organization !== undefined) {
-      fields.push('organization = @organization');
+      fields.push('organization = $organization');
       values.organization = updates.organization;
     }
     if (updates.is_active !== undefined) {
-      fields.push('is_active = @is_active');
+      fields.push('is_active = $is_active');
       values.is_active = updates.is_active ? 1 : 0;
     }
     if (updates.metadata !== undefined) {
-      fields.push('metadata = @metadata');
+      fields.push('metadata = $metadata');
       values.metadata = updates.metadata;
     }
 
     fields.push('updated_at = CURRENT_TIMESTAMP');
 
     const stmt = this.db.prepare(`
-      UPDATE users SET ${fields.join(', ')} WHERE user_id = @user_id
+      UPDATE users SET ${fields.join(', ')} WHERE user_id = $user_id
     `);
 
     stmt.run(values);
@@ -345,10 +347,10 @@ export class DatabaseService {
         smtp_host, smtp_port, smtp_secure, smtp_username,
         smtp_password_encrypted, smtp_encryption_iv, is_active
       ) VALUES (
-        @account_id, @user_id, @name, @host, @port, @username,
-        @password_encrypted, @encryption_iv, @tls,
-        @smtp_host, @smtp_port, @smtp_secure, @smtp_username,
-        @smtp_password_encrypted, @smtp_encryption_iv, @is_active
+        $account_id, $user_id, $name, $host, $port, $username,
+        $password_encrypted, $encryption_iv, $tls,
+        $smtp_host, $smtp_port, $smtp_secure, $smtp_username,
+        $smtp_password_encrypted, $smtp_encryption_iv, $is_active
       )
     `);
 
@@ -425,7 +427,7 @@ export class DatabaseService {
       ORDER BY a.name
     `);
 
-    return stmt.all(userId) as Account[];
+    return stmt.all(userId) as unknown as Account[];
   }
 
   listDecryptedAccountsForUser(userId: string): DecryptedAccount[] {
@@ -438,46 +440,46 @@ export class DatabaseService {
     const values: any = { account_id: accountId };
 
     if (updates.name !== undefined) {
-      fields.push('name = @name');
+      fields.push('name = $name');
       values.name = updates.name;
     }
     if (updates.host !== undefined) {
-      fields.push('host = @host');
+      fields.push('host = $host');
       values.host = updates.host;
     }
     if (updates.port !== undefined) {
-      fields.push('port = @port');
+      fields.push('port = $port');
       values.port = updates.port;
     }
     if (updates.username !== undefined) {
-      fields.push('username = @username');
+      fields.push('username = $username');
       values.username = updates.username;
     }
     if (updates.password !== undefined) {
       const passwordData = this.encrypt(updates.password);
-      fields.push('password_encrypted = @password_encrypted');
-      fields.push('encryption_iv = @encryption_iv');
+      fields.push('password_encrypted = $password_encrypted');
+      fields.push('encryption_iv = $encryption_iv');
       values.password_encrypted = passwordData.encrypted;
       values.encryption_iv = passwordData.iv;
     }
     if (updates.tls !== undefined) {
-      fields.push('tls = @tls');
+      fields.push('tls = $tls');
       values.tls = updates.tls ? 1 : 0;
     }
     if (updates.smtp_host !== undefined) {
-      fields.push('smtp_host = @smtp_host');
+      fields.push('smtp_host = $smtp_host');
       values.smtp_host = updates.smtp_host;
     }
     if (updates.smtp_port !== undefined) {
-      fields.push('smtp_port = @smtp_port');
+      fields.push('smtp_port = $smtp_port');
       values.smtp_port = updates.smtp_port;
     }
     if (updates.smtp_username !== undefined) {
-      fields.push('smtp_username = @smtp_username');
+      fields.push('smtp_username = $smtp_username');
       values.smtp_username = updates.smtp_username;
     }
     if (updates.smtp_secure !== undefined) {
-      fields.push('smtp_secure = @smtp_secure');
+      fields.push('smtp_secure = $smtp_secure');
       values.smtp_secure = updates.smtp_secure ? 1 : 0;
     }
     if (updates.smtp_password !== undefined) {
@@ -488,21 +490,21 @@ export class DatabaseService {
       } else {
         // Update SMTP password
         const smtpPasswordData = this.encrypt(updates.smtp_password);
-        fields.push('smtp_password_encrypted = @smtp_password_encrypted');
-        fields.push('smtp_encryption_iv = @smtp_encryption_iv');
+        fields.push('smtp_password_encrypted = $smtp_password_encrypted');
+        fields.push('smtp_encryption_iv = $smtp_encryption_iv');
         values.smtp_password_encrypted = smtpPasswordData.encrypted;
         values.smtp_encryption_iv = smtpPasswordData.iv;
       }
     }
     if (updates.is_active !== undefined) {
-      fields.push('is_active = @is_active');
+      fields.push('is_active = $is_active');
       values.is_active = updates.is_active ? 1 : 0;
     }
 
     fields.push('updated_at = CURRENT_TIMESTAMP');
 
     const stmt = this.db.prepare(`
-      UPDATE accounts SET ${fields.join(', ')} WHERE account_id = @account_id
+      UPDATE accounts SET ${fields.join(', ')} WHERE account_id = $account_id
     `);
 
     stmt.run(values);
@@ -584,7 +586,7 @@ export class DatabaseService {
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO unsubscribe_links
       (user_id, account_id, folder, uid, sender_email, subject, unsubscribe_link, list_unsubscribe_header, message_date)
-      VALUES (@user_id, @account_id, @folder, @uid, @sender_email, @subject, @unsubscribe_link, @list_unsubscribe_header, @message_date)
+      VALUES ($user_id, $account_id, $folder, $uid, $sender_email, $subject, $unsubscribe_link, $list_unsubscribe_header, $message_date)
     `);
 
     stmt.run({
@@ -617,7 +619,7 @@ export class DatabaseService {
     query += ' ORDER BY extracted_at DESC';
 
     const stmt = this.db.prepare(query);
-    return stmt.all(...params) as UnsubscribeLink[];
+    return stmt.all(...params) as unknown as UnsubscribeLink[];
   }
 
   // ===================
@@ -636,14 +638,14 @@ export class DatabaseService {
     const stmt = this.db.prepare(`
       INSERT INTO subscription_summary
       (user_id, sender_email, sender_domain, sender_name, unsubscribe_link, unsubscribe_method, category, total_emails, first_seen, last_seen)
-      VALUES (@user_id, @sender_email, @sender_domain, @sender_name, @unsubscribe_link, @unsubscribe_method, @category, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      VALUES ($user_id, $sender_email, $sender_domain, $sender_name, $unsubscribe_link, $unsubscribe_method, $category, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT(user_id, sender_email) DO UPDATE SET
         total_emails = total_emails + 1,
         last_seen = CURRENT_TIMESTAMP,
-        sender_name = COALESCE(@sender_name, sender_name),
-        unsubscribe_link = COALESCE(@unsubscribe_link, unsubscribe_link),
-        unsubscribe_method = COALESCE(@unsubscribe_method, unsubscribe_method),
-        category = @category
+        sender_name = COALESCE($sender_name, sender_name),
+        unsubscribe_link = COALESCE($unsubscribe_link, unsubscribe_link),
+        unsubscribe_method = COALESCE($unsubscribe_method, unsubscribe_method),
+        category = $category
     `);
 
     stmt.run({
@@ -912,7 +914,7 @@ export class DatabaseService {
   createCategory(category: Omit<Category, 'category_id' | 'created_at' | 'updated_at' | 'match_count' | 'last_matched'>): Category {
     const stmt = this.db.prepare(`
       INSERT INTO categories (user_id, account_id, category_name, keywords, target_folder, enabled)
-      VALUES (@user_id, @account_id, @category_name, @keywords, @target_folder, @enabled)
+      VALUES ($user_id, $account_id, $category_name, $keywords, $target_folder, $enabled)
     `);
 
     const result = stmt.run({
