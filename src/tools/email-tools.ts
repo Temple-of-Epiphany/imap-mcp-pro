@@ -473,7 +473,21 @@ export function emailTools(
         content: z.string().optional().describe('Base64 encoded content'),
         path: z.string().optional().describe('File path to attach'),
         contentType: z.string().optional().describe('MIME type'),
-      })).optional().describe('Email attachments'),
+      })).optional().describe('Email attachments (legacy form: { filename, content?, path?, contentType? }).'),
+      attachmentPaths: z.array(z.string()).optional().describe(
+        'WP1: array of absolute file paths to attach. Server reads, validates, and encodes ' +
+        'the files internally (no base64 in the JSON payload). Each path must resolve inside ' +
+        'one of the allowed attachment directories — see env IMAP_MCP_ALLOWED_ATTACHMENT_DIRS ' +
+        'or per-user override in users.allowed_attachment_dirs.'
+      ),
+      attachmentContentTypes: z.array(z.string()).optional().describe(
+        'Parallel array to attachmentPaths overriding the detected Content-Type. ' +
+        'Use "" or omit an entry to keep the detected value.'
+      ),
+      attachmentFilenames: z.array(z.string()).optional().describe(
+        'Parallel array to attachmentPaths overriding the basename used as filename. ' +
+        'Use "" or omit an entry to keep the basename.'
+      ),
       appendToSent: z.boolean().optional().default(true).describe(
         'Append the sent message to the IMAP Sent folder after a successful SMTP send. Default true.'
       ),
@@ -489,6 +503,7 @@ export function emailTools(
     }
   }, withErrorHandling(async ({
     accountId, to, subject, text, html, cc, bcc, replyTo, attachments,
+    attachmentPaths, attachmentContentTypes, attachmentFilenames,
     appendToSent, sentFolderOverride, forceAppendToSent, isReply,
   }) => {
     const dbAccount = db.getDecryptedAccount(accountId);
@@ -513,15 +528,75 @@ export function emailTools(
       } : undefined
     };
 
+    // ---- WP1: resolve and validate path-based attachments ----
+    const validatedPathAttachments: Array<{ filename: string; path: string; contentType: string }> = [];
+    if (attachmentPaths && attachmentPaths.length > 0) {
+      const { validateAttachmentPaths, resolveAllowedDirs, formatValidationErrors } =
+        await import('../services/attachment-validator.js');
+
+      const userId = (() => {
+        try {
+          const u = db.getUserByUsername(process.env.MCP_USER_ID || 'default');
+          return u?.user_id ?? null;
+        } catch { return null; }
+      })();
+
+      const globalDirs = (process.env.IMAP_MCP_ALLOWED_ATTACHMENT_DIRS ?? '')
+        .split(',').map(s => s.trim()).filter(Boolean);
+      const allowedDirs = userId
+        ? resolveAllowedDirs(db, userId, globalDirs)
+        : globalDirs;
+
+      const maxBytes = Number(process.env.IMAP_MCP_MAX_ATTACHMENT_SIZE_BYTES ?? 25 * 1024 * 1024);
+      const maxTotalBytes = Number(process.env.IMAP_MCP_MAX_TOTAL_ATTACHMENT_SIZE_BYTES ?? 50 * 1024 * 1024);
+
+      const inputs = attachmentPaths.map((p, i) => ({
+        path: p,
+        contentType: attachmentContentTypes?.[i] || undefined,
+        filename: attachmentFilenames?.[i] || undefined,
+      }));
+
+      const result = await validateAttachmentPaths(
+        inputs,
+        { globalAllowedDirs: globalDirs, maxSizeBytes: maxBytes, maxTotalSizeBytes: maxTotalBytes },
+        allowedDirs
+      );
+
+      if (result.errors.length > 0) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              result: 'attachment_validation_failed',
+              errors: formatValidationErrors(result.errors),
+              errorDetails: result.errors,
+            }, null, 2)
+          }]
+        };
+      }
+
+      for (const a of result.attachments) {
+        validatedPathAttachments.push({
+          filename: a.filename,
+          path: a.realPath,
+          contentType: a.contentType,
+        });
+      }
+    }
+
     const emailComposer = {
       from: account.user,
       to, subject, text, html, cc, bcc, replyTo,
-      attachments: attachments?.map(att => ({
-        filename: att.filename,
-        content: att.content ? Buffer.from(att.content, 'base64') : undefined,
-        path: att.path,
-        contentType: att.contentType,
-      })),
+      attachments: [
+        ...(attachments?.map(att => ({
+          filename: att.filename,
+          content: att.content ? Buffer.from(att.content, 'base64') : undefined,
+          path: att.path,
+          contentType: att.contentType,
+        })) ?? []),
+        ...validatedPathAttachments,
+      ],
     };
 
     // ---- 1. SMTP send ----

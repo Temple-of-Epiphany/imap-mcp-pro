@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.8.0",
+  "schemaVersion": "1.9.0",
   "description": "Release-indexed manifest of schema migrations. Each entry is applied in order via the `schema_version` ledger. A migration is complete when its `to` version is present in the ledger.",
   "migrations": [
     {
@@ -51,6 +51,13 @@
       "file": "schema_update_1.7.0_TO_1.8.0.sql",
       "rollbackFile": "schema_update_1.7.0_TO_1.8.0.down.sql",
       "description": "Add sent_folder_cache + append_retry_queue for WP4 Sent Folder Placement (Issue #98)"
+    },
+    {
+      "from": "1.8.0",
+      "to": "1.9.0",
+      "file": "schema_update_1.8.0_TO_1.9.0.sql",
+      "rollbackFile": "schema_update_1.8.0_TO_1.9.0.down.sql",
+      "description": "Add users.allowed_attachment_dirs for WP1 Attachment-by-Reference (Issue #100)"
     }
   ]
 }
