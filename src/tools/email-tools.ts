@@ -132,7 +132,9 @@ export function emailTools(
   db: DatabaseService,
   smtpService: SmtpService,
   results?: ResultsService,
-  workerPool?: WorkerPool
+  workerPool?: WorkerPool,
+  sentFolder?: import('../services/sent-folder-service.js').SentFolderService,
+  appendRetry?: import('../services/append-retry-service.js').AppendRetryService
 ): void {
   // Search emails tool
   server.registerTool('imap_search_emails', {
@@ -452,7 +454,11 @@ export function emailTools(
 
   // Send email tool
   server.registerTool('imap_send_email', {
-    description: 'Send an email using SMTP',
+    description:
+      'Send an email via SMTP and (by default) append the message to the IMAP Sent folder. ' +
+      'Sent folder resolution: cache → SPECIAL-USE \\Sent flag → provider preset → fallback name probe. ' +
+      'Gmail accounts skip the APPEND by default because Gmail server-copies sent messages; ' +
+      "pass forceAppendToSent=true to override. Bcc is preserved in the Sent copy per RFC 5322 §3.6.3.",
     inputSchema: {
       accountId: z.string().describe('Account ID to send from'),
       to: z.union([z.string(), z.array(z.string())]).describe('Recipient email address(es)'),
@@ -468,14 +474,28 @@ export function emailTools(
         path: z.string().optional().describe('File path to attach'),
         contentType: z.string().optional().describe('MIME type'),
       })).optional().describe('Email attachments'),
+      appendToSent: z.boolean().optional().default(true).describe(
+        'Append the sent message to the IMAP Sent folder after a successful SMTP send. Default true.'
+      ),
+      sentFolderOverride: z.string().optional().describe(
+        'Force a specific Sent folder name, bypassing auto-detection.'
+      ),
+      forceAppendToSent: z.boolean().optional().default(false).describe(
+        'Append even on accounts where auto-detection would skip (e.g. Gmail). Default false.'
+      ),
+      isReply: z.boolean().optional().default(false).describe(
+        'Set the \\Answered flag on the Sent copy when true.'
+      ),
     }
-  }, withErrorHandling(async ({ accountId, to, subject, text, html, cc, bcc, replyTo, attachments }) => {
+  }, withErrorHandling(async ({
+    accountId, to, subject, text, html, cc, bcc, replyTo, attachments,
+    appendToSent, sentFolderOverride, forceAppendToSent, isReply,
+  }) => {
     const dbAccount = db.getDecryptedAccount(accountId);
     if (!dbAccount) {
       throw new AccountNotFoundError(accountId);
     }
 
-    // Convert database account to ImapAccount format
     const account = {
       id: dbAccount.account_id,
       name: dbAccount.name,
@@ -495,13 +515,7 @@ export function emailTools(
 
     const emailComposer = {
       from: account.user,
-      to,
-      subject,
-      text,
-      html,
-      cc,
-      bcc,
-      replyTo,
+      to, subject, text, html, cc, bcc, replyTo,
       attachments: attachments?.map(att => ({
         filename: att.filename,
         content: att.content ? Buffer.from(att.content, 'base64') : undefined,
@@ -510,19 +524,223 @@ export function emailTools(
       })),
     };
 
-    const messageId = await smtpService.sendEmail(accountId, account, emailComposer);
-    
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          success: true,
-          messageId,
-          message: 'Email sent successfully',
-        }, null, 2)
-      }]
+    // ---- 1. SMTP send ----
+    let outcome;
+    try {
+      outcome = await smtpService.sendEmailWithCopy(accountId, account, emailComposer);
+    } catch (error: any) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            result: 'send_failed',
+            error: error?.message ?? 'Unknown SMTP error',
+          }, null, 2)
+        }]
+      };
+    }
+
+    const baseResult = {
+      success: true,
+      messageId: outcome.messageId,
+      sentAt: outcome.sentAt.toISOString(),
     };
+
+    // ---- 2. Decide whether to APPEND ----
+    if (!appendToSent || !sentFolder) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            ...baseResult,
+            result: 'sent_not_archived',
+            archiveSkipped: !sentFolder ? 'sent-folder-service-unavailable' : 'appendToSent=false',
+          }, null, 2)
+        }]
+      };
+    }
+
+    // ---- 3. Resolve Sent folder ----
+    let resolved;
+    try {
+      resolved = await sentFolder.resolveSentFolder(accountId, {
+        override: sentFolderOverride,
+        autoCreate: false,
+      });
+    } catch (e: any) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            ...baseResult,
+            result: 'sent_not_archived',
+            archiveSkipped: 'resolution-failed',
+            archiveError: e?.message,
+          }, null, 2)
+        }]
+      };
+    }
+
+    // Gmail server-copies sent messages — APPENDing produces a duplicate.
+    if (resolved.gmailAutoSkip && !forceAppendToSent && !sentFolderOverride) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            ...baseResult,
+            result: 'sent_and_archived',
+            archive: { method: 'gmail-server-copy', folder: resolved.folderName ?? '[Gmail]/Sent Mail' },
+          }, null, 2)
+        }]
+      };
+    }
+
+    if (!resolved.folderName) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            ...baseResult,
+            result: 'sent_not_archived',
+            archiveSkipped: 'no-sent-folder-found',
+            resolutionMethod: resolved.method,
+          }, null, 2)
+        }]
+      };
+    }
+
+    // ---- 4. APPEND to Sent ----
+    const appendFlags = ['\\Seen'];
+    if (isReply) appendFlags.push('\\Answered');
+
+    try {
+      const appendResult = await imapService.appendMessage(
+        accountId,
+        resolved.folderName,
+        outcome.rawMessage,
+        { flags: appendFlags, internalDate: outcome.sentAt }
+      );
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            ...baseResult,
+            result: 'sent_and_archived',
+            archive: {
+              folder: resolved.folderName,
+              uid: appendResult.uid,
+              method: resolved.method,
+              cacheHit: resolved.cacheHit,
+            },
+          }, null, 2)
+        }]
+      };
+    } catch (e: any) {
+      // SMTP succeeded; APPEND failed. Queue for retry if available.
+      let queued = false;
+      if (appendRetry) {
+        try {
+          await appendRetry.enqueue({
+            accountId,
+            targetFolder: resolved.folderName,
+            messageBytes: outcome.rawMessage,
+            flags: appendFlags,
+            internalDate: outcome.sentAt,
+          });
+          queued = true;
+        } catch {
+          // Best-effort; surface in response either way.
+        }
+      }
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            ...baseResult,
+            result: 'sent_not_archived',
+            archive: {
+              folder: resolved.folderName,
+              method: resolved.method,
+              error: e?.message ?? 'APPEND failed',
+              queuedForRetry: queued,
+            },
+          }, null, 2)
+        }]
+      };
+    }
   }));
+
+
+
+  // ---- WP4 diagnostic tools ----
+  if (sentFolder) {
+    server.registerTool('imap_test_sent_folder', {
+      description:
+        'Diagnose Sent folder resolution for an account. Returns the resolved folder name, ' +
+        'the resolution method (cache, special_use, preset, fallback, auto_created, failed), ' +
+        'whether the cache was hit, and whether the account would skip APPEND under default ' +
+        'settings (Gmail server-copy behavior).',
+      inputSchema: {
+        accountId: z.string().describe('Account ID'),
+        invalidateCache: z.boolean().optional().default(false).describe(
+          'Force a fresh resolution by clearing the cache entry first.'
+        ),
+      }
+    }, withErrorHandling(async ({ accountId, invalidateCache }) => {
+      if (invalidateCache) {
+        sentFolder.invalidateCache(accountId);
+      }
+      const resolved = await sentFolder.resolveSentFolder(accountId);
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            accountId,
+            resolvedFolder: resolved.folderName,
+            resolutionMethod: resolved.method,
+            cacheHit: resolved.cacheHit,
+            gmailAutoSkip: resolved.gmailAutoSkip,
+          }, null, 2)
+        }]
+      };
+    }));
+  }
+
+  if (appendRetry) {
+    server.registerTool('imap_list_unarchived_sends', {
+      description:
+        'List queued Sent-folder APPEND operations that failed after a successful SMTP send. ' +
+        'These are retried automatically every 5 minutes for 24 hours. Use this tool to surface ' +
+        'them to the user when the IMAP server has been unavailable.',
+      inputSchema: {
+        accountId: z.string().optional().describe('Filter to one account ID'),
+        limit: z.number().optional().default(50).describe('Max entries to return (default 50)'),
+      }
+    }, withErrorHandling(async ({ accountId, limit }) => {
+      const items = appendRetry.list({ accountId, limit });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            count: items.length,
+            items: items.map((i) => ({
+              id: i.id,
+              accountId: i.accountId,
+              targetFolder: i.targetFolder,
+              flags: i.flags,
+              internalDate: i.internalDate.toISOString(),
+              createdAt: i.createdAt.toISOString(),
+              lastAttemptAt: i.lastAttemptAt?.toISOString() ?? null,
+              attemptCount: i.attemptCount,
+              lastError: i.lastError,
+              expiresAt: i.expiresAt.toISOString(),
+            })),
+          }, null, 2)
+        }]
+      };
+    }));
+  }
 
   // Reply to email tool
   server.registerTool('imap_reply_to_email', {

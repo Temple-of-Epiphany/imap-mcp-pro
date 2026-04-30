@@ -1,5 +1,18 @@
 import nodemailer from 'nodemailer';
+// MailComposer compiles the full MIME we hand to IMAP APPEND. The default
+// `transporter.sendMail` path strips Bcc from the DATA payload per RFC 5322
+// §3.6.3 — we want Bcc preserved in the Sent folder copy.
+import MailComposer from 'nodemailer/lib/mail-composer/index.js';
 import { ImapAccount, EmailComposer, SmtpConfig } from '../types/index.js';
+
+export interface SendEmailOutcome {
+  /** RFC 5322 Message-ID returned by the SMTP server */
+  messageId: string;
+  /** Full MIME (with Bcc header preserved) for IMAP APPEND to Sent folder */
+  rawMessage: Buffer;
+  /** Wall-clock send completion time; used as APPEND internal-date */
+  sentAt: Date;
+}
 
 export class SmtpService {
   private transporters: Map<string, nodemailer.Transporter> = new Map();
@@ -79,36 +92,84 @@ export class SmtpService {
     };
   }
 
+  /**
+   * Backward-compat shim — returns just the message ID.
+   * New callers should use sendEmailWithCopy() to also receive the MIME
+   * bytes for an IMAP APPEND to the Sent folder.
+   */
   async sendEmail(accountId: string, account: ImapAccount, email: EmailComposer): Promise<string> {
-    try {
-      const transporter = await this.createTransporter(account);
-      
-      const mailOptions: nodemailer.SendMailOptions = {
-        from: email.from || account.user,
-        to: email.to,
-        cc: email.cc,
-        bcc: email.bcc,
-        subject: email.subject,
-        text: email.text,
-        html: email.html,
-        attachments: email.attachments?.map(att => ({
-          filename: att.filename,
-          content: att.content,
-          path: att.path,
-          contentType: att.contentType,
-          contentDisposition: att.contentDisposition,
-          cid: att.cid,
-        })),
-        replyTo: email.replyTo,
-        inReplyTo: email.inReplyTo,
-        references: Array.isArray(email.references) ? email.references.join(' ') : email.references,
-      };
+    const outcome = await this.sendEmailWithCopy(accountId, account, email);
+    return outcome.messageId;
+  }
 
-      const info = await transporter.sendMail(mailOptions);
-      return info.messageId;
+  /**
+   * Send the message AND return the full MIME with Bcc preserved so the
+   * caller can APPEND to the IMAP Sent folder. Two-step flow:
+   *   1. Build the full MIME (Bcc header included) via MailComposer.
+   *   2. Hand the same mailOptions to nodemailer.sendMail — it uses Bcc
+   *      for RCPT TO but strips it from DATA per RFC 5322 §3.6.3.
+   */
+  async sendEmailWithCopy(
+    accountId: string,
+    account: ImapAccount,
+    email: EmailComposer
+  ): Promise<SendEmailOutcome> {
+    const transporter = await this.createTransporter(account);
+
+    const mailOptions: nodemailer.SendMailOptions = {
+      from: email.from || account.user,
+      to: email.to,
+      cc: email.cc,
+      bcc: email.bcc,
+      subject: email.subject,
+      text: email.text,
+      html: email.html,
+      attachments: email.attachments?.map(att => ({
+        filename: att.filename,
+        content: att.content,
+        path: att.path,
+        contentType: att.contentType,
+        contentDisposition: att.contentDisposition,
+        cid: att.cid,
+      })),
+      replyTo: email.replyTo,
+      inReplyTo: email.inReplyTo,
+      references: Array.isArray(email.references) ? email.references.join(' ') : email.references,
+    };
+
+    let rawMessage: Buffer;
+    try {
+      // Compile the Sent-folder copy with Bcc preserved. MailComposer's
+      // underlying MimeNode strips Bcc by default (per RFC 5322 §3.6.3 for
+      // the wire-protocol payload). For the *sender's* archive copy we
+      // explicitly set keepBcc=true so the recipient list is preserved.
+      rawMessage = await new Promise<Buffer>((resolve, reject) => {
+        const composer = new MailComposer(mailOptions);
+        const node = composer.compile() as any;
+        node.keepBcc = true;
+        node.build((err: Error | null, bytes: Buffer) => {
+          if (err) reject(err);
+          else resolve(bytes);
+        });
+      });
+    } catch (e) {
+      throw new Error(
+        `Failed to compile MIME for Sent folder copy: ${e instanceof Error ? e.message : 'Unknown error'}`
+      );
+    }
+
+    let info: nodemailer.SentMessageInfo;
+    try {
+      info = await transporter.sendMail(mailOptions);
     } catch (error) {
       throw new Error(`Failed to send email: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+
+    return {
+      messageId: info.messageId,
+      rawMessage,
+      sentAt: new Date(),
+    };
   }
 
   async verifySmtpConnection(account: ImapAccount): Promise<boolean> {

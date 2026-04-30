@@ -10,6 +10,8 @@ import { DatabaseService } from './services/database-service.js';
 import { SmtpService } from './services/smtp-service.js';
 import { FileExportService } from './services/file-export-service.js';
 import { ResultsService } from './services/results-service.js';
+import { SentFolderService } from './services/sent-folder-service.js';
+import { AppendRetryService } from './services/append-retry-service.js';
 import { WorkerPool } from './utils/worker-pool.js';
 import { registerTools } from './tools/index.js';
 import { dispatchCli, EXIT_CODES } from './config/cli.js';
@@ -45,8 +47,10 @@ await dispatchCli({
 // Pre-handshake stage — must complete in < 2s on cold start.
 // ============================================================================
 
-const { server, imapService, smtpService, db, fileExport, results, workerPool } =
-  await timeStage('pre-handshake', async () => {
+const {
+  server, imapService, smtpService, db, fileExport, results, workerPool,
+  sentFolderService, appendRetryService,
+} = await timeStage('pre-handshake', async () => {
     // 1. Load + validate config
     let config;
     try {
@@ -89,13 +93,23 @@ const { server, imapService, smtpService, db, fileExport, results, workerPool } 
     imapService.setWorkerPool(workerPool);
     const smtpService = new SmtpService();
 
+    // 6b. WP4: Sent folder resolution + APPEND retry queue
+    const sentFolderService = new SentFolderService(db, imapService);
+    const appendRetryService = new AppendRetryService(db, imapService);
+
     // 7. Tool schema registration
-    registerTools(server, imapService, db, smtpService, results, workerPool);
+    registerTools(
+      server, imapService, db, smtpService, results, workerPool,
+      sentFolderService, appendRetryService
+    );
 
     // Mark unused config field as intentional for now
     void config;
 
-    return { server, imapService, smtpService, db, fileExport, results, workerPool };
+    return {
+      server, imapService, smtpService, db, fileExport, results, workerPool,
+      sentFolderService, appendRetryService,
+    };
   });
 
 // ============================================================================
@@ -118,6 +132,14 @@ void timeStage('post-handshake', async () => {
     if (n > 0) logEvent('[startup]', { component: 'orphan-sweep', cleaned: n });
   } catch (e: any) {
     logEvent('[startup]', { component: 'orphan-sweep', outcome: 'error', error: e?.message });
+  }
+
+  // WP4: start the APPEND retry timer (5-min interval, unref'd)
+  try {
+    appendRetryService.start();
+    logEvent('[startup]', { component: 'append-retry', msg: 'retry timer started' });
+  } catch (e: any) {
+    logEvent('[startup]', { component: 'append-retry', outcome: 'error', error: e?.message });
   }
 });
 
@@ -147,7 +169,12 @@ async function buildToolsManifest(): Promise<unknown> {
   const tmpImap = new ImapService(tmpDb);
   tmpImap.setWorkerPool(tmpWorkerPool);
   const tmpSmtp = new SmtpService();
-  registerTools(tmpServer, tmpImap, tmpDb, tmpSmtp, tmpResults, tmpWorkerPool);
+  const tmpSentFolder = new SentFolderService(tmpDb, tmpImap);
+  const tmpAppendRetry = new AppendRetryService(tmpDb, tmpImap);
+  registerTools(
+    tmpServer, tmpImap, tmpDb, tmpSmtp, tmpResults, tmpWorkerPool,
+    tmpSentFolder, tmpAppendRetry
+  );
 
   // Pull the registered tools out of McpServer's internal map. This is
   // accessing private SDK state (versioned at @1.22.0); regenerate if the
@@ -200,6 +227,7 @@ async function buildToolsManifest(): Promise<unknown> {
 
 async function shutdown(signal: string) {
   logEvent('[shutdown]', { signal, msg: 'cleaning up' });
+  try { appendRetryService.stop(); } catch (e: any) { logEvent('[shutdown]', { component: 'appendRetry.stop', error: e?.message }); }
   try { results.destroy(); } catch (e: any) { logEvent('[shutdown]', { component: 'results.destroy', error: e?.message }); }
   try { await workerPool.destroy(); } catch (e: any) { logEvent('[shutdown]', { component: 'workerPool.destroy', error: e?.message }); }
   try { fileExport.destroy(); } catch (e: any) { logEvent('[shutdown]', { component: 'fileExport.destroy', error: e?.message }); }
@@ -209,4 +237,4 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 // keep refs alive
-void imapService; void smtpService; void db;
+void imapService; void smtpService; void db; void sentFolderService;

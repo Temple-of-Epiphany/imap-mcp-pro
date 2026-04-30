@@ -4,6 +4,8 @@ import { DatabaseService } from '../services/database-service.js';
 import { SmtpService } from '../services/smtp-service.js';
 import { ResultsService } from '../services/results-service.js';
 import { WorkerPool } from '../utils/worker-pool.js';
+import { SentFolderService } from '../services/sent-folder-service.js';
+import { AppendRetryService } from '../services/append-retry-service.js';
 import { accountTools } from './account-tools.js';
 import { emailTools } from './email-tools.js';
 import { folderTools } from './folder-tools.js';
@@ -23,7 +25,9 @@ export function registerTools(
   db: DatabaseService,
   smtpService: SmtpService,
   results?: ResultsService,
-  workerPool?: WorkerPool
+  workerPool?: WorkerPool,
+  sentFolder?: SentFolderService,
+  appendRetry?: AppendRetryService
 ): void {
   // Register user & database management tools (v2.6.0 - SQLite3 integration)
   userTools(server, db);
@@ -31,8 +35,9 @@ export function registerTools(
   // Register account management tools (legacy - to be deprecated)
   accountTools(server, db, imapService);
 
-  // Register email operation tools (Phase C: pass results + workerPool when wired)
-  emailTools(server, imapService, db, smtpService, results, workerPool);
+  // Register email operation tools (Phase C: pass results + workerPool when wired;
+  // WP4: sentFolder + appendRetry for Sent-folder placement)
+  emailTools(server, imapService, db, smtpService, results, workerPool, sentFolder, appendRetry);
 
   // Register folder operation tools
   folderTools(server, imapService, db);

@@ -1137,21 +1137,21 @@ export class ImapService {
   async appendMessage(
     accountId: string,
     mailboxName: string,
-    messageContent: string,
+    messageContent: string | Buffer,
     options?: { flags?: string[]; internalDate?: Date }
   ): Promise<{ uid: number; uidValidity: bigint }> {
     return this.withRetry(accountId, async () => {
       const client = this.getConnection(accountId);
 
-      const appendOptions: any = {};
-      if (options?.flags) {
-        appendOptions.flags = options.flags;
-      }
-      if (options?.internalDate) {
-        appendOptions.internalDate = options.internalDate;
-      }
-
-      const result = await client.append(mailboxName, messageContent, appendOptions);
+      // ImapFlow API: append(path, content, flags?, idate?). The 3rd & 4th
+      // args are POSITIONAL — passing { flags, internalDate } as one object
+      // (the previous shape here) silently breaks the APPEND.
+      const result = await client.append(
+        mailboxName,
+        messageContent,
+        options?.flags,
+        options?.internalDate
+      );
 
       // Handle false return (failed append) or successful AppendResponseObject
       if (!result) {
