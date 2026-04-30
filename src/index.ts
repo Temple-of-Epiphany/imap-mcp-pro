@@ -67,7 +67,7 @@ const {
 
     // 2. Construct McpServer with explicit capabilities (closes #80)
     const server = new McpServer(
-      { name: 'imap-mcp-pro', version: '2.14.0' },
+      { name: 'imap-mcp-pro', version: '2.15.0' },
       { capabilities: SERVER_CAPABILITIES }
     );
 
@@ -175,7 +175,7 @@ async function buildToolsManifest(): Promise<unknown> {
 
   // Construct the same server object but never call server.connect().
   const tmpServer = new McpServer(
-    { name: 'imap-mcp-pro', version: '2.14.0' },
+    { name: 'imap-mcp-pro', version: '2.15.0' },
     { capabilities: SERVER_CAPABILITIES }
   );
   const tmpDb = new DatabaseService();

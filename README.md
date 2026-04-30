@@ -6,6 +6,8 @@ An enterprise-grade Model Context Protocol (MCP) server that provides production
 
 ## Features
 
+**91 MCP tools** across email/folder/account/category/scoring/subscription/dns-firewall/usercheck/staging/diagnostics — every IMAP4rev2 (RFC 9051) operation we use is exposed.
+
 ### Core Features
 - 🔐 **Secure Account Management**: Encrypted credential storage with AES-256 encryption
 - 🚀 **Connection Pooling**: Efficient IMAP connection management
@@ -17,6 +19,14 @@ An enterprise-grade Model Context Protocol (MCP) server that provides production
 - 🌐 **Web-Based Setup Wizard**: Easy account configuration with provider presets
 - 📱 **15+ Email Providers**: Pre-configured settings for Gmail, Outlook, Yahoo, and more
 - 🔗 **Auto SMTP Configuration**: Automatic SMTP settings based on IMAP provider
+
+### v2.0 Reliability & Attachments (v2.15.0+)
+
+- **Auto-Sent-folder placement**: every `imap_send_email` archives to the right Sent folder by provider (Gmail / Outlook / iCloud / Fastmail / Yahoo / Hostinger / Zoho / GMX / ProtonMail). Bcc preserved in the archive copy per RFC 5322 §3.6.3. Failures queue for background retry, not lost.
+- **Pooled SMTP with classified retry**: nodemailer pool, exponential backoff for transient failures, immediate surface (no retry) for auth failures with provider-specific guidance (e.g. "Gmail requires an app password, generate at...").
+- **Path-based attachments** (`attachmentPaths`): pass absolute file paths instead of base64. Server validates against an allowed-dirs whitelist (with per-user override), realpath + symlink-target check, size caps, RFC 2183 filename sanitization.
+- **Chunked attachment uploads**: for clients without server filesystem access. 4-tool workflow (`stage_init` → `stage_append × N` → `stage_finalize` → `imap_send_email stagedAttachmentIds=[...]`). Out-of-order chunks reassemble; duplicate `chunkIndex` is idempotent; SHA-256 verification on finalize.
+- **Diagnostic tools**: `imap_test_smtp`, `imap_test_sent_folder`, `imap_get_smtp_metrics`, `imap_list_unarchived_sends`, `imap_list_staged_attachments`.
 
 ### Enterprise Features (Pro Edition)
 

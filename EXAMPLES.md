@@ -202,6 +202,151 @@ For each account in parallel:
 
 ---
 
+## 8. Sending an attachment via path (v2.0)
+
+**You:** Send the Q1 report from `~/Documents/imap-attachments/q1.pdf` to `cfo@example.com`.
+
+**Claude:** I'll use `attachmentPaths` so you don't have to base64 the PDF into the request.
+
+> *Tool call: `imap_send_email`*
+> ```json
+> {
+>   "accountId": "...",
+>   "to": "cfo@example.com",
+>   "subject": "Q1 Report",
+>   "text": "Attached.",
+>   "attachmentPaths": ["/Users/me/Documents/imap-attachments/q1.pdf"]
+> }
+> ```
+
+**Result:**
+
+```json
+{
+  "success": true,
+  "messageId": "<...@bitterfield.com>",
+  "result": "sent_and_archived",
+  "archive": { "folder": "INBOX.Sent", "uid": 642, "method": "special_use", "cacheHit": true }
+}
+```
+
+**Claude:** Sent and archived to the Sent folder (resolved via SPECIAL-USE — cached for 24 hours).
+
+If the path isn't whitelisted, Claude gets a structured error:
+
+```json
+{
+  "success": false,
+  "result": "attachment_validation_failed",
+  "errors": ["Path resolves outside allowed dirs: /etc/passwd -> /etc/passwd"],
+  "errorDetails": [{ "kind": "outside-allowed-dirs", "path": "/etc/passwd", "resolved": "/etc/passwd" }]
+}
+```
+
+The configured allowed directories live in `IMAP_MCP_ALLOWED_ATTACHMENT_DIRS` (or `users.allowed_attachment_dirs` per-user).
+
+---
+
+## 9. Chunked upload from a web client (v2.0)
+
+A web UI can't put files on the server's filesystem, so it uses the staging API instead.
+
+**Client (browser):**
+
+```js
+// Read the file
+const file = input.files[0];
+
+// 1. init
+const { stagingId, chunkSizeBytes } = await mcp.call('imap_attachment_stage_init', {
+  filename: file.name,
+  expectedSize: file.size,
+  contentType: file.type,
+});
+
+// 2. upload in chunks (256 KiB by default)
+for (let off = 0, idx = 0; off < file.size; off += chunkSizeBytes, idx++) {
+  const slice = file.slice(off, off + chunkSizeBytes);
+  const buf = new Uint8Array(await slice.arrayBuffer());
+  const chunkData = btoa(String.fromCharCode(...buf));  // base64
+  await mcp.call('imap_attachment_stage_append', {
+    stagingId,
+    chunkIndex: idx,
+    chunkData,
+    isFinal: off + chunkSizeBytes >= file.size,  // auto-finalize on last chunk
+  });
+}
+```
+
+**Then prompt:**
+
+> Send a quick note to ops@example.com with the file I just uploaded.
+
+> *Tool call: `imap_send_email`*
+> ```json
+> {
+>   "accountId": "...",
+>   "to": "ops@example.com",
+>   "subject": "Logs",
+>   "text": "Attached the bundle from this morning.",
+>   "stagedAttachmentIds": ["<the stagingId>"]
+> }
+> ```
+
+The server attaches the assembled blob and deletes the staging session on send success. Out-of-order chunk uploads are fine (each chunk is keyed by index, not arrival order).
+
+---
+
+## 10. Diagnosing a flaky SMTP server (v2.0)
+
+**You:** I'm getting intermittent send failures on my Yahoo account. What's wrong?
+
+**Claude:**
+
+> *Tool call: `imap_test_smtp`*
+> `{ "accountId": "...", "verbose": false }`
+
+**Result:**
+
+```json
+{
+  "success": true,
+  "smtpHost": "smtp.mail.yahoo.com",
+  "secure": false,
+  "tlsVersion": "TLSv1.3",
+  "tlsCipher": "TLS_AES_256_GCM_SHA384",
+  "rttMs": 387,
+  "authResult": "ok",
+  "capabilities": ["STARTTLS", "PIPELINING", "SIZE", "8BITMIME", "AUTH"],
+  "providerGuidance": "Yahoo / AOL require an app password. Generate one in Account Security → App passwords."
+}
+```
+
+> *Tool call: `imap_get_smtp_metrics`*
+> `{ "accountId": "..." }`
+
+**Result:**
+
+```json
+{
+  "accounts": [{
+    "smtpHost": "smtp.mail.yahoo.com",
+    "sendTotal": 17,
+    "sendSuccessTotal": 14,
+    "sendFailureTotal": 3,
+    "retryTotal": 6,
+    "retryByCategory": { "transient": 6, "permanent": 0, "authentication": 0, "configuration": 0 },
+    "lastSendDurationMs": 2104,
+    "lastError": null
+  }],
+  "pool": { "configured": 1 }
+}
+```
+
+**Claude:** Yahoo's SMTP is up (TLS 1.3, auth ok, 387 ms RTT). Of your 17 recent sends, 3 failed initially but **all 6 retries were classified as transient** (4xx codes, connection blips) — no auth failures, no permanent errors. Last error is null, meaning the eventual outcome was successful for everything attempted. The flakiness is on Yahoo's side; the retry classifier is absorbing it.
+
+---
+
 ## Tips for working with the tools
 
 - **Default to `responseMode='auto'`** — the server picks the right tier (inline / handle / file) based on size. Override only when you know better.

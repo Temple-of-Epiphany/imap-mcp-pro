@@ -25,13 +25,18 @@ src/
 │   │                              #   auto-migration on construct
 │   ├── migration-service.ts      # Schema_version ledger + migration runner
 │   ├── imap-service.ts           # ImapFlow connection pool, search/fetch/store/move
-│   ├── smtp-service.ts           # nodemailer-based send
+│   ├── smtp-service.ts           # nodemailer pool, retry classification (WP3)
+│   ├── smtp-error-classifier.ts  # WP3: transient/permanent/auth/config + provider guidance
+│   ├── sent-folder-service.ts    # WP4: 6-step Sent folder resolution + cache
+│   ├── append-retry-service.ts   # WP4: durable encrypted retry queue for failed APPENDs
+│   ├── attachment-validator.ts   # WP1: path validation gate (allowed dirs, realpath, size)
+│   ├── attachment-staging-service.ts  # WP2: chunked-upload sessions + GC
 │   ├── results-service.ts        # Tool-result cache (handle/file modes), LRU eviction
 │   ├── file-export-service.ts    # Encrypted JSON/JSONL writer for file-mode results
 │   └── encryption/               # Key storage paths (keyring vs file)
-├── tools/                        # 81 MCP tools across 12 files
+├── tools/                        # 91 MCP tools across 12 files
 │   ├── account-tools.ts          # 8  add/remove/list/share accounts
-│   ├── email-tools.ts            # 22 search/get/mark/delete/move/copy/send/bulk
+│   ├── email-tools.ts            # 32 search/get/mark/delete/move/copy/send/bulk + WP1/2/3/4
 │   ├── folder-tools.ts           # 6  list/status/create/delete/rename
 │   ├── meta-tools.ts             # 7  about/list-tools/connect/disconnect/metrics
 │   ├── capability-tools.ts       # 1  imap_get_capabilities
@@ -267,6 +272,50 @@ Claude Desktop captures stderr to per-server log files:
 | Linux | `~/.local/state/Claude/logs/mcp-server-imap-mcp-pro.log` |
 
 ---
+
+## v2.0 send pipeline (WP1 + WP2 + WP3 + WP4)
+
+`imap_send_email` orchestrates four cooperating pieces:
+
+```
+                          ┌─────────────────────────────────────────────────┐
+                          │  imap_send_email handler                        │
+                          └─────────────────────────────────────────────────┘
+                                                │
+                  ┌─────────────────────────────┼─────────────────────────────┐
+                  ▼                             ▼                             ▼
+   ┌────────────────────────┐   ┌────────────────────────┐   ┌──────────────────────────┐
+   │ AttachmentValidator    │   │ AttachmentStaging      │   │ legacy attachments[]     │
+   │  (WP1: paths)          │   │  (WP2: stagedIds)      │   │  (base64 inline)         │
+   └────────────┬───────────┘   └────────────┬───────────┘   └────────────┬─────────────┘
+                └─────────────────┬──────────┴──────────────────────┬─────┘
+                                  ▼                                 ▼
+                          ┌──────────────────────────────────────────┐
+                          │ SmtpService.sendEmailWithCopy            │
+                          │  - MailComposer w/ keepBcc=true (WP4)    │
+                          │  - pool + retry classifier (WP3)         │
+                          └────────────┬─────────────────────────────┘
+                                       │ rawMessage (Bcc preserved)
+                                       ▼
+                          ┌──────────────────────────────────────────┐
+                          │ SentFolderService.resolveSentFolder      │
+                          │  cache → SPECIAL-USE → preset → fallback │
+                          └────────────┬─────────────────────────────┘
+                                       │
+                                       ▼ on failure → AppendRetryService.enqueue
+                          ┌──────────────────────────────────────────┐
+                          │ ImapService.appendMessage                │
+                          │  (positional flags, idate)               │
+                          └──────────────────────────────────────────┘
+```
+
+Result codes returned to the caller:
+
+- `sent_and_archived` — both stages OK
+- `sent_not_archived` — SMTP success but APPEND failed (queued for retry, see `imap_list_unarchived_sends`)
+- `send_failed` — SMTP failed; classified error with provider guidance
+- `attachment_validation_failed` — `attachmentPaths` validation rejected an entry
+- `staged_attachments_*` — staging-related failures (not found / unauthorized / unavailable)
 
 ## References
 
