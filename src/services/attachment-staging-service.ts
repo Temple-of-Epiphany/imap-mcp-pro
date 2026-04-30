@@ -346,7 +346,7 @@ export class AttachmentStagingService {
     }
     const rows = this.db.getDb()
       .prepare(`SELECT * FROM attachment_staging ${where} ORDER BY created_at DESC LIMIT ?`)
-      .all(...params, limit) as StagingRow[];
+      .all(...params, limit) as unknown as StagingRow[];
     return rows;
   }
 

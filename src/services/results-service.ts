@@ -193,9 +193,9 @@ export class ResultsService {
         storage_mode, storage_type, rows_json, rows_iv, file_path, file_size_bytes,
         row_count, schema_version, created_at, expires_at, last_accessed_at, access_count
       ) VALUES (
-        @result_id, @user_id, @account_id, @tool_name, @folder, @params_json, @summary_json,
-        @storage_mode, @storage_type, @rows_json, @rows_iv, @file_path, @file_size_bytes,
-        @row_count, @schema_version, @created_at, @expires_at, @last_accessed_at, @access_count
+        $result_id, $user_id, $account_id, $tool_name, $folder, $params_json, $summary_json,
+        $storage_mode, $storage_type, $rows_json, $rows_iv, $file_path, $file_size_bytes,
+        $row_count, $schema_version, $created_at, $expires_at, $last_accessed_at, $access_count
       )
     `);
 
@@ -257,8 +257,12 @@ export class ResultsService {
       if (!row.rows_json || !row.rows_iv) {
         throw new Error(`Result ${resultId} marked inline but missing rows_json/iv`);
       }
-      const encryptedHex = (row.rows_json as Buffer).toString('hex');
-      const plain = this.db.decryptString(encryptedHex, row.rows_iv);
+      // node:sqlite returns BLOB as Uint8Array (not Node Buffer); coerce so
+      // .toString('hex') uses Buffer's encoding-aware impl.
+      const blob = Buffer.isBuffer(row.rows_json)
+        ? row.rows_json
+        : Buffer.from(row.rows_json as Uint8Array);
+      const plain = this.db.decryptString(blob.toString('hex'), row.rows_iv);
       const all = JSON.parse(plain) as StoredResultRowSummary[];
       rows = all.slice(offset, offset + limit);
     }

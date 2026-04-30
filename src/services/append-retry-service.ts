@@ -131,9 +131,11 @@ export class AppendRetryService {
     const now = Date.now();
 
     // Drop expired entries first.
-    const expired = this.db.getDb()
-      .prepare('DELETE FROM append_retry_queue WHERE expires_at <= ?')
-      .run(now).changes;
+    const expired = Number(
+      this.db.getDb()
+        .prepare('DELETE FROM append_retry_queue WHERE expires_at <= ?')
+        .run(now).changes
+    );
 
     const due = this.db.getDb()
       .prepare(`
@@ -149,8 +151,14 @@ export class AppendRetryService {
     let failed = 0;
     for (const row of due) {
       try {
+        // node:sqlite returns BLOB columns as Uint8Array (not Buffer); wrap
+        // so .toString('hex') uses Buffer's encoding-aware impl, not the
+        // generic Object.prototype.toString.
+        const blob = Buffer.isBuffer(row.message_bytes)
+          ? row.message_bytes
+          : Buffer.from(row.message_bytes as Uint8Array);
         const plain = this.db.decryptString(
-          (row.message_bytes as Buffer).toString('hex'),
+          blob.toString('hex'),
           row.message_iv
         );
         const flags = JSON.parse(row.flags);

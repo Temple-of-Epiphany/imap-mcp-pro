@@ -1566,6 +1566,52 @@ export function emailTools(
     };
   }));
 
+  // Circuit-breaker diagnostic + manual reset
+  server.registerTool('imap_get_circuit_breaker', {
+    description:
+      'Inspect the per-account circuit breaker state (CLOSED / OPEN / HALF_OPEN), ' +
+      'failure count, last failure reason, and configured thresholds/timeout. Use this to ' +
+      'understand why operations are being blocked when imap_get_metrics shows zero failures.',
+    inputSchema: {
+      accountId: z.string().describe('Account ID'),
+    }
+  }, withErrorHandling(async ({ accountId }) => {
+    const state = imapService.getCircuitBreakerState(accountId);
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify(
+          state ?? { error: `No circuit breaker state for account ${accountId}` },
+          null, 2
+        )
+      }]
+    };
+  }));
+
+  server.registerTool('imap_reset_circuit_breaker', {
+    description:
+      'Manually reset the circuit breaker for an account back to CLOSED with zero failure ' +
+      "count. Use when the breaker has tripped due to transient errors and you don't want " +
+      "to wait for the timeout-based HALF_OPEN transition. Returns the breaker's previous " +
+      'state for diagnostics.',
+    inputSchema: {
+      accountId: z.string().describe('Account ID'),
+    }
+  }, withErrorHandling(async ({ accountId }) => {
+    const previous = imapService.resetCircuitBreaker(accountId);
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify(
+          previous
+            ? { success: true, accountId, previous }
+            : { success: false, error: `No circuit breaker state for account ${accountId}` },
+          null, 2
+        )
+      }]
+    };
+  }));
+
   // Level 3: Reset metrics
   server.registerTool('imap_reset_metrics', {
     description: 'Reset connection metrics for an account',
