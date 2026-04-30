@@ -12,6 +12,8 @@ import { FileExportService } from './services/file-export-service.js';
 import { ResultsService } from './services/results-service.js';
 import { SentFolderService } from './services/sent-folder-service.js';
 import { AppendRetryService } from './services/append-retry-service.js';
+import { AttachmentStagingService, DEFAULT_STAGING_CONFIG } from './services/attachment-staging-service.js';
+import os from 'os';
 import { WorkerPool } from './utils/worker-pool.js';
 import { registerTools } from './tools/index.js';
 import { dispatchCli, EXIT_CODES } from './config/cli.js';
@@ -49,7 +51,7 @@ await dispatchCli({
 
 const {
   server, imapService, smtpService, db, fileExport, results, workerPool,
-  sentFolderService, appendRetryService,
+  sentFolderService, appendRetryService, attachmentStaging,
 } = await timeStage('pre-handshake', async () => {
     // 1. Load + validate config
     let config;
@@ -97,10 +99,19 @@ const {
     const sentFolderService = new SentFolderService(db, imapService);
     const appendRetryService = new AppendRetryService(db, imapService);
 
+    // 6c. WP2: attachment staging (chunked uploads)
+    const stagingDir = process.env.IMAP_MCP_ATTACHMENT_STAGING_DIR
+      ?? path.join(os.homedir(), '.imap-mcp', 'staging');
+    const attachmentStaging = new AttachmentStagingService(db, {
+      ...DEFAULT_STAGING_CONFIG,
+      stagingDir,
+      perUserMaxBytes: Number(process.env.IMAP_MCP_MAX_STAGING_BYTES_PER_USER ?? 500 * 1024 * 1024),
+    });
+
     // 7. Tool schema registration
     registerTools(
       server, imapService, db, smtpService, results, workerPool,
-      sentFolderService, appendRetryService
+      sentFolderService, appendRetryService, attachmentStaging
     );
 
     // Mark unused config field as intentional for now
@@ -108,7 +119,7 @@ const {
 
     return {
       server, imapService, smtpService, db, fileExport, results, workerPool,
-      sentFolderService, appendRetryService,
+      sentFolderService, appendRetryService, attachmentStaging,
     };
   });
 
@@ -141,6 +152,14 @@ void timeStage('post-handshake', async () => {
   } catch (e: any) {
     logEvent('[startup]', { component: 'append-retry', outcome: 'error', error: e?.message });
   }
+
+  // WP2: start the staging GC timer (15-min interval, unref'd)
+  try {
+    attachmentStaging.start();
+    logEvent('[startup]', { component: 'staging-gc', msg: 'GC timer started' });
+  } catch (e: any) {
+    logEvent('[startup]', { component: 'staging-gc', outcome: 'error', error: e?.message });
+  }
 });
 
 logEvent('[startup]', { msg: 'IMAP MCP Server ready' });
@@ -171,9 +190,13 @@ async function buildToolsManifest(): Promise<unknown> {
   const tmpSmtp = new SmtpService();
   const tmpSentFolder = new SentFolderService(tmpDb, tmpImap);
   const tmpAppendRetry = new AppendRetryService(tmpDb, tmpImap);
+  const tmpStaging = new AttachmentStagingService(tmpDb, {
+    ...DEFAULT_STAGING_CONFIG,
+    stagingDir: path.join(os.homedir(), '.imap-mcp', 'staging'),
+  });
   registerTools(
     tmpServer, tmpImap, tmpDb, tmpSmtp, tmpResults, tmpWorkerPool,
-    tmpSentFolder, tmpAppendRetry
+    tmpSentFolder, tmpAppendRetry, tmpStaging
   );
 
   // Pull the registered tools out of McpServer's internal map. This is
@@ -227,6 +250,7 @@ async function buildToolsManifest(): Promise<unknown> {
 
 async function shutdown(signal: string) {
   logEvent('[shutdown]', { signal, msg: 'cleaning up' });
+  try { attachmentStaging.stop(); } catch (e: any) { logEvent('[shutdown]', { component: 'staging.stop', error: e?.message }); }
   try { appendRetryService.stop(); } catch (e: any) { logEvent('[shutdown]', { component: 'appendRetry.stop', error: e?.message }); }
   try { results.destroy(); } catch (e: any) { logEvent('[shutdown]', { component: 'results.destroy', error: e?.message }); }
   try { await workerPool.destroy(); } catch (e: any) { logEvent('[shutdown]', { component: 'workerPool.destroy', error: e?.message }); }
