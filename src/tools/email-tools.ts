@@ -134,7 +134,8 @@ export function emailTools(
   results?: ResultsService,
   workerPool?: WorkerPool,
   sentFolder?: import('../services/sent-folder-service.js').SentFolderService,
-  appendRetry?: import('../services/append-retry-service.js').AppendRetryService
+  appendRetry?: import('../services/append-retry-service.js').AppendRetryService,
+  staging?: import('../services/attachment-staging-service.js').AttachmentStagingService
 ): void {
   // Search emails tool
   server.registerTool('imap_search_emails', {
@@ -488,6 +489,10 @@ export function emailTools(
         'Parallel array to attachmentPaths overriding the basename used as filename. ' +
         'Use "" or omit an entry to keep the basename.'
       ),
+      stagedAttachmentIds: z.array(z.string()).optional().describe(
+        'WP2: array of stagingIds from imap_attachment_stage_finalize. The server reads each ' +
+        'assembled blob, attaches it, and deletes the staging session on successful send.'
+      ),
       appendToSent: z.boolean().optional().default(true).describe(
         'Append the sent message to the IMAP Sent folder after a successful SMTP send. Default true.'
       ),
@@ -504,6 +509,7 @@ export function emailTools(
   }, withErrorHandling(async ({
     accountId, to, subject, text, html, cc, bcc, replyTo, attachments,
     attachmentPaths, attachmentContentTypes, attachmentFilenames,
+    stagedAttachmentIds,
     appendToSent, sentFolderOverride, forceAppendToSent, isReply,
   }) => {
     const dbAccount = db.getDecryptedAccount(accountId);
@@ -585,6 +591,68 @@ export function emailTools(
       }
     }
 
+    // ---- WP2: resolve staged attachments ----
+    const stagedAttachments: Array<{ filename: string; path: string; contentType: string; stagingId: string }> = [];
+    if (stagedAttachmentIds && stagedAttachmentIds.length > 0) {
+      if (!staging) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              result: 'staged_attachments_unavailable',
+              error: 'Attachment staging service is not available on this server.',
+            }, null, 2)
+          }]
+        };
+      }
+      const userId = (() => {
+        try {
+          const u = db.getUserByUsername(process.env.MCP_USER_ID || 'default');
+          return u?.user_id ?? null;
+        } catch { return null; }
+      })();
+      if (!userId) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              result: 'staged_attachments_unauthorized',
+              error: 'Unable to resolve current user from MCP_USER_ID.',
+            }, null, 2)
+          }]
+        };
+      }
+      const missing: string[] = [];
+      for (const sid of stagedAttachmentIds) {
+        const f = staging.getFinalized(userId, sid);
+        if (!f) {
+          missing.push(sid);
+          continue;
+        }
+        stagedAttachments.push({
+          filename: f.filename,
+          path: f.assembledPath,
+          contentType: f.contentType,
+          stagingId: sid,
+        });
+      }
+      if (missing.length > 0) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              result: 'staged_attachments_not_found',
+              missingStagingIds: missing,
+              hint: 'Either the stagingId is invalid, expired, owned by another user, not finalized, or already consumed.',
+            }, null, 2)
+          }]
+        };
+      }
+    }
+
     const emailComposer = {
       from: account.user,
       to, subject, text, html, cc, bcc, replyTo,
@@ -596,6 +664,11 @@ export function emailTools(
           contentType: att.contentType,
         })) ?? []),
         ...validatedPathAttachments,
+        ...stagedAttachments.map(s => ({
+          filename: s.filename,
+          path: s.path,
+          contentType: s.contentType,
+        })),
       ],
     };
 
@@ -611,9 +684,20 @@ export function emailTools(
             success: false,
             result: 'send_failed',
             error: error?.message ?? 'Unknown SMTP error',
+            classified: error?.classified,
+            retriesAttempted: error?.retriesAttempted,
           }, null, 2)
         }]
       };
+    }
+
+    // ---- 1b. consume staged attachments now that the send succeeded ----
+    if (staging && stagedAttachments.length > 0) {
+      for (const s of stagedAttachments) {
+        try { await staging.consume(s.stagingId); } catch {
+          // Best-effort cleanup; the GC sweep will catch lingering files later.
+        }
+      }
     }
 
     const baseResult = {
@@ -810,6 +894,132 @@ export function emailTools(
               attemptCount: i.attemptCount,
               lastError: i.lastError,
               expiresAt: i.expiresAt.toISOString(),
+            })),
+          }, null, 2)
+        }]
+      };
+    }));
+  }
+
+  // ---- WP2 attachment staging tools ----
+  if (staging) {
+    server.registerTool('imap_attachment_stage_init', {
+      description:
+        'Begin a chunked attachment upload. Returns a stagingId, server-recommended chunkSizeBytes ' +
+        '(default 256 KiB), and an expiresAt timestamp (default 1 hour). Subsequent chunks are sent ' +
+        'via imap_attachment_stage_append. Per-user disk quota is enforced — the call fails if the ' +
+        "session's expectedSize would exceed it.",
+      inputSchema: {
+        filename: z.string().describe('Original filename (used as the attachment basename).'),
+        expectedSize: z.number().int().nonnegative().describe('Total size the client intends to upload, in bytes.'),
+        contentType: z.string().optional().describe('MIME type. Defaults to application/octet-stream.'),
+        ttlSeconds: z.number().int().positive().optional().describe('Override the default 1-hour TTL.'),
+      }
+    }, withErrorHandling(async ({ filename, expectedSize, contentType, ttlSeconds }) => {
+      const userId = (() => {
+        try { return db.getUserByUsername(process.env.MCP_USER_ID || 'default')?.user_id ?? null; }
+        catch { return null; }
+      })();
+      if (!userId) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({
+            success: false, error: 'Unable to resolve user from MCP_USER_ID',
+          }, null, 2) }]
+        };
+      }
+      const result = await staging.init({
+        userId, filename, expectedSize, contentType,
+        ttlMs: ttlSeconds ? ttlSeconds * 1000 : undefined,
+      });
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ success: true, ...result }, null, 2) }]
+      };
+    }));
+
+    server.registerTool('imap_attachment_stage_append', {
+      description:
+        'Append one chunk to a staging session. Chunks may arrive out-of-order; duplicate chunkIndex ' +
+        'is idempotent. Set isFinal=true on the last chunk to auto-finalize and skip an explicit ' +
+        'imap_attachment_stage_finalize call.',
+      inputSchema: {
+        stagingId: z.string().describe('From imap_attachment_stage_init'),
+        chunkIndex: z.number().int().nonnegative().describe('0-indexed position in the byte stream.'),
+        chunkData: z.string().describe('Base64-encoded chunk bytes.'),
+        isFinal: z.boolean().optional().default(false).describe('If true, finalize after this chunk.'),
+      }
+    }, withErrorHandling(async ({ stagingId, chunkIndex, chunkData, isFinal }) => {
+      const result = await staging.append({ stagingId, chunkIndex, chunkData, isFinal });
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ success: true, ...result }, null, 2) }]
+      };
+    }));
+
+    server.registerTool('imap_attachment_stage_finalize', {
+      description:
+        'Concatenate the uploaded chunks in order, compute SHA-256, mark the session ready for use ' +
+        'in imap_send_email via stagedAttachmentIds. Required only if no append call set isFinal=true.',
+      inputSchema: {
+        stagingId: z.string().describe('From imap_attachment_stage_init'),
+      }
+    }, withErrorHandling(async ({ stagingId }) => {
+      const result = await staging.finalize({ stagingId });
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ success: true, ...result }, null, 2) }]
+      };
+    }));
+
+    server.registerTool('imap_attachment_stage_cancel', {
+      description: 'Discard a staging session and reclaim its disk space.',
+      inputSchema: {
+        stagingId: z.string().describe('From imap_attachment_stage_init'),
+      }
+    }, withErrorHandling(async ({ stagingId }) => {
+      await staging.cancel(stagingId);
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ success: true, stagingId }, null, 2) }]
+      };
+    }));
+
+    server.registerTool('imap_list_staged_attachments', {
+      description:
+        'List staging sessions for the current user (or all users if no userId is provided and the ' +
+        'caller is admin context). Useful for debugging and quota checks.',
+      inputSchema: {
+        limit: z.number().int().positive().optional().default(50),
+      }
+    }, withErrorHandling(async ({ limit }) => {
+      const userId = (() => {
+        try { return db.getUserByUsername(process.env.MCP_USER_ID || 'default')?.user_id ?? null; }
+        catch { return null; }
+      })();
+      if (!userId) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({
+            success: false, error: 'Unable to resolve user',
+          }, null, 2) }]
+        };
+      }
+      const items = staging.list({ userId, limit });
+      const bytesInUse = staging.userBytesInUse(userId);
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            count: items.length,
+            bytesInUse,
+            items: items.map((r) => ({
+              stagingId: r.staging_id,
+              filename: r.filename,
+              contentType: r.content_type,
+              expectedSize: r.expected_size,
+              currentSize: r.current_size,
+              chunksReceived: r.chunks_received,
+              finalized: !!r.finalized,
+              consumedAt: r.consumed_at ? new Date(r.consumed_at).toISOString() : null,
+              expiresAt: new Date(r.expires_at).toISOString(),
+              createdAt: new Date(r.created_at).toISOString(),
+              sha256: r.sha256,
             })),
           }, null, 2)
         }]
