@@ -5,6 +5,79 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.15.0] - 2026-04-30
+
+### v2.0 Reliability & Attachments — full ship
+
+Completes the v2.0 spec (tracker #97). Four work packages, all merged:
+
+- **WP4** Sent Folder Placement (#98 / PR #110)
+- **WP3** SMTP Send Hardening (#99 / PR #111)
+- **WP1** Attachment-by-Reference (#100 / PR #112)
+- **WP2** Attachment Staging API (#101 / PR #113)
+
+Tool surface: **80 → 91** (+11). Schema: **1.7.0 → 1.10.0** (3 reversible migrations).
+
+#### ✨ Added
+
+**Sent Folder Placement (WP4, PR #110)**
+- `imap_send_email` now appends sent messages to the user's IMAP Sent folder by default. Resolution chain: cache → SPECIAL-USE `\Sent` (RFC 6154) → provider preset (Gmail / Outlook / iCloud / Fastmail / Yahoo / Hostinger / Zoho / GMX / ProtonMail / Mailbox.org / Posteo) → fallback name probe → optional auto-create → failed.
+- New params on `imap_send_email`: `appendToSent` (default `true`), `sentFolderOverride`, `forceAppendToSent`, `isReply`.
+- Bcc preserved in the Sent copy per RFC 5322 §3.6.3 (via `MailComposer` with `keepBcc=true`); SMTP delivery path still strips Bcc as required.
+- Gmail special-case: APPEND auto-skipped because Gmail server-copies sent messages (override with `forceAppendToSent`).
+- Structured `result` codes: `sent_and_archived`, `sent_not_archived`, `send_failed`. APPEND failure does **not** fail the SMTP send.
+- Durable APPEND retry queue: failed APPENDs queued AES-256-GCM encrypted, retried every 5 min for 24 h, surfaced via `imap_list_unarchived_sends`.
+- New tools: `imap_test_sent_folder`, `imap_list_unarchived_sends`.
+
+**SMTP Send Hardening (WP3, PR #111)**
+- Pooled SMTP transports via nodemailer pool, keyed by accountId; configurable max-connections / idle-timeout / max-lifetime / health-check.
+- Retry classifier with 4 categories: transient / permanent / authentication / configuration. Exponential backoff with jitter, default 3 attempts / 1 s base / 30 s cap. Auth failures explicitly do **not** retry.
+- Provider-aware error guidance for the common auth-failure modes (Gmail app passwords, Outlook modern auth, Yahoo / iCloud / Fastmail app passwords, ProtonMail Bridge).
+- Per-account SMTP metrics: send total, success/failure, retry counts split by category, durations, last-error.
+- New tools: `imap_test_smtp` (TLS info, EHLO capabilities, AUTH methods, RTT, optional verbose transcript), `imap_get_smtp_metrics`, `imap_reset_smtp_metrics`.
+
+**Attachment-by-Reference (WP1, PR #112)**
+- New `imap_send_email` params: `attachmentPaths` (string[]), `attachmentContentTypes` (string[]), `attachmentFilenames` (string[]). Server reads, validates, encodes — no base64 in the JSON payload.
+- Validation gate: absolute path required; literal `..` segments rejected before realpath; `fs.realpath` then containment check inside allowed dirs (allowed dirs themselves realpath'd up front to handle e.g. macOS `/tmp` → `/private/tmp` symlinks); regular-file + readable + per-file size cap + aggregate size cap.
+- Multi-tenant per-user override: `users.allowed_attachment_dirs` column (CSV) takes precedence over the global `IMAP_MCP_ALLOWED_ATTACHMENT_DIRS`.
+- MIME detection via `mime-types`; filenames sanitized per RFC 2183 (separators → `_`, leading dots stripped, control chars dropped, capped at 255 bytes).
+- Existing base64 `content` workflow unchanged.
+
+**Attachment Staging API (WP2, PR #113)**
+- 4-step chunked upload: `imap_attachment_stage_init` → `imap_attachment_stage_append × N` → `imap_attachment_stage_finalize` → `imap_send_email stagedAttachmentIds=[...]`. Or `imap_attachment_stage_cancel` to discard.
+- Out-of-order chunks reassemble correctly; duplicate `chunkIndex` is idempotent.
+- Storage: `{stagingDir}/{userId}/{stagingId}/chunk-NNNNNN.bin`; finalize streams through SHA-256 and concatenates into `assembled.bin`.
+- Per-user disk quota enforced at init (`IMAP_MCP_MAX_STAGING_BYTES_PER_USER`, default 500 MiB). Default 1-hour TTL, configurable per session.
+- 15-min GC sweep drops expired sessions; consumed sessions cleaned on send success.
+- New tools: `imap_attachment_stage_init`, `imap_attachment_stage_append`, `imap_attachment_stage_finalize`, `imap_attachment_stage_cancel`, `imap_list_staged_attachments`.
+
+#### 🛠️ Changed
+
+- `imap_send_email` returns a structured `result` field: `sent_and_archived` / `sent_not_archived` / `send_failed` / `attachment_validation_failed` / `staged_attachments_not_found` / `staged_attachments_unavailable` / `staged_attachments_unauthorized`. Existing callers that only checked `success: true` still work but now also have actionable diagnostic info on failure paths.
+- `imap_send_email`'s `attachments[]` legacy form is unchanged; new `attachmentPaths`, `stagedAttachmentIds`, and additional/optional params are additive.
+
+#### 🐛 Fixed
+
+- **`imap_append_message` had been silently failing** with "Command failed" since it was added (PR #52). The wrapper passed `{ flags, internalDate }` as a single object to ImapFlow's `client.append()` whose API takes `(path, content, flags, idate)` as **positional args**. Surfaced during WP4 verification against a real IMAP server. Affects every prior caller of `imap_append_message`.
+
+#### 📊 Schema migrations (1.7.0 → 1.10.0, all reversible)
+
+- `1.7.0 → 1.8.0` — `sent_folder_cache` + `append_retry_queue` (WP4)
+- `1.8.0 → 1.9.0` — `users.allowed_attachment_dirs` column (WP1)
+- `1.9.0 → 1.10.0` — `attachment_staging` table (WP2)
+
+#### 🛡️ Backward compatibility
+
+No breaking changes. Existing tool invocations without the new params behave identically (defaults preserve prior behavior; e.g., `appendToSent` defaults to `true` but Gmail auto-skips so no unexpected duplicates). All 17 `IMAP_MCP_*` env vars from earlier releases continue to work; new ones are additive.
+
+#### 🧪 Verification
+
+Each WP shipped with a live-data harness that ran against real IMAP/SMTP accounts. Results captured in the per-PR descriptions:
+- WP4: 4/4 against Hostinger + Gmail
+- WP3: 7/7 (classifier table + provider lookup + backoff + live `testSmtp` + pool reuse + auth-no-retry)
+- WP1: 15/15 (validator gate cases)
+- WP2: 8/8 (10 MiB chunked upload SHA-256 match, out-of-order, duplicate, quota, cancel, GC, multi-user)
+
 ## [2.14.0] - 2026-04-29
 
 ### Anthropic SDK Alignment & Claude Desktop Extension (.mcpb)
