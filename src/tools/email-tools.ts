@@ -742,6 +742,70 @@ export function emailTools(
     }));
   }
 
+  // ---- WP3 diagnostic + metrics tools ----
+  server.registerTool('imap_test_smtp', {
+    description:
+      'Probe SMTP connectivity for an account without sending. Returns TLS version & cipher, ' +
+      'certificate validity & expiry, server greeting, EHLO capabilities, AUTH methods, RTT, ' +
+      'auth pass/fail, and provider-aware guidance for known auth-failure patterns (Gmail app ' +
+      "passwords, Outlook app passwords, etc.). Use 'verbose' to include the raw SMTP transcript.",
+    inputSchema: {
+      accountId: z.string().describe('Account ID'),
+      verbose: z.boolean().optional().default(false).describe('Include the raw SMTP transcript in the response.'),
+      testAuth: z.boolean().optional().default(true).describe('Attempt AUTH after connect. Default true.'),
+    }
+  }, withErrorHandling(async ({ accountId, verbose, testAuth }) => {
+    const dbAccount = db.getDecryptedAccount(accountId);
+    if (!dbAccount) throw new AccountNotFoundError(accountId);
+    const account = {
+      id: dbAccount.account_id, name: dbAccount.name, host: dbAccount.host, port: dbAccount.port,
+      user: dbAccount.username, password: dbAccount.password, tls: dbAccount.tls,
+      smtp: dbAccount.smtp_host ? {
+        host: dbAccount.smtp_host, port: dbAccount.smtp_port!,
+        secure: dbAccount.smtp_secure || false,
+        user: dbAccount.smtp_username, password: dbAccount.smtp_password,
+      } : undefined,
+    };
+    const result = await smtpService.testSmtp(account, { verbose, testAuth });
+    return {
+      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
+    };
+  }));
+
+  server.registerTool('imap_get_smtp_metrics', {
+    description:
+      'Get per-account SMTP metrics: send total, success/failure counts, retry counts (split ' +
+      'by error category), last-send duration and timestamp, last error info. Pass no accountId ' +
+      'to retrieve metrics for all accounts that have sent.',
+    inputSchema: {
+      accountId: z.string().optional().describe('Account ID (omit for all accounts)'),
+    }
+  }, withErrorHandling(async ({ accountId }) => {
+    const metrics = smtpService.getSmtpMetrics(accountId);
+    const pool = smtpService.getPoolStats();
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({ accounts: metrics, pool }, null, 2)
+      }]
+    };
+  }));
+
+  server.registerTool('imap_reset_smtp_metrics', {
+    description: 'Reset SMTP metrics for an account (or all accounts if omitted).',
+    inputSchema: {
+      accountId: z.string().optional().describe('Account ID (omit to reset all)'),
+    }
+  }, withErrorHandling(async ({ accountId }) => {
+    smtpService.resetSmtpMetrics(accountId);
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({ success: true, scope: accountId ?? 'all' }, null, 2)
+      }]
+    };
+  }));
+
   // Reply to email tool
   server.registerTool('imap_reply_to_email', {
     description: 'Reply to an existing email',
