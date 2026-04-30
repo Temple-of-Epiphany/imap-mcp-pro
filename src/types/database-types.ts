@@ -16,6 +16,8 @@ export interface User {
   updated_at: string;
   is_active: boolean;
   metadata?: string; // JSON string
+  /** WP1: comma-separated list of absolute paths the user may read attachments from. */
+  allowed_attachment_dirs?: string | null;
 }
 
 export interface Account {
