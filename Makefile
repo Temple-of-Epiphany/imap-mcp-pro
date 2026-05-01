@@ -4,7 +4,7 @@
 # Author: Colin Bitterfield
 # Email: colin.bitterfield@templeofepiphany.com
 # Date: 2025-11-06
-# Version: 1.0.0
+# Version: 1.1.0
 
 .PHONY: help install uninstall start stop restart status logs update test build clean backup restore migrate migrate-status migrate-rollback migrate-dry-run
 
@@ -71,6 +71,10 @@ else
     SERVICE_CMD := sc
 endif
 
+# Actual database path — hardcoded in DatabaseService regardless of DATA_DIR
+ACTUAL_DATA_DB := $(HOME)/.imap-mcp/data.db
+ACTUAL_DATA_KEY := $(HOME)/.imap-mcp/.encryption-key
+
 help:
 	@echo "IMAP MCP Pro - Installation & Service Management"
 	@echo ""
@@ -106,22 +110,32 @@ build:
 	@echo "Build complete!"
 
 install: build
-	@if [ -f "$(INSTALL_DIR)/package.json" ] && [ -f "$(DATA_DIR)/data.db" ]; then \
+	@if [ -f "$(INSTALL_DIR)/package.json" ] || [ -f "$(ACTUAL_DATA_DB)" ] || [ -f "$(ACTUAL_DATA_KEY)" ]; then \
 		echo "========================================"; \
 		echo "Existing installation detected"; \
 		echo "========================================"; \
 		echo "Install Dir: $(INSTALL_DIR)"; \
-		echo "Data Dir: $(DATA_DIR)"; \
+		echo "Database:    $(ACTUAL_DATA_DB)"; \
 		echo ""; \
-		echo "Running update instead of fresh install..."; \
+		echo "Running update instead of fresh install (data preserved)."; \
 		echo ""; \
 		$(MAKE) update-internal; \
 	else \
-		echo "Installing IMAP MCP Pro..."; \
-		echo "Platform: $(PLATFORM)"; \
-		echo "Install Type: $(INSTALL_TYPE)"; \
+		echo "========================================"; \
+		echo "Fresh installation"; \
+		echo "========================================"; \
+		echo "Platform:    $(PLATFORM)"; \
 		echo "Install Dir: $(INSTALL_DIR)"; \
-		bash scripts/install.sh $(PLATFORM) $(INSTALL_TYPE) "$(INSTALL_DIR)" "$(CONFIG_DIR)" "$(DATA_DIR)" "$(LOG_DIR)" "$(SERVICE_FILE)"; \
+		echo "Database:    $(ACTUAL_DATA_DB)"; \
+		echo ""; \
+		printf "No existing data found. Proceed with fresh install? [y/N] "; \
+		read CONFIRM; \
+		if [ "$$CONFIRM" = "y" ] || [ "$$CONFIRM" = "Y" ]; then \
+			bash scripts/install.sh $(PLATFORM) $(INSTALL_TYPE) "$(INSTALL_DIR)" "$(CONFIG_DIR)" "$(DATA_DIR)" "$(LOG_DIR)" "$(SERVICE_FILE)"; \
+		else \
+			echo "Aborted."; \
+			exit 1; \
+		fi; \
 	fi
 
 uninstall:
@@ -185,7 +199,7 @@ update-internal:
 		const fs = require('fs'); \
 		const path = require('path'); \
 		const Database = require('better-sqlite3'); \
-		const dbPath = path.join(process.env.HOME || '.', '.local/share/imap-mcp/data.db'); \
+		const dbPath = path.join(process.env.HOME || '.', '.imap-mcp', 'data.db'); \
 		if (fs.existsSync(dbPath)) { \
 			const db = new Database(dbPath); \
 			const currentVersion = db.prepare('SELECT version FROM schema_version ORDER BY applied_at DESC LIMIT 1').get(); \

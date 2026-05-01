@@ -2,7 +2,7 @@
 # IMAP MCP Pro - Installation Script
 # Author: Colin Bitterfield <colin.bitterfield@templeofepiphany.com>
 # Date: 2025-11-06
-# Version: 1.0.0
+# Version: 1.1.0
 
 set -e
 
@@ -252,6 +252,15 @@ EOF
     echo "✓ Systemd service installed at $SERVICE_FILE"
     echo "  Use 'make start' to start the Web UI service"
 fi
+
+# ---------------------------------------------------------------
+# Backup setup (fresh install only)
+# ---------------------------------------------------------------
+echo ""
+echo "==========================================="
+echo "Backup Setup"
+echo "==========================================="
+bash "$(dirname "$0")/setup-backup-cron.sh"
 
 echo ""
 echo "===========================================
