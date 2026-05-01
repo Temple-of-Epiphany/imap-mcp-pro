@@ -7,6 +7,7 @@ import { WorkerPool } from '../utils/worker-pool.js';
 import { SentFolderService } from '../services/sent-folder-service.js';
 import { AppendRetryService } from '../services/append-retry-service.js';
 import { AttachmentStagingService } from '../services/attachment-staging-service.js';
+import { MessageCacheService } from '../services/message-cache-service.js';
 import { accountTools } from './account-tools.js';
 import { emailTools } from './email-tools.js';
 import { folderTools } from './folder-tools.js';
@@ -19,6 +20,7 @@ import { capabilityTools } from './capability-tools.js';
 import { dnsFirewallTools } from './dns-firewall-tools.js';
 import { categoryTools } from './category-tools.js';
 import { resultTools } from './result-tools.js';
+import { cacheTools } from './cache-tools.js';
 import { getAnnotations } from './annotations.js';
 
 /**
@@ -51,7 +53,8 @@ export function registerTools(
   workerPool?: WorkerPool,
   sentFolder?: SentFolderService,
   appendRetry?: AppendRetryService,
-  staging?: AttachmentStagingService
+  staging?: AttachmentStagingService,
+  messageCache?: MessageCacheService
 ): void {
   // Inject MCP annotations on every registerTool call (drives Claude
   // Desktop's Tool Permissions UI). Restored after the registration phase
@@ -92,6 +95,11 @@ export function registerTools(
   // Register consolidated imap_results tool (resource-handle pattern)
   if (results) {
     resultTools(server, db, results);
+  }
+
+  // Register v2.17.0 MVP cache tools (Issue #124)
+  if (messageCache) {
+    cacheTools(server, messageCache);
   }
 
   // Register meta/discovery tools

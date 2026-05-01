@@ -99,6 +99,14 @@ export const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
   'imap_attachment_stage_cancel':      WRITE_LOCAL,
   'imap_list_staged_attachments':      READ_ONLY,
 
+  // ---- v2.17.0 MVP cache (Issue #124) ----
+  // sync_folder_cache: reads remote (IMAP) and writes local DB rows. Treat
+  // as READ_REMOTE because the user-facing effect is "I'm reading these
+  // messages" — the local cache is an implementation detail, not user state.
+  'imap_sync_folder_cache':            READ_REMOTE,
+  // search_cache: pure local DB read, no IMAP traffic.
+  'imap_search_cache':                 READ_ONLY,
+
   // ---- folder-tools (6) ----
   'imap_list_folders':                 READ_REMOTE,
   'imap_folder_status':                READ_REMOTE,

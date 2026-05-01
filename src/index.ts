@@ -13,6 +13,7 @@ import { ResultsService } from './services/results-service.js';
 import { SentFolderService } from './services/sent-folder-service.js';
 import { AppendRetryService } from './services/append-retry-service.js';
 import { AttachmentStagingService, DEFAULT_STAGING_CONFIG } from './services/attachment-staging-service.js';
+import { MessageCacheService } from './services/message-cache-service.js';
 import os from 'os';
 import { WorkerPool } from './utils/worker-pool.js';
 import { registerTools } from './tools/index.js';
@@ -51,7 +52,7 @@ await dispatchCli({
 
 const {
   server, imapService, smtpService, db, fileExport, results, workerPool,
-  sentFolderService, appendRetryService, attachmentStaging,
+  sentFolderService, appendRetryService, attachmentStaging, messageCache,
 } = await timeStage('pre-handshake', async () => {
     // 1. Load + validate config
     let config;
@@ -108,10 +109,13 @@ const {
       perUserMaxBytes: Number(process.env.IMAP_MCP_MAX_STAGING_BYTES_PER_USER ?? 500 * 1024 * 1024),
     });
 
+    // 6d. v2.17.0 MVP: local message header cache (no I/O at construction time)
+    const messageCache = new MessageCacheService(db, imapService);
+
     // 7. Tool schema registration
     registerTools(
       server, imapService, db, smtpService, results, workerPool,
-      sentFolderService, appendRetryService, attachmentStaging
+      sentFolderService, appendRetryService, attachmentStaging, messageCache
     );
 
     // Mark unused config field as intentional for now
@@ -119,7 +123,7 @@ const {
 
     return {
       server, imapService, smtpService, db, fileExport, results, workerPool,
-      sentFolderService, appendRetryService, attachmentStaging,
+      sentFolderService, appendRetryService, attachmentStaging, messageCache,
     };
   });
 
@@ -194,9 +198,10 @@ async function buildToolsManifest(): Promise<unknown> {
     ...DEFAULT_STAGING_CONFIG,
     stagingDir: path.join(os.homedir(), '.imap-mcp', 'staging'),
   });
+  const tmpMessageCache = new MessageCacheService(tmpDb, tmpImap);
   registerTools(
     tmpServer, tmpImap, tmpDb, tmpSmtp, tmpResults, tmpWorkerPool,
-    tmpSentFolder, tmpAppendRetry, tmpStaging
+    tmpSentFolder, tmpAppendRetry, tmpStaging, tmpMessageCache
   );
 
   // Pull the registered tools out of McpServer's internal map. This is
@@ -262,3 +267,4 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 // keep refs alive
 void imapService; void smtpService; void db; void sentFolderService;
+void messageCache;
