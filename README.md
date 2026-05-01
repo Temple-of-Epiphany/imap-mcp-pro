@@ -6,7 +6,7 @@ An enterprise-grade Model Context Protocol (MCP) server that provides production
 
 ## Features
 
-**91 MCP tools** across email/folder/account/category/scoring/subscription/dns-firewall/usercheck/staging/diagnostics — every IMAP4rev2 (RFC 9051) operation we use is exposed.
+**95 MCP tools** across email/folder/account/category/scoring/subscription/dns-firewall/usercheck/staging/cache/diagnostics — every IMAP4rev2 (RFC 9051) operation we use is exposed.
 
 ### Core Features
 - 🔐 **Secure Account Management**: Encrypted credential storage with AES-256 encryption
@@ -19,6 +19,13 @@ An enterprise-grade Model Context Protocol (MCP) server that provides production
 - 🌐 **Web-Based Setup Wizard**: Easy account configuration with provider presets
 - 📱 **15+ Email Providers**: Pre-configured settings for Gmail, Outlook, Yahoo, and more
 - 🔗 **Auto SMTP Configuration**: Automatic SMTP settings based on IMAP provider
+
+### Local Message Cache + Auto-installed Skills (v2.17.0+)
+
+- **Local SQLite header cache** for fast sender enumeration. `imap_sync_folder_cache` populates a per-folder cache; `imap_search_cache` runs `group_by_sender` / `by_domain` / `by_address` queries against it in milliseconds. Validated end-to-end against a 1500-message INBOX: cold sync 1.7s, warm group-by-sender 4ms.
+- **UIDVALIDITY-aware delta sync**: subsequent syncs only fetch new UIDs. Mailbox renumbering is detected automatically and triggers a full resync.
+- **Cache-miss is explicit**: `imap_search_cache` returns a structured `cache_miss` error when a folder has not been synced — no silent IMAP fallback. The skill orchestrates the order.
+- **Auto-installed skills**: bundled Claude skills (`unsubscribe-cleanup` in v2.17.0) are copied to `~/.claude/skills/imap-mcp-pro/` on server startup. Idempotent: skips when versions match, updates when the bundle is newer, preserves on-disk content with a higher version. Disable via `IMAP_MCP_SKIP_SKILLS_INSTALL=1`.
 
 ### v2.0 Reliability & Attachments (v2.15.0+)
 
