@@ -26,14 +26,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14         # arm64
+          - os: macos-14         # Apple Silicon
             label: macos-arm64
-          - os: macos-13         # x86_64
-            label: macos-x64
           - os: windows-latest
             label: windows-x64
           - os: ubuntu-latest
             label: linux-x64
+          # macos-x64 (Intel) intentionally dropped — GitHub-hosted macos-13
+          # runners are queue-starved through 2026 (Apple Silicon transition).
+          # macOS Intel users can run the linux-x64 .mcpb under Rosetta or
+          # build from source. Tracked in commit history; revisit if a clean
+          # macos-x64 runner pool returns.
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
