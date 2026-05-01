@@ -14,6 +14,7 @@ import { SentFolderService } from './services/sent-folder-service.js';
 import { AppendRetryService } from './services/append-retry-service.js';
 import { AttachmentStagingService, DEFAULT_STAGING_CONFIG } from './services/attachment-staging-service.js';
 import { MessageCacheService } from './services/message-cache-service.js';
+import { SkillsInstallerService } from './services/skills-installer-service.js';
 import os from 'os';
 import { WorkerPool } from './utils/worker-pool.js';
 import { registerTools } from './tools/index.js';
@@ -163,6 +164,29 @@ void timeStage('post-handshake', async () => {
     logEvent('[startup]', { component: 'staging-gc', msg: 'GC timer started' });
   } catch (e: any) {
     logEvent('[startup]', { component: 'staging-gc', outcome: 'error', error: e?.message });
+  }
+
+  // v2.17.0 MVP (#124): copy bundled skills to ~/.claude/skills/imap-mcp-pro/.
+  // Idempotent — skips skills already at the bundled version. Best-effort:
+  // a failure here is logged but never blocks tool availability.
+  try {
+    const bundleDir = path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      'skills',
+    );
+    const installer = new SkillsInstallerService(bundleDir);
+    const r = await installer.install();
+    logEvent('[startup]', {
+      component: 'skills-install',
+      installed: r.installed,
+      updated: r.updated,
+      unchanged: r.unchanged.length,
+      preserved: r.preserved,
+      skipped: r.skipped,
+      durationMs: r.durationMs,
+    });
+  } catch (e: any) {
+    logEvent('[startup]', { component: 'skills-install', outcome: 'error', error: e?.message });
   }
 });
 
