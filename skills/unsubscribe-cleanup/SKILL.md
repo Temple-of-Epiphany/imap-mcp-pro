@@ -1,9 +1,9 @@
 ---
 name: unsubscribe-cleanup
-version: "0.1.0"
+version: "0.1.1"
 description: "Find and execute newsletter unsubscribes safely using imap-mcp-pro. Enumerates senders ranked by message count, filters to genuine bulk-mail (List-Unsubscribe header present, never replied to), presents candidates for user confirmation, and executes selected unsubscribes via the existing imap_execute_unsubscribe pipeline. Use when the user wants to reduce newsletter clutter, stop receiving promotional mail, or clean up subscription noise."
 date_created: 2026-04-30
-date_updated: 2026-04-30
+date_updated: 2026-05-01
 ---
 
 # Unsubscribe Cleanup
@@ -49,6 +49,31 @@ This skill depends on the `imap-mcp-pro` MCP server being installed and connecte
 
 If any required tool is missing, stop and tell the user the MCP server needs upgrading to v2.17.0 or later.
 
+## Asking the user questions
+
+**Always use plain Markdown** — numbered lists, prose, fenced lists. **NEVER use `<ask_user_input_v0>`, `ask_user_choice`, `ChoicePrompt`, or any other tool-call XML tag** when interacting with the user.
+
+Why: those tags render as a structured chooser only inside the **claude.ai** web app. In **Claude Desktop** (where this MCP's users actually run), they emit as raw XML in chat — looks broken, confuses the user, and blocks the workflow.
+
+**Wrong** — would render as raw `<ask_user_input_v0>...</ask_user_input_v0>` text in Claude Desktop:
+
+```
+<ask_user_input_v0>
+  <questions>[{"question":"Pick one","options":["A","B"],"type":"single_select"}]</questions>
+</ask_user_input_v0>
+```
+
+**Right** — plain Markdown, works everywhere:
+
+```markdown
+Two things I need from you before proceeding:
+
+1. **Which to unsubscribe?** Reply with numbers ("1, 3, 5"), a sender name, or "all but #4".
+2. **Default deletion behavior?** Type one: `Trash`, `Archive`, or `skip` (only unsubscribe, leave existing messages alone).
+```
+
+If the user has already stated a preference earlier in the conversation, just proceed without re-asking.
+
 ## Workflow
 
 ### Step 1 — Confirm scope
@@ -56,8 +81,24 @@ If any required tool is missing, stop and tell the user the MCP server needs upg
 Ask the user (or infer from context):
 
 1. **Account** — which IMAP account? Use `imap_list_accounts` to show options if unclear. Default to the user's primary account.
-2. **Folder** — default `INBOX`. Don't operate on `Sent`, `Trash`, `Junk`, or `_Pending_Cleanup`.
+2. **Folder** — see "Folder selection" below; the right default depends on the provider.
 3. **Date range** — default last 90 days. The user might say "last 6 months" or "all of 2025" — convert to a since-date.
+
+#### Folder selection
+
+| Provider (host contains) | Recommended folder | Why |
+|---|---|---|
+| `gmail.com` / `googlemail.com` / `imap.gmail.com` | **`[Gmail]/All Mail`** | Gmail's tabbed inbox (Primary / Promotions / Updates / Forums / Social) hides newsletters from the IMAP `INBOX` view — Promotions/Updates messages are filtered out. `INBOX` typically shows *only* the Primary tab via IMAP, so scanning it misses 90%+ of newsletters. `[Gmail]/All Mail` covers everything but is slower (10K+ messages typical). |
+| Outlook / Office 365 / iCloud / Hostinger / others | **`INBOX`** | These providers don't filter newsletters out of IMAP `INBOX`. |
+| User-specified | what they said | Honor explicit instructions. |
+
+**Do not** operate on `Sent`, `Trash`, `Junk`, or `_Pending_Cleanup`.
+
+**Detection** — call `imap_list_accounts`, inspect each account's `host` field:
+- `imap.gmail.com` or anything matching `(gmail|googlemail)\.com$` → Gmail
+- otherwise → standard `INBOX`
+
+If you're scanning a Gmail account's `INBOX` and the result has fewer than ~10 senders, **explicitly tell the user** the inbox looked nearly empty because Gmail tabs aren't IMAP folders, and offer to retry against `[Gmail]/All Mail`.
 
 Confirm scope back to the user in one sentence before proceeding: *"I'll look at INBOX in your Gmail account for newsletters received in the last 90 days."*
 

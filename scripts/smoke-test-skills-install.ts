@@ -78,8 +78,10 @@ async function main() {
   const r3 = await installer.install();
   console.log(`    installed: ${JSON.stringify(r3.installed)}, updated: ${JSON.stringify(r3.updated)}, durationMs: ${r3.durationMs}`);
   const restoredVersion = await readVersion(path.join(installDir, 'unsubscribe-cleanup'));
-  const t3ok = r3.updated.includes('unsubscribe-cleanup') && restoredVersion === '0.1.0';
-  console.log(`    updated + version restored to bundled (${restoredVersion}): ${t3ok ? '✓' : '✗'}`);
+  // Read the version the bundle ships, so this assertion stays in sync with version bumps.
+  const bundledVersion = await readVersion(path.join(bundleDir, 'unsubscribe-cleanup'));
+  const t3ok = r3.updated.includes('unsubscribe-cleanup') && restoredVersion === bundledVersion;
+  console.log(`    updated + version restored to bundled (${restoredVersion}, bundle=${bundledVersion}): ${t3ok ? '✓' : '✗'}`);
 
   // ---- Test 4: Newer on-disk version preserved ----
   console.log('\n[4] Newer on-disk version preserved');
