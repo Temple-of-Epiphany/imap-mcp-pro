@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Temple-of-Epiphany/imap-mcp-pro/blob/main/SECURITY.md
+    about: Please follow our responsible disclosure process — do not open a public issue.
+  - name: Question / discussion
+    url: https://github.com/Temple-of-Epiphany/imap-mcp-pro/issues/new?labels=question
+    about: For usage questions, configuration help, or general discussion. Use the bug-report template if something is actually broken.
+  - name: Commercial licensing inquiry
+    url: mailto:colin.bitterfield@templeofepiphany.com
+    about: For MSP / multi-tenant deployments requiring a commercial license.
