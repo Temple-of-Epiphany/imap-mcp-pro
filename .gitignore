@@ -26,6 +26,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# Claude Code local state (per-clone settings, worktrees, skills cache)
+.claude/
+
 # Test coverage
 coverage/
 .nyc_output/
