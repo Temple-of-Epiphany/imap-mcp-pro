@@ -1140,6 +1140,52 @@ export class ImapService {
     }, `bulkRemoveKeyword(${folderName}, ${keyword}, ${uids.length} messages)`);
   }
 
+  // ============================================================================
+  // v2.17.0 MVP: header fetch for MessageCacheService (Issue #124)
+  // ============================================================================
+
+  /**
+   * Open a folder and fetch envelope + flags + raw headers for a UID range.
+   * Returns the folder's current UIDVALIDITY/UIDNEXT alongside the messages
+   * so the caller can detect mailbox renumbering and decide whether to wipe
+   * the local cache.
+   *
+   * Pass `uidRange = null` to skip the fetch entirely (useful when the caller
+   * only needs the UIDVALIDITY/UIDNEXT to decide there's nothing new to fetch).
+   */
+  async fetchHeadersForCache(
+    accountId: string,
+    folderName: string,
+    uidRange: string | null,
+    options?: { headers?: string[] }
+  ): Promise<{
+    uidValidity: number;
+    uidNext: number;
+    messages: FetchMessageObject[];
+  }> {
+    return this.withRetry(accountId, async () => {
+      const client = this.getConnection(accountId);
+      const mailbox = await client.mailboxOpen(folderName);
+      const uidValidity = Number(mailbox.uidValidity ?? 0);
+      const uidNext = Number(mailbox.uidNext ?? 0);
+
+      const messages: FetchMessageObject[] = [];
+      if (uidRange !== null) {
+        const fetchOpts: any = {
+          uid: true,
+          flags: true,
+          envelope: true,
+          headers: options?.headers ?? ['list-unsubscribe'],
+        };
+        for await (const msg of client.fetch(uidRange, fetchOpts, { uid: true })) {
+          messages.push(msg);
+        }
+      }
+
+      return { uidValidity, uidNext, messages };
+    }, `fetchHeadersForCache(${folderName}, ${uidRange ?? 'status-only'})`);
+  }
+
   // RFC 9051: APPEND command (Issue #52)
   async appendMessage(
     accountId: string,

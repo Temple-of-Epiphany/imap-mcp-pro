@@ -13,15 +13,21 @@
  *   - Multi-folder sync (one folder per call)
  *   - Body cache, FTS5 index
  *
+ * Cache-miss heuristic: a folder is considered "synced" when at least one row
+ * exists for (account_id, folder). MVP limitation — an empty folder that was
+ * legitimately synced will look like a cache miss. Acceptable for v2.17.0;
+ * v2.18.0 may add a folder_cache_state table to track sync without rows.
+ *
  * Author: Colin Bitterfield
  * Email: colin.bitterfield@templeofepiphany.com
  * Date Created: 2026-04-30
  * Date Updated: 2026-04-30
- * Version: 0.1.0
+ * Version: 0.2.0
  */
 
 import { DatabaseService } from './database-service.js';
 import { ImapService } from './imap-service.js';
+import type { FetchMessageObject } from 'imapflow';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -95,6 +101,105 @@ export class CacheMissError extends Error {
 }
 
 // ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/** Pull domain off "user@host" → "host" (lowercase). */
+function extractDomain(address: string | null): string | null {
+  if (!address) return null;
+  const at = address.lastIndexOf('@');
+  if (at < 0 || at === address.length - 1) return null;
+  return address.slice(at + 1).toLowerCase();
+}
+
+/** Find a header in imapflow's raw-headers Buffer (case-insensitive,
+ *  handles folded continuation lines). */
+function extractHeader(headersBuf: Buffer | undefined, name: string): string | null {
+  if (!headersBuf || headersBuf.length === 0) return null;
+  const text = headersBuf.toString('utf8');
+  const lines = text.split(/\r?\n/);
+  const lowerName = name.toLowerCase() + ':';
+  let value: string | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.toLowerCase().startsWith(lowerName)) {
+      value = line.slice(lowerName.length).trim();
+      // Continuation lines start with whitespace; concatenate.
+      while (i + 1 < lines.length && /^[ \t]/.test(lines[i + 1])) {
+        i++;
+        value += ' ' + lines[i].trim();
+      }
+      return value;
+    }
+  }
+  return null;
+}
+
+/** Convert imapflow's FetchMessageObject into a CachedMessageRow. */
+function toCacheRow(
+  accountId: string,
+  folder: string,
+  uidValidity: number,
+  cachedAt: number,
+  msg: FetchMessageObject,
+): CachedMessageRow | null {
+  if (!msg || typeof msg.uid !== 'number') return null;
+
+  const fromEntry = msg.envelope?.from?.[0];
+  const fromAddrRaw = fromEntry?.address ?? null;
+  const fromAddress = fromAddrRaw ? fromAddrRaw.toLowerCase() : null;
+  const fromDomain = extractDomain(fromAddress);
+  const fromName = fromEntry?.name ?? null;
+
+  // imapflow gives `headers` as a Buffer when fetched via `headers: [...]`.
+  const headersBuf = (msg as any).headers as Buffer | undefined;
+  const listUnsubscribe = extractHeader(headersBuf, 'List-Unsubscribe');
+
+  const date = msg.envelope?.date instanceof Date ? msg.envelope.date.getTime()
+             : msg.envelope?.date ? new Date(msg.envelope.date as any).getTime()
+             : null;
+
+  return {
+    accountId,
+    folder,
+    uid: msg.uid,
+    uidValidity,
+    messageId: msg.envelope?.messageId ?? null,
+    dateReceived: date,
+    subject: msg.envelope?.subject ?? null,
+    fromAddress,
+    fromDomain,
+    fromName,
+    listUnsubscribe,
+    flags: msg.flags ? Array.from(msg.flags) : [],
+    cachedAt,
+  };
+}
+
+/** Row coming back from SQLite → typed CachedMessageRow. */
+function rowFromDb(r: any): CachedMessageRow {
+  let flags: string[] = [];
+  try {
+    if (r.flags_json) flags = JSON.parse(r.flags_json);
+  } catch { /* swallow */ }
+  return {
+    accountId: r.account_id,
+    folder: r.folder,
+    uid: r.uid,
+    uidValidity: r.uid_validity,
+    messageId: r.message_id,
+    dateReceived: r.date_received,
+    subject: r.subject,
+    fromAddress: r.from_address,
+    fromDomain: r.from_domain,
+    fromName: r.from_name,
+    listUnsubscribe: r.list_unsubscribe,
+    flags,
+    cachedAt: r.cached_at,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
 
@@ -108,79 +213,270 @@ export class MessageCacheService {
    * Sync a folder's headers into the local cache. Idempotent.
    *
    * Behavior:
-   *   1. Resolve current UIDVALIDITY from IMAP.
-   *   2. If the cache holds rows for this (accountId, folder) at a different
-   *      UIDVALIDITY (or fullResync=true), drop those rows.
-   *   3. UID FETCH headers for every UID not already in the cache at the
-   *      current UIDVALIDITY. Insert rows.
-   *   4. Return a report with row counts + duration.
-   *
-   * @throws AccountNotFoundError, FolderNotFoundError, ImapConnectionError
+   *   1. Read existing cache state (count, max uid, uid_validity).
+   *   2. Open IMAP folder, read current UIDVALIDITY + UIDNEXT.
+   *   3. If cached UIDVALIDITY differs (or fullResync=true), wipe rows.
+   *   4. Fetch every UID > max-cached-UID (or 1:* on full resync).
+   *   5. INSERT OR REPLACE rows in a single transaction.
+   *   6. Return a SyncFolderReport.
    */
   async syncFolder(
-    _accountId: string,
-    _folder: string,
-    _options: SyncFolderOptions = {},
+    accountId: string,
+    folder: string,
+    options: SyncFolderOptions = {},
   ): Promise<SyncFolderReport> {
-    throw new Error('MessageCacheService.syncFolder: not yet implemented (v2.17.0 MVP.1)');
+    const start = Date.now();
+    const rawDb = this.db.getDb();
+
+    // 1. Existing cache state for this folder.
+    const existing = rawDb.prepare(
+      `SELECT
+         COUNT(*)          AS count,
+         MAX(uid)          AS max_uid,
+         MAX(uid_validity) AS uid_validity
+       FROM messages_cache
+       WHERE account_id = $a AND folder = $f`
+    ).get({ $a: accountId, $f: folder }) as
+      | { count: number; max_uid: number | null; uid_validity: number | null }
+      | undefined;
+
+    const rowsBefore = existing?.count ?? 0;
+    const cachedUidValidity = existing?.uid_validity ?? null;
+    const maxCachedUid = existing?.max_uid ?? 0;
+
+    // 2. Resolve current IMAP folder state (no fetch yet).
+    const head = await this.imap.fetchHeadersForCache(accountId, folder, null);
+    const currentUidValidity = head.uidValidity;
+    const currentUidNext = head.uidNext;
+
+    // 3. Decide: full resync or incremental?
+    const uidValidityChanged =
+      cachedUidValidity !== null && cachedUidValidity !== currentUidValidity;
+    const fullResync = options.fullResync === true || uidValidityChanged;
+
+    if (fullResync && rowsBefore > 0) {
+      rawDb.prepare(
+        `DELETE FROM messages_cache WHERE account_id = $a AND folder = $f`
+      ).run({ $a: accountId, $f: folder });
+    }
+
+    const baseRows = fullResync ? 0 : rowsBefore;
+
+    // 4. Compute UID range. Skip fetch entirely when there's nothing new.
+    const fetchFrom = fullResync ? 1 : maxCachedUid + 1;
+    const nothingNew = currentUidNext > 0 && fetchFrom >= currentUidNext;
+
+    let rowsAdded = 0;
+    if (!nothingNew) {
+      const uidRange = `${fetchFrom}:*`;
+      const fetched = await this.imap.fetchHeadersForCache(accountId, folder, uidRange);
+
+      // 5. Insert in a single transaction for performance.
+      const insert = rawDb.prepare(`
+        INSERT OR REPLACE INTO messages_cache (
+          account_id, folder, uid, uid_validity, message_id, date_received,
+          subject, from_address, from_domain, from_name, list_unsubscribe,
+          flags_json, cached_at
+        ) VALUES (
+          $accountId, $folder, $uid, $uidValidity, $messageId, $dateReceived,
+          $subject, $fromAddress, $fromDomain, $fromName, $listUnsubscribe,
+          $flagsJson, $cachedAt
+        )
+      `);
+
+      const cachedAt = Date.now();
+      rawDb.exec('BEGIN');
+      try {
+        for (const msg of fetched.messages) {
+          const row = toCacheRow(accountId, folder, currentUidValidity, cachedAt, msg);
+          if (!row) continue;
+          insert.run({
+            $accountId: row.accountId,
+            $folder: row.folder,
+            $uid: row.uid,
+            $uidValidity: row.uidValidity,
+            $messageId: row.messageId,
+            $dateReceived: row.dateReceived,
+            $subject: row.subject,
+            $fromAddress: row.fromAddress,
+            $fromDomain: row.fromDomain,
+            $fromName: row.fromName,
+            $listUnsubscribe: row.listUnsubscribe,
+            $flagsJson: JSON.stringify(row.flags),
+            $cachedAt: row.cachedAt,
+          });
+          rowsAdded++;
+        }
+        rawDb.exec('COMMIT');
+      } catch (e) {
+        try { rawDb.exec('ROLLBACK'); } catch { /* swallow */ }
+        throw e;
+      }
+    }
+
+    return {
+      accountId,
+      folder,
+      uidValidity: currentUidValidity,
+      uidValidityChanged,
+      rowsBefore,
+      rowsAfter: baseRows + rowsAdded,
+      rowsAdded,
+      rowsUpdated: 0,                   // INSERT OR REPLACE doesn't distinguish
+      durationMs: Date.now() - start,
+    };
   }
 
-  /**
-   * Return cached rows where from_domain matches `domain` (case-insensitive).
-   * Throws CacheMissError if the folder has never been synced.
-   */
+  /** Throw CacheMissError if the folder has no cached rows. */
+  private assertSynced(accountId: string, folder: string): void {
+    const row = this.db.getDb().prepare(
+      `SELECT 1 FROM messages_cache WHERE account_id = $a AND folder = $f LIMIT 1`
+    ).get({ $a: accountId, $f: folder });
+    if (!row) throw new CacheMissError(accountId, folder);
+  }
+
   async searchByFromDomain(
-    _accountId: string,
-    _folder: string,
-    _domain: string,
-    _options: SearchOptions = {},
+    accountId: string,
+    folder: string,
+    domain: string,
+    options: SearchOptions = {},
   ): Promise<CachedMessageRow[]> {
-    throw new Error('MessageCacheService.searchByFromDomain: not yet implemented (v2.17.0 MVP.1)');
+    this.assertSynced(accountId, folder);
+    const limit = Math.min(options.limit ?? 50, 1000);
+    const params: Record<string, unknown> = {
+      $a: accountId,
+      $f: folder,
+      $d: domain.toLowerCase(),
+      $limit: limit,
+    };
+    let where = `account_id = $a AND folder = $f AND from_domain = $d`;
+    if (options.since !== undefined) { where += ` AND date_received >= $since`; params.$since = options.since; }
+    if (options.until !== undefined) { where += ` AND date_received <= $until`; params.$until = options.until; }
+
+    const rows = this.db.getDb().prepare(
+      `SELECT * FROM messages_cache WHERE ${where}
+       ORDER BY date_received DESC LIMIT $limit`
+    ).all(params as any) as any[];
+
+    return rows.map(rowFromDb);
   }
 
-  /**
-   * Return cached rows where from_address matches `address` exactly
-   * (case-insensitive). Throws CacheMissError if the folder has never been synced.
-   */
   async searchByFromAddress(
-    _accountId: string,
-    _folder: string,
-    _address: string,
-    _options: SearchOptions = {},
+    accountId: string,
+    folder: string,
+    address: string,
+    options: SearchOptions = {},
   ): Promise<CachedMessageRow[]> {
-    throw new Error('MessageCacheService.searchByFromAddress: not yet implemented (v2.17.0 MVP.1)');
+    this.assertSynced(accountId, folder);
+    const limit = Math.min(options.limit ?? 50, 1000);
+    const params: Record<string, unknown> = {
+      $a: accountId,
+      $f: folder,
+      $addr: address.toLowerCase(),
+      $limit: limit,
+    };
+    let where = `account_id = $a AND folder = $f AND from_address = $addr`;
+    if (options.since !== undefined) { where += ` AND date_received >= $since`; params.$since = options.since; }
+    if (options.until !== undefined) { where += ` AND date_received <= $until`; params.$until = options.until; }
+
+    const rows = this.db.getDb().prepare(
+      `SELECT * FROM messages_cache WHERE ${where}
+       ORDER BY date_received DESC LIMIT $limit`
+    ).all(params as any) as any[];
+
+    return rows.map(rowFromDb);
   }
 
-  /**
-   * Group cached rows by from_address, return top N senders by message count.
-   * Throws CacheMissError if the folder has never been synced.
-   */
   async groupBySender(
-    _accountId: string,
-    _folder: string,
-    _options: SearchOptions = {},
+    accountId: string,
+    folder: string,
+    options: SearchOptions = {},
   ): Promise<SenderGroupRow[]> {
-    throw new Error('MessageCacheService.groupBySender: not yet implemented (v2.17.0 MVP.1)');
+    this.assertSynced(accountId, folder);
+    const limit = Math.min(options.limit ?? 50, 1000);
+    const params: Record<string, unknown> = {
+      $a: accountId,
+      $f: folder,
+      $limit: limit,
+    };
+    let where = `account_id = $a AND folder = $f AND from_address IS NOT NULL`;
+    if (options.since !== undefined) { where += ` AND date_received >= $since`; params.$since = options.since; }
+    if (options.until !== undefined) { where += ` AND date_received <= $until`; params.$until = options.until; }
+
+    const rows = this.db.getDb().prepare(
+      `SELECT
+         from_address                                              AS from_address,
+         MIN(from_domain)                                          AS from_domain,
+         MIN(COALESCE(from_name, ''))                              AS from_name,
+         COUNT(*)                                                  AS count,
+         MAX(date_received)                                        AS last_seen,
+         MAX(CASE WHEN list_unsubscribe IS NOT NULL THEN 1 ELSE 0 END)
+                                                                   AS list_unsubscribe_present
+       FROM messages_cache
+       WHERE ${where}
+       GROUP BY from_address
+       ORDER BY count DESC, last_seen DESC
+       LIMIT $limit`
+    ).all(params as any) as Array<{
+      from_address: string;
+      from_domain: string | null;
+      from_name: string;
+      count: number;
+      last_seen: number | null;
+      list_unsubscribe_present: number;
+    }>;
+
+    return rows.map(r => ({
+      fromAddress: r.from_address,
+      fromDomain: r.from_domain ?? '',
+      fromName: r.from_name === '' ? null : r.from_name,
+      count: r.count,
+      lastSeen: r.last_seen ?? 0,
+      listUnsubscribePresent: r.list_unsubscribe_present === 1,
+    }));
   }
 
-  /**
-   * Drop cache rows for one folder (folder=string) or an entire account
-   * (folder=undefined). Returns the number of rows removed.
-   */
-  async invalidate(_accountId: string, _folder?: string): Promise<number> {
-    throw new Error('MessageCacheService.invalidate: not yet implemented (v2.17.0 MVP.1)');
+  /** Drop cache rows for one folder or an entire account. Returns rows removed. */
+  async invalidate(accountId: string, folder?: string): Promise<number> {
+    const rawDb = this.db.getDb();
+    const result = folder !== undefined
+      ? rawDb.prepare(
+          `DELETE FROM messages_cache WHERE account_id = $a AND folder = $f`
+        ).run({ $a: accountId, $f: folder })
+      : rawDb.prepare(
+          `DELETE FROM messages_cache WHERE account_id = $a`
+        ).run({ $a: accountId });
+    return Number(result.changes ?? 0);
   }
 
-  /**
-   * Diagnostic: per-folder cached row count + last sync time.
-   * Read-only; safe to call before any sync has happened (returns []).
-   */
-  async getStatus(_accountId: string): Promise<Array<{
+  /** Per-folder cached row count + last sync time. Read-only; safe before sync. */
+  async getStatus(accountId: string): Promise<Array<{
     folder: string;
     rowCount: number;
     uidValidity: number;
     lastCachedAt: number;
   }>> {
-    throw new Error('MessageCacheService.getStatus: not yet implemented (v2.17.0 MVP.1)');
+    const rows = this.db.getDb().prepare(
+      `SELECT folder,
+              COUNT(*)             AS row_count,
+              MIN(uid_validity)    AS uid_validity,
+              MAX(cached_at)       AS last_cached_at
+       FROM messages_cache
+       WHERE account_id = $a
+       GROUP BY folder
+       ORDER BY folder`
+    ).all({ $a: accountId }) as Array<{
+      folder: string;
+      row_count: number;
+      uid_validity: number;
+      last_cached_at: number;
+    }>;
+
+    return rows.map(r => ({
+      folder: r.folder,
+      rowCount: r.row_count,
+      uidValidity: r.uid_validity,
+      lastCachedAt: r.last_cached_at,
+    }));
   }
 }
