@@ -1,0 +1,57 @@
+name: CI
+
+# Run on every push to main and on every PR opened against main.
+# This is the cheap "does it compile" check — heavyweight work (per-platform
+# .mcpb builds) lives in build-dxt.yml and only fires on tag push.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build (linux-x64, node 22)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript build
+        run: npm run build
+
+      - name: Verify dist artifacts
+        shell: bash
+        run: |
+          test -f dist/index.js                          # entrypoint
+          test -f dist/database/schema.sql               # base schema copied
+          ls dist/database/schema_update_*.sql > /dev/null  # migrations copied
+          test -f dist/database/migrations-manifest.json # manifest copied
+          # Skills bundle (v2.17.0+) — optional check, skip cleanly when absent
+          if [ -d skills ]; then
+            test -f dist/skills/manifest.json
+          fi
+
+      - name: Verify tools manifest renders
+        run: |
+          OUT=$(node dist/index.js --print-tools-manifest)
+          # Sanity check: should be valid JSON with at least 90 tools
+          echo "$OUT" | node -e "
+            const j = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            if (!Array.isArray(j.tools) || j.tools.length < 90) {
+              console.error('Tools manifest looks wrong: ' + (j.tools?.length ?? 'no tools array'));
+              process.exit(1);
+            }
+            console.log('Tools manifest OK: ' + j.tools.length + ' tools');
+          "
