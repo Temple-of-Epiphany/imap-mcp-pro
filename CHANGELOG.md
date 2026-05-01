@@ -5,6 +5,75 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.17.0] - 2026-05-01
+
+### Local message cache + first auto-installed skill
+
+This release lands the first piece of the v3.0 bulk-operations effort: a local SQLite header cache that makes sender enumeration, domain lookups, and "top N senders" queries return in milliseconds against folders with thousands of messages, plus the auto-install mechanism that delivers a Claude skill alongside the MCP server. Together they enable the `unsubscribe-cleanup` workflow without needing the user to hand-copy any skill files.
+
+Tool count: 93 → 95.
+
+#### ✨ Added
+
+- **`imap_sync_folder_cache`** — populate the local `messages_cache` table for one folder. Idempotent: subsequent calls fetch only UIDs since the last sync. UIDVALIDITY change triggers a full resync automatically. Returns `{ rowsAdded, rowsAfter, durationMs, uidValidity, uidValidityChanged }`. Reads remote (IMAP) and writes the local cache; annotated `READ_REMOTE` because the user-facing effect is reading messages — the cache is an implementation detail.
+- **`imap_search_cache`** — fast SQL-backed search against the local cache. Three modes:
+  - `by_domain` — rows where `from_domain` matches (case-insensitive).
+  - `by_address` — rows where `from_address` matches exactly.
+  - `group_by_sender` — top-N senders ranked by message count, with `list_unsubscribe_present` flag for quick newsletter identification.
+  - Optional `since` filter accepts relative ("90d", "24h") or ISO date.
+  - Cache miss returns an explicit structured `cache_miss` error — no silent IMAP fallback. The skill orchestrates the order.
+- **Auto-installed skills** (`SkillsInstallerService`). On startup, the server copies bundled skills from inside its package to `~/.claude/skills/imap-mcp-pro/<skill-name>/`. Idempotent: skips when versions match, updates when the bundle is newer, preserves on-disk content when its version is ahead of the bundle. Disable via `IMAP_MCP_SKIP_SKILLS_INSTALL=1`.
+- **`unsubscribe-cleanup` skill** (v0.1.0) bundled inside the `.mcpb`. Wraps `imap_sync_folder_cache` + `imap_search_cache` + the existing PR #45 unsubscribe pipeline (`imap_list_unsubscribe_candidates`, `imap_get_unsubscribe_links`, `imap_execute_unsubscribe`, `imap_mark_subscription_unsubscribed`) into a confirmation-gated workflow. Source of truth lives in `Temple-of-Epiphany/claude-skills-library`; this `.mcpb` ships a vendored snapshot.
+
+#### 🛠️ Changed
+
+- **Schema migration `1.10.0 → 1.11.0`** — adds `messages_cache` table with indexes on `(account_id, from_domain)`, `(account_id, from_address)`, and `(account_id, date_received)`. Reversible via the matching `.down.sql`. FK to `accounts` cascades on account delete.
+- **`scripts/postbuild.mjs`** — now also copies `skills/` → `dist/skills/` so the bundle ends up inside the `.mcpb` archive (no `dxt/build.mjs` change needed; existing `dist/` staging carries the skills along).
+- **`ImapService.fetchHeadersForCache`** — new public method used by the cache. Opens the folder, reads UIDVALIDITY/UIDNEXT, optionally fetches an envelope + flags + `List-Unsubscribe` header for a UID range. Pass `uidRange = null` to skip the fetch and just inspect mailbox status.
+
+#### 🐛 Fixed
+
+- **Windows `.mcpb` build** (Issue #122). The `npm run build` script used a Unix shell chain (`mkdir -p && cp ...`) that errored on Windows `cmd.exe` with "The syntax of the command is incorrect." `tsc` compiled fine but schema files never copied to `dist/database/`, then `DatabaseService` threw `Schema file not found`. Replaced with `scripts/postbuild.mjs` — small Node script using `node:fs/promises` for cross-platform file ops. Every Windows `.mcpb` artifact build had failed since the workflow was added.
+
+#### 🧪 Validated
+
+- **Cache primitive** verified against `colin@bitterfield.com` INBOX (1537 messages):
+  - Cold sync: 1537 rows in 1.72s (target < 60s — beat by 35×)
+  - Warm re-sync: 0 new rows in 196ms (UIDVALIDITY + delta logic confirmed)
+  - `group_by_sender` warm: 20 ranked rows in 4ms (target < 200ms — beat by 50×)
+  - `by_domain` lookup: 5 rows in 1ms
+- **Cache primitive** verified against `cbitterfield@gmail.com` INBOX with same 5/5 pass — top senders correctly enumerated across 100+ msg/sender clusters.
+- **Skills installer** smoke test: fresh install / no-op re-install / update on older / preserve on newer / skip env-var — 5/5 pass.
+
+#### 📦 Distribution
+
+- Build matrix dropped `macos-x64` (macos-13 runner pool queue-starved through 2026; Apple Silicon transition complete). Future tagged releases produce 3 `.mcpb` artifacts: `macos-arm64`, `windows-x64`, `linux-x64`. macOS Intel users: run the `linux-x64` `.mcpb` under Rosetta or build from source.
+- Node ≥ 22.5 still required (`node:sqlite` baseline from v2.16.0).
+
+#### 🛡️ Backward compatibility
+
+- Existing tools untouched. **No transparent cache rewrite of `imap_search_emails` / `imap_get_email`** in this release — those still go straight to IMAP. The skill orchestrates the order: call `imap_sync_folder_cache` first, then use `imap_search_cache`. Transparent integration is deferred to a future release once cache-staleness behavior is fully understood.
+- All env vars from v2.16.0 continue to work.
+- Schema migration `1.11.0` is purely additive (one new table); existing tables unchanged.
+
+#### 🚧 MVP cuts (deferred to v2.18.0+)
+
+These were intentionally scoped out of v2.17.0 to ship the cache thesis end-to-end:
+
+- Cross-folder participants index, attachments table, FTS5, threading columns (full Track B / #119)
+- Cache mutation write-through on `imap_mark_as_read` etc. (cache silently goes stale until next `imap_sync_folder_cache` call)
+- Multi-folder sync (`imap_sync_account_cache` — currently one folder per call)
+- Full skill installer per #120: SHA-based user-edit preservation, periodic 1–4 hr TTL re-sync, configurable install path, `imap_get_skills_manifest` tool for remote consumers
+
+#### 🔗 Issues / PRs
+
+- #122 (Windows build fix) → PR #123 — merged
+- #124 (v2.17.0 MVP umbrella) — closed by this release
+- #125 (cache scaffold + implementation + skill installer) — merged
+- #126 (drop macos-x64 from matrix) — merged
+- claude-skills-library #7 (`unsubscribe-cleanup` skill content) → PR #10 — merged
+- #117, #119, #120, #121 — remain open as v3.0 roadmap
+
 ## [2.16.0] - 2026-04-30
 
 ### Hardened Claude Desktop install path
