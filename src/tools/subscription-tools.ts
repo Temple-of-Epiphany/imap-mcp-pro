@@ -64,7 +64,10 @@ export function registerSubscriptionTools(
       linksFound: 0,
       linksStored: 0,
       errors: 0,
-      emails: [] as any[]
+      emails: [] as any[],
+      // Per-message error reasons so the tool surface is debuggable on its
+      // own, without digging through MCP server stderr (issue #130).
+      failedLinks: [] as Array<{ uid: number; from: string; reason: string }>
     };
 
     // Process each email
@@ -112,8 +115,14 @@ export function registerSubscriptionTools(
             has_list_unsubscribe_header: !!unsubscribeInfo.list_unsubscribe_header
           });
         }
-      } catch (error) {
+      } catch (error: any) {
         results.errors++;
+        const reason = error?.message ?? String(error);
+        results.failedLinks.push({
+          uid: email.uid,
+          from: email.from,
+          reason: reason.slice(0, 500),       // cap to keep response reasonable
+        });
         console.error(`[SubscriptionTools] Error processing email ${email.uid}:`, error);
       }
     }
@@ -131,7 +140,9 @@ export function registerSubscriptionTools(
             errors: results.errors,
             elapsed_ms: elapsed
           },
-          emails: results.emails
+          emails: results.emails,
+          // Only include when non-empty to avoid noise on healthy runs.
+          ...(results.failedLinks.length > 0 ? { failedLinks: results.failedLinks } : {})
         }, null, 2)
       }]
     };

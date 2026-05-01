@@ -27,9 +27,12 @@ This patch makes `package.json` the single source of truth.
 
 No tool surface, schema, or behavior changes. Pure release-hygiene patch.
 
-#### 🚧 Known stale (not fixed in this patch)
+- **`imap_extract_unsubscribe_links` now surfaces per-message error reasons** (Issue #130). The tool was reporting `errors: N` with no detail; the actual error went to server stderr only. Response now includes a `failedLinks: [{uid, from, reason}]` array (omitted when empty). Diagnostic-only — does not change which messages succeed or fail. Root-cause fix for the underlying store-path failure is tracked in #130 part 2 and depends on the data this surfacing makes visible.
+
+#### 🚧 Known issues (not fixed in this patch)
 
 - `src/web/server.ts` has three more hardcoded version strings (2.9.0, 2.12.0). The embedded web UI is not exercised by the `.mcpb` distribution; will be fixed when the web UI gets a broader review.
+- `imap_extract_unsubscribe_links` body-fetching path can exceed the MCP transport timeout on large folders (#131). The `imap_search_cache` cache-based path is the recommended alternative; the body-fetch path needs a time/row budget and partial-result return.
 
 ## [2.17.0] - 2026-05-01
 
