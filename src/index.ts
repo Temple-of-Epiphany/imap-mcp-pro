@@ -23,13 +23,31 @@ import { loadConfig, ConfigError } from './config/loader.js';
 import { logEvent, timeStage, SERVER_CAPABILITIES } from './startup.js';
 import { PACKAGE_VERSION } from './utils/package-info.js';
 
-// Silence any package version output to stdout
+// Filter stdout to keep stray library chatter (npm-style version banners,
+// dotenv config dumps, etc.) from corrupting the JSON-RPC stream that
+// Claude Desktop reads. The MCP transport is line-delimited JSON over
+// stdout — anything that isn't a JSON-RPC payload would parse as garbage.
+//
+// Bug history (v2.17.3, #137): the previous filter only allowed string
+// writes starting with `{`. Node's stdout switches from string writes to
+// Buffer writes once a payload exceeds the default highWaterMark (~8KB
+// on macOS/Linux). Any tool response over that threshold —
+// `imap_get_unsubscribe_links` with 17 rows being the canonical case —
+// got silently dropped, causing the MCP client to hang waiting for bytes
+// that never arrived. Fixed: pass Buffers through unconditionally; only
+// filter strings that don't look like JSON-RPC.
 const originalWrite = process.stdout.write.bind(process.stdout);
 (process.stdout.write as any) = function(chunk: any, encoding?: any, callback?: any): boolean {
-  // Only allow JSON-RPC messages through
+  // Buffers always pass through. They're either MCP SDK fragments (any
+  // non-trivial response will be a Buffer) or already-validated bytes.
+  if (Buffer.isBuffer(chunk) || chunk instanceof Uint8Array) {
+    return originalWrite(chunk, encoding, callback);
+  }
+  // Strings: allow JSON-RPC payloads (`{…}`) and bare newlines (delimiters).
   if (typeof chunk === 'string' && (chunk.startsWith('{') || chunk === '\n')) {
     return originalWrite(chunk, encoding, callback);
   }
+  // Anything else is library chatter — drop, preserving the v2.17.2 intent.
   return true;
 };
 
