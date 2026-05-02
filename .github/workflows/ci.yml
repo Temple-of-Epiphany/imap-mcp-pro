@@ -11,6 +11,14 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Force JavaScript actions (actions/checkout, actions/setup-node, etc.) onto
+# Node.js 24. GitHub deprecated Node 20 in their action runtime — without
+# this opt-in, every run logs the deprecation warning, and Node 20 will be
+# removed entirely on 2026-09-16. Setting this env var now buys us safe
+# forward compatibility without bumping individual action SHAs.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   build:
     name: Build (linux-x64, node 22)
