@@ -175,7 +175,9 @@ export class SkillsInstallerService {
 // Internal: trivial semver compare (MVP — no prerelease handling)
 // ---------------------------------------------------------------------------
 
-function compareSemver(a: string, b: string): number {
+/** Trivial semver compare. Returns negative if a<b, zero if equal, positive
+ *  if a>b. No prerelease handling (MVP). Exported for unit tests. */
+export function compareSemver(a: string, b: string): number {
   const partsA = a.split('.').map((n) => parseInt(n, 10) || 0);
   const partsB = b.split('.').map((n) => parseInt(n, 10) || 0);
   for (let i = 0; i < 3; i++) {

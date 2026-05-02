@@ -104,8 +104,9 @@ export class CacheMissError extends Error {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/** Pull domain off "user@host" → "host" (lowercase). */
-function extractDomain(address: string | null): string | null {
+/** Pull domain off "user@host" → "host" (lowercase).
+ *  Exported for unit tests (src/services/message-cache-service.test.ts). */
+export function extractDomain(address: string | null): string | null {
   if (!address) return null;
   const at = address.lastIndexOf('@');
   if (at < 0 || at === address.length - 1) return null;
@@ -113,8 +114,9 @@ function extractDomain(address: string | null): string | null {
 }
 
 /** Find a header in imapflow's raw-headers Buffer (case-insensitive,
- *  handles folded continuation lines). */
-function extractHeader(headersBuf: Buffer | undefined, name: string): string | null {
+ *  handles folded continuation lines).
+ *  Exported for unit tests (src/services/message-cache-service.test.ts). */
+export function extractHeader(headersBuf: Buffer | undefined, name: string): string | null {
   if (!headersBuf || headersBuf.length === 0) return null;
   const text = headersBuf.toString('utf8');
   const lines = text.split(/\r?\n/);
