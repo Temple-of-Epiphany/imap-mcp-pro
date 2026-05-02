@@ -16,6 +16,13 @@ on:
       - 'v*.*.*'
   workflow_dispatch:
 
+# Force JavaScript actions onto Node.js 24. GitHub deprecated Node 20 in
+# their action runtime — without this opt-in, every run logs the deprecation
+# warning, and Node 20 will be removed entirely on 2026-09-16. See
+# https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 permissions:
   contents: write  # needed for release upload
 
