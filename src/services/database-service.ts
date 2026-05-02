@@ -285,6 +285,25 @@ export class DatabaseService {
     return stmt.all() as unknown as User[];
   }
 
+  /**
+   * Resolve a caller-supplied user identifier to the canonical `users.user_id`
+   * (UUID). Accepts either form:
+   *
+   *   - canonical user_id UUID  → returned as-is if it exists
+   *   - username (e.g. "colin") → looked up; returns the matched user_id
+   *
+   * Returns null if neither resolution succeeds — caller must surface a
+   * clear "unknown user" error rather than letting an FK constraint fail
+   * deep in an unrelated insert path (issue #130).
+   */
+  resolveUserId(input: string): string | null {
+    if (!input) return null;
+    const byId = this.getUser(input);
+    if (byId) return byId.user_id;
+    const byName = this.getUserByUsername(input);
+    return byName ? byName.user_id : null;
+  }
+
   updateUser(userId: string, updates: Partial<User>): void {
     const fields: string[] = [];
     const values: any = { user_id: userId };

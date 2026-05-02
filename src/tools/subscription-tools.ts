@@ -19,6 +19,33 @@ import { UnsubscribeService } from '../services/unsubscribe-service.js';
 import { UnsubscribeExecutorService } from '../services/unsubscribe-executor-service.js';
 import { withErrorHandling } from '../utils/error-handler.js';
 
+/**
+ * Thrown when the caller-supplied `userId` doesn't match any row in the
+ * users table by UUID or by username. `withErrorHandling` converts this
+ * into a structured error response back to the LLM with a clear hint.
+ */
+class UnknownUserError extends Error {
+  constructor(provided: string) {
+    super(
+      `Unknown user: "${provided}". Pass a valid user_id (UUID) or a username ` +
+      `that exists in the users table. Call imap_list_users to see valid values.`
+    );
+    this.name = 'UnknownUserError';
+  }
+}
+
+/**
+ * Resolve `userId` input (UUID or username) → canonical UUID. Throws
+ * UnknownUserError if neither match — this stops FK constraint failures
+ * deep in INSERT paths (issue #130) by failing fast at the tool boundary
+ * with a clear, actionable error.
+ */
+function resolveUserOrThrow(db: DatabaseService, input: string): string {
+  const resolved = db.resolveUserId(input);
+  if (!resolved) throw new UnknownUserError(input);
+  return resolved;
+}
+
 export function registerSubscriptionTools(
   server: McpServer,
   imapService: ImapService,
@@ -34,15 +61,16 @@ export function registerSubscriptionTools(
   server.registerTool('imap_extract_unsubscribe_links', {
     description: 'Scan folder for unsubscribe links in emails. Extracts List-Unsubscribe headers and body links. Stores to database for subscription management. Processes 100+ emails efficiently.',
     inputSchema: {
-      userId: z.string().describe('User ID'),
+      userId: z.string().describe('User ID (either canonical user_id UUID or username from the users table). Call imap_list_users for valid values.'),
       accountId: z.string().describe('Account ID'),
       folder: z.string().default('INBOX').describe('Folder name'),
       limit: z.number().optional().default(100).describe('Max emails to process (default: 100)'),
       olderThan: z.number().optional().describe('Optional: Only process emails older than N days')
     }
-  }, withErrorHandling(async ({ userId, accountId, folder, limit, olderThan }: {
+  }, withErrorHandling(async ({ userId: userIdRaw, accountId, folder, limit, olderThan }: {
     userId: string; accountId: string; folder: string; limit?: number; olderThan?: number
   }) => {
+    const userId = resolveUserOrThrow(db, userIdRaw);
     const startTime = Date.now();
 
     // Build search criteria
@@ -154,14 +182,15 @@ export function registerSubscriptionTools(
   server.registerTool('imap_get_subscription_summary', {
     description: 'Get aggregated subscription summary. Shows all senders with unsubscribe links, email counts, categories, and unsubscribe status. Filter by category or unsubscribed status.',
     inputSchema: {
-      userId: z.string().describe('User ID'),
+      userId: z.string().describe('User ID (either canonical user_id UUID or username from the users table). Call imap_list_users for valid values.'),
       category: z.enum(['marketing', 'newsletter', 'promotional', 'transactional', 'other']).optional().describe('Filter by category'),
       unsubscribed: z.boolean().optional().describe('Filter by unsubscribe status'),
       sortBy: z.enum(['last_seen', 'total_emails', 'sender_email']).optional().default('last_seen').describe('Sort by field')
     }
-  }, withErrorHandling(async ({ userId, category, unsubscribed, sortBy }: {
+  }, withErrorHandling(async ({ userId: userIdRaw, category, unsubscribed, sortBy }: {
     userId: string; category?: string; unsubscribed?: boolean; sortBy?: string
   }) => {
+    const userId = resolveUserOrThrow(db, userIdRaw);
     let subscriptions = unsubscribeService.getSubscriptionSummary(userId, { category, unsubscribed });
 
     // Sort results
@@ -214,10 +243,11 @@ export function registerSubscriptionTools(
   server.registerTool('imap_mark_subscription_unsubscribed', {
     description: 'Mark a sender as unsubscribed in the database. Records timestamp. Useful for tracking which lists you have already unsubscribed from.',
     inputSchema: {
-      userId: z.string().describe('User ID'),
+      userId: z.string().describe('User ID (either canonical user_id UUID or username from the users table). Call imap_list_users for valid values.'),
       senderEmail: z.string().describe('Sender email address to mark as unsubscribed')
     }
-  }, withErrorHandling(async ({ userId, senderEmail }: { userId: string; senderEmail: string }) => {
+  }, withErrorHandling(async ({ userId: userIdRaw, senderEmail }: { userId: string; senderEmail: string }) => {
+    const userId = resolveUserOrThrow(db, userIdRaw);
     unsubscribeService.markAsUnsubscribed(userId, senderEmail);
 
     return {
@@ -239,13 +269,14 @@ export function registerSubscriptionTools(
   server.registerTool('imap_update_subscription_category', {
     description: 'Update the category of a subscription (marketing, newsletter, promotional, transactional, other). Helps organize subscriptions.',
     inputSchema: {
-      userId: z.string().describe('User ID'),
+      userId: z.string().describe('User ID (either canonical user_id UUID or username from the users table). Call imap_list_users for valid values.'),
       senderEmail: z.string().describe('Sender email address'),
       category: z.enum(['marketing', 'newsletter', 'promotional', 'transactional', 'other']).describe('New category')
     }
-  }, withErrorHandling(async ({ userId, senderEmail, category }: {
+  }, withErrorHandling(async ({ userId: userIdRaw, senderEmail, category }: {
     userId: string; senderEmail: string; category: 'marketing' | 'newsletter' | 'promotional' | 'transactional' | 'other'
   }) => {
+    const userId = resolveUserOrThrow(db, userIdRaw);
     db.updateSubscriptionCategory(userId, senderEmail, category);
 
     return {
@@ -268,13 +299,14 @@ export function registerSubscriptionTools(
   server.registerTool('imap_update_subscription_notes', {
     description: 'Add or update notes for a subscription. Useful for tracking why you subscribed, unsubscribe difficulty, etc.',
     inputSchema: {
-      userId: z.string().describe('User ID'),
+      userId: z.string().describe('User ID (either canonical user_id UUID or username from the users table). Call imap_list_users for valid values.'),
       senderEmail: z.string().describe('Sender email address'),
       notes: z.string().describe('Notes text')
     }
-  }, withErrorHandling(async ({ userId, senderEmail, notes }: {
+  }, withErrorHandling(async ({ userId: userIdRaw, senderEmail, notes }: {
     userId: string; senderEmail: string; notes: string
   }) => {
+    const userId = resolveUserOrThrow(db, userIdRaw);
     db.updateSubscriptionNotes(userId, senderEmail, notes);
 
     return {
@@ -296,13 +328,14 @@ export function registerSubscriptionTools(
   server.registerTool('imap_get_unsubscribe_links', {
     description: 'Get all extracted unsubscribe links from emails. Filter by account or sender. Shows individual email details with unsubscribe links.',
     inputSchema: {
-      userId: z.string().describe('User ID'),
+      userId: z.string().describe('User ID (either canonical user_id UUID or username from the users table). Call imap_list_users for valid values.'),
       accountId: z.string().optional().describe('Filter by account ID'),
       senderEmail: z.string().optional().describe('Filter by sender email')
     }
-  }, withErrorHandling(async ({ userId, accountId, senderEmail }: {
+  }, withErrorHandling(async ({ userId: userIdRaw, accountId, senderEmail }: {
     userId: string; accountId?: string; senderEmail?: string
   }) => {
+    const userId = resolveUserOrThrow(db, userIdRaw);
     const links = unsubscribeService.getUnsubscribeLinks(userId, { account_id: accountId, sender_email: senderEmail });
 
     return {
@@ -334,14 +367,15 @@ export function registerSubscriptionTools(
   server.registerTool('imap_list_unsubscribe_candidates', {
     description: 'List all subscriptions with unsubscribe links. Shows sender, subject, link, method, and email count. Filter by category or unsubscribed status. Perfect for reviewing before executing unsubscribes.',
     inputSchema: {
-      userId: z.string().describe('User ID'),
+      userId: z.string().describe('User ID (either canonical user_id UUID or username from the users table). Call imap_list_users for valid values.'),
       category: z.enum(['marketing', 'newsletter', 'promotional', 'transactional', 'other']).optional().describe('Filter by category'),
       unsubscribed: z.boolean().optional().describe('Filter by unsubscribe status (default: show all)'),
       sortBy: z.enum(['last_seen', 'total_emails', 'sender_email']).optional().default('total_emails').describe('Sort by field')
     }
-  }, withErrorHandling(async ({ userId, category, unsubscribed, sortBy }: {
+  }, withErrorHandling(async ({ userId: userIdRaw, category, unsubscribed, sortBy }: {
     userId: string; category?: string; unsubscribed?: boolean; sortBy?: string
   }) => {
+    const userId = resolveUserOrThrow(db, userIdRaw);
     let subscriptions = unsubscribeService.getSubscriptionSummary(userId, { category, unsubscribed });
 
     // Only show subscriptions with unsubscribe links
@@ -388,19 +422,20 @@ export function registerSubscriptionTools(
   server.registerTool('imap_execute_unsubscribe', {
     description: 'Execute unsubscribe request for one or more senders. Supports HTTP GET/POST and mailto methods. Optional dry-run mode for testing. Updates database with execution results.',
     inputSchema: {
-      userId: z.string().describe('User ID'),
+      userId: z.string().describe('User ID (either canonical user_id UUID or username from the users table). Call imap_list_users for valid values.'),
       senderEmails: z.array(z.string()).describe('Array of sender email addresses to unsubscribe from'),
       accountId: z.string().optional().describe('Account ID (required for mailto unsubscribe)'),
       dryRun: z.boolean().optional().default(false).describe('Dry run mode - validate but do not execute'),
       method: z.enum(['auto', 'http-get', 'http-post', 'mailto']).optional().default('auto').describe('Unsubscribe method (auto detects from link)')
     }
-  }, withErrorHandling(async ({ userId, senderEmails, accountId, dryRun, method }: {
+  }, withErrorHandling(async ({ userId: userIdRaw, senderEmails, accountId, dryRun, method }: {
     userId: string;
     senderEmails: string[];
     accountId?: string;
     dryRun?: boolean;
     method?: 'auto' | 'http-get' | 'http-post' | 'mailto'
   }) => {
+    const userId = resolveUserOrThrow(db, userIdRaw);
     const results: any[] = [];
 
     for (const senderEmail of senderEmails) {
