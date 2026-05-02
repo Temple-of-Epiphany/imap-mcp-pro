@@ -17,7 +17,8 @@
     "migrate:status": "tsx src/cli/migrate.ts status",
     "migrate:dry-run": "tsx src/cli/migrate.ts dry-run",
     "migrate:rollback": "tsx src/cli/migrate.ts down",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [
     "mcp",
@@ -66,7 +67,8 @@
     "electron": "^41.3.0",
     "nodemon": "^3.1.10",
     "tsx": "^4.20.3",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.5"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",

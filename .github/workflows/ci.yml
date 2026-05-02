@@ -31,6 +31,9 @@ jobs:
       - name: TypeScript build
         run: npm run build
 
+      - name: Unit tests (vitest)
+        run: npm test
+
       - name: Verify dist artifacts
         shell: bash
         run: |
