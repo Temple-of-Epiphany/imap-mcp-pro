@@ -1,8 +1,8 @@
 {
   "name": "unsubscribe-cleanup",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "date_created": "2026-04-30",
-  "date_updated": "2026-04-30",
+  "date_updated": "2026-05-01",
   "depends_on": {
     "mcp_server": "imap-mcp-pro@>=2.17.0",
     "tools": [

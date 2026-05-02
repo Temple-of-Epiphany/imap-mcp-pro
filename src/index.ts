@@ -21,6 +21,7 @@ import { registerTools } from './tools/index.js';
 import { dispatchCli, EXIT_CODES } from './config/cli.js';
 import { loadConfig, ConfigError } from './config/loader.js';
 import { logEvent, timeStage, SERVER_CAPABILITIES } from './startup.js';
+import { PACKAGE_VERSION } from './utils/package-info.js';
 
 // Silence any package version output to stdout
 const originalWrite = process.stdout.write.bind(process.stdout);
@@ -69,7 +70,7 @@ const {
 
     // 2. Construct McpServer with explicit capabilities (closes #80)
     const server = new McpServer(
-      { name: 'imap-mcp-pro', version: '2.17.0' },
+      { name: 'imap-mcp-pro', version: PACKAGE_VERSION },
       { capabilities: SERVER_CAPABILITIES }
     );
 
@@ -203,7 +204,7 @@ async function buildToolsManifest(): Promise<unknown> {
 
   // Construct the same server object but never call server.connect().
   const tmpServer = new McpServer(
-    { name: 'imap-mcp-pro', version: '2.17.0' },
+    { name: 'imap-mcp-pro', version: PACKAGE_VERSION },
     { capabilities: SERVER_CAPABILITIES }
   );
   const tmpDb = new DatabaseService();

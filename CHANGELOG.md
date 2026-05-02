@@ -5,6 +5,35 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.17.1] - 2026-05-01
+
+### Patch — fix stale hardcoded version strings
+
+The `imap_about` tool reported `version: '2.6.0'` regardless of the actual package version — a hardcoded string in `src/tools/meta-tools.ts` that hadn't been touched since the v2.6 era. Two more occurrences in `src/index.ts` (the McpServer constructor in normal startup + the manifest-emit path) had been kept up to date manually but immediately drifted again with each release.
+
+This patch makes `package.json` the single source of truth.
+
+#### 🐛 Fixed
+
+- **`imap_about` returns the actual running version**, not a fossilized constant. Handler now reads `PACKAGE_VERSION` from a new `src/utils/package-info.ts` module that loads `package.json` at module init.
+- **`McpServer` `serverInfo.version`** (both startup paths in `src/index.ts`) reads from the same module. Bumping `package.json` is now the only step required to make the new version visible everywhere.
+
+#### 🛠️ Changed
+
+- New `src/utils/package-info.ts` exports `PACKAGE_NAME` and `PACKAGE_VERSION`. Falls back to safe defaults (`imap-mcp-pro` / `0.0.0`) if `package.json` can't be read — never crashes startup.
+- `imap_about.service.packageName` now reads from `package.json` rather than being a hardcoded literal.
+
+#### 🛡️ Backward compatibility
+
+No tool surface, schema, or behavior changes. Pure release-hygiene patch.
+
+- **`imap_extract_unsubscribe_links` now surfaces per-message error reasons** (Issue #130). The tool was reporting `errors: N` with no detail; the actual error went to server stderr only. Response now includes a `failedLinks: [{uid, from, reason}]` array (omitted when empty). Diagnostic-only — does not change which messages succeed or fail. Root-cause fix for the underlying store-path failure is tracked in #130 part 2 and depends on the data this surfacing makes visible.
+
+#### 🚧 Known issues (not fixed in this patch)
+
+- `src/web/server.ts` has three more hardcoded version strings (2.9.0, 2.12.0). The embedded web UI is not exercised by the `.mcpb` distribution; will be fixed when the web UI gets a broader review.
+- `imap_extract_unsubscribe_links` body-fetching path can exceed the MCP transport timeout on large folders (#131). The `imap_search_cache` cache-based path is the recommended alternative; the body-fetch path needs a time/row budget and partial-result return.
+
 ## [2.17.0] - 2026-05-01
 
 ### Local message cache + first auto-installed skill

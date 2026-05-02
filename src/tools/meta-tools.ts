@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { withErrorHandling } from '../utils/error-handler.js';
+import { PACKAGE_NAME, PACKAGE_VERSION } from '../utils/package-info.js';
 
 /**
  * Meta tools for service discovery and information
@@ -16,8 +17,8 @@ export function metaTools(server: McpServer): void {
       service: {
         name: 'IMAP MCP Pro',
         description: 'Enterprise-grade IMAP MCP server with Level 1-3 reliability features, circuit breaker, metrics, bulk operations, and SQLite3 database with AES-256-GCM encryption for commercial and large-scale deployments',
-        version: '2.6.0',
-        packageName: '@temple-of-epiphany/imap-mcp-pro'
+        version: PACKAGE_VERSION,
+        packageName: PACKAGE_NAME
       },
       license: {
         model: 'Dual-License',
