@@ -5,6 +5,35 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.17.3] - 2026-05-02
+
+### Patch — fix stdout filter dropping large Buffer writes (#137)
+
+`imap_get_unsubscribe_links` (and any tool whose response payload exceeds Node's stdio highWaterMark, ~8KB on macOS/Linux) hung indefinitely in Claude Desktop. Sibling tools returning smaller payloads (`imap_get_subscription_summary`, `imap_list_unsubscribe_candidates`, `imap_about`) worked instantly. Local DB query for the same 17 rows completed in 1ms — confirming the hang was purely in the transport layer.
+
+Root cause: the stdout filter installed at server startup (originally to silence stray npm-style version banners that would corrupt the JSON-RPC stream) only allowed `string` writes starting with `{`. When Node's stdout switches to Buffer writes for larger payloads, those Buffers were silently discarded — the client kept waiting for bytes that never arrived.
+
+This bug has been latent since v2.6 (when the filter was first added). Pre-v2.17 nobody hit a tool whose response exceeded ~8KB; v2.17's `failedLinks` diagnostic and the row-level read tools finally pushed responses over the threshold.
+
+#### 🐛 Fixed
+
+- **`process.stdout.write` filter now passes Buffers and Uint8Arrays through unconditionally.** String writes still gate on JSON-RPC shape (`{…}` or bare newline) so the original anti-chatter intent is preserved. Library chatter (npm banners, dotenv config dumps) still gets dropped — only large structured responses are unblocked.
+- Added a comment block at the filter call site documenting the bug + fix history so the next person who touches it knows why the filter exists and what it does/doesn't allow.
+
+#### 🧪 Acceptance criteria (per #137)
+
+After installing 2.17.3:
+
+- `imap_get_unsubscribe_links(userId="colin")` returns 17 rows in under 1 second.
+- `imap_get_unsubscribe_links(senderEmail="citizenship@sableinternational.com", userId="colin")` returns exactly 1 row.
+- No regression in `imap_get_subscription_summary` or `imap_list_unsubscribe_candidates`.
+- No regression in `imap_extract_unsubscribe_links` (the `failedLinks` array on a real failure is now well above 8KB and previously may have hit the same bug).
+
+#### 🛡️ Backward compatibility
+
+- No schema, no API, no behavior changes for existing-working calls.
+- Pure transport-layer fix — strictly unblocks responses that were silently dropped.
+
 ## [2.17.2] - 2026-05-02
 
 ### Patch — fix subscription tools' silent FK failure on `userId` (#130)
