@@ -5,6 +5,48 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.17.2] - 2026-05-02
+
+### Patch — fix subscription tools' silent FK failure on `userId` (#130)
+
+The v2.17.1 `failedLinks` diagnostic worked exactly as designed and surfaced the actual underlying bug: `imap_extract_unsubscribe_links` was failing 100% of stores with `FOREIGN KEY constraint failed` because the tool layer accepted the caller-supplied `userId` (often a username like `"colin"`) and inserted it directly into tables whose FK references `users.user_id` (a UUID like `cabcbc4f-…`). Every insert violated the FK; every error was caught and reported in `failedLinks` but no row was ever stored. Downstream `imap_get_unsubscribe_links`, `imap_list_unsubscribe_candidates`, `imap_get_subscription_summary`, and the entire `unsubscribe-cleanup` skill workflow returned empty.
+
+This bug has been latent since v2.6 — pre-v2.17.1 the errors were swallowed to stderr and were invisible. v2.17.1's `failedLinks` made it diagnosable.
+
+#### 🐛 Fixed
+
+- **`db.resolveUserId(input)` helper** — accepts either a canonical `user_id` (UUID) or a `username`, returns the canonical UUID. Single point of truth for caller-supplied user identifiers.
+- **All 8 subscription tools now resolve `userId` at the tool boundary** before any DB write or read:
+  - `imap_extract_unsubscribe_links`
+  - `imap_get_subscription_summary`
+  - `imap_mark_subscription_unsubscribed`
+  - `imap_update_subscription_category`
+  - `imap_update_subscription_notes`
+  - `imap_get_unsubscribe_links`
+  - `imap_list_unsubscribe_candidates`
+  - `imap_execute_unsubscribe`
+- **Unknown user → structured error** — passing a `userId` that matches neither a UUID nor a username throws `UnknownUserError`, which `withErrorHandling` converts to a clean error envelope with the actionable hint *"Pass a valid user_id (UUID) or a username that exists in the users table. Call imap_list_users to see valid values."*
+- **Tool descriptions updated** — all subscription tools now document that `userId` accepts either form.
+
+#### 🧪 Acceptance criteria (per #130)
+
+After installing 2.17.2, the same reproduction that produced the bug report should succeed:
+
+```
+imap_extract_unsubscribe_links(folder="INBOX", limit=200)
+  → linksFound: 17, linksStored: 17, errors: 0   (no failedLinks field)
+imap_get_unsubscribe_links(userId="colin")
+  → 17 rows returned
+imap_list_unsubscribe_candidates(userId="colin")
+  → 5 candidates (one per distinct sender)
+```
+
+#### 🛡️ Backward compatibility
+
+- No schema changes (DB stays at 1.11.0).
+- `userId` parameter accepts a strict superset of what it did before — any UUID that worked previously still works; usernames now also work.
+- All other tool surfaces unchanged.
+
 ## [2.17.1] - 2026-05-01
 
 ### Patch — fix stale hardcoded version strings
