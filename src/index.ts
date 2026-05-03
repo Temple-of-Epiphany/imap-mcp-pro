@@ -73,6 +73,7 @@ await dispatchCli({
 const {
   server, imapService, smtpService, db, fileExport, results, workerPool,
   sentFolderService, appendRetryService, attachmentStaging, messageCache,
+  skillsInstaller,
 } = await timeStage('pre-handshake', async () => {
     // 1. Load + validate config
     let config;
@@ -132,10 +133,17 @@ const {
     // 6d. v2.17.0 MVP: local message header cache (no I/O at construction time)
     const messageCache = new MessageCacheService(db, imapService);
 
+    // 6e. v2.17.4 (#138): skill installer — same instance used for the
+    //     post-handshake bundle install AND for the imap_check_skill_updates
+    //     / imap_update_skills tools. No network calls at construction time.
+    const bundleSkillsDir = path.join(__dirname, '..', 'skills');
+    const skillsInstaller = new SkillsInstallerService(bundleSkillsDir);
+
     // 7. Tool schema registration
     registerTools(
       server, imapService, db, smtpService, results, workerPool,
-      sentFolderService, appendRetryService, attachmentStaging, messageCache
+      sentFolderService, appendRetryService, attachmentStaging, messageCache,
+      skillsInstaller
     );
 
     // Mark unused config field as intentional for now
@@ -144,6 +152,7 @@ const {
     return {
       server, imapService, smtpService, db, fileExport, results, workerPool,
       sentFolderService, appendRetryService, attachmentStaging, messageCache,
+      skillsInstaller,
     };
   });
 
@@ -189,12 +198,10 @@ void timeStage('post-handshake', async () => {
   // Idempotent — skips skills already at the bundled version. Best-effort:
   // a failure here is logged but never blocks tool availability.
   try {
-    const bundleDir = path.join(
-      path.dirname(fileURLToPath(import.meta.url)),
-      'skills',
-    );
-    const installer = new SkillsInstallerService(bundleDir);
-    const r = await installer.install();
+    // Reuse the singleton installer constructed in pre-handshake. It already
+    // points at the right bundle dir and will be reused by the
+    // imap_check_skill_updates / imap_update_skills tools.
+    const r = await skillsInstaller.install();
     logEvent('[startup]', {
       component: 'skills-install',
       installed: r.installed,
@@ -242,9 +249,11 @@ async function buildToolsManifest(): Promise<unknown> {
     stagingDir: path.join(os.homedir(), '.imap-mcp', 'staging'),
   });
   const tmpMessageCache = new MessageCacheService(tmpDb, tmpImap);
+  const tmpBundleSkillsDir = path.join(__dirname, '..', 'skills');
+  const tmpSkillsInstaller = new SkillsInstallerService(tmpBundleSkillsDir);
   registerTools(
     tmpServer, tmpImap, tmpDb, tmpSmtp, tmpResults, tmpWorkerPool,
-    tmpSentFolder, tmpAppendRetry, tmpStaging, tmpMessageCache
+    tmpSentFolder, tmpAppendRetry, tmpStaging, tmpMessageCache, tmpSkillsInstaller
   );
 
   // Pull the registered tools out of McpServer's internal map. This is

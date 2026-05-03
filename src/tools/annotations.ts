@@ -107,6 +107,12 @@ export const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
   // search_cache: pure local DB read, no IMAP traffic.
   'imap_search_cache':                 READ_ONLY,
 
+  // ---- v2.17.4 skill update from GitHub (#138) ----
+  // check: read-only network call to raw.githubusercontent.com.
+  'imap_check_skill_updates':          READ_REMOTE,
+  // update: writes to ~/.claude/skills/imap-mcp-pro/<name>/ from GitHub.
+  'imap_update_skills':                WRITE_LOCAL,
+
   // ---- folder-tools (6) ----
   'imap_list_folders':                 READ_REMOTE,
   'imap_folder_status':                READ_REMOTE,

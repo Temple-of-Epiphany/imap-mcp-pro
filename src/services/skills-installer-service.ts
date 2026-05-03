@@ -75,6 +75,41 @@ interface SkillVersionFile {
   version: string;
 }
 
+/** GitHub source descriptor for skill updates. */
+export interface GitHubSource {
+  owner: string;
+  repo: string;
+  ref: string;
+}
+
+/** Default GitHub source — overridable via env vars or per-call options. */
+export function defaultGitHubSource(): GitHubSource {
+  return {
+    owner: process.env.IMAP_MCP_SKILL_GITHUB_OWNER ?? 'Temple-of-Epiphany',
+    repo: process.env.IMAP_MCP_SKILL_GITHUB_REPO ?? 'claude-skills-library',
+    ref: process.env.IMAP_MCP_SKILL_GITHUB_REF ?? 'main',
+  };
+}
+
+/** Per-skill availability status from a GitHub check. */
+export interface SkillUpdateStatus {
+  name: string;
+  installed: string | null;     // version.json on disk; null if not installed
+  bundled: string;              // version shipped with this MCP build
+  available: string | null;     // version on GitHub at the requested ref
+  hasUpdate: boolean;           // available > max(installed, bundled)
+  fetchError: string | null;    // network/parse error, if any
+}
+
+export interface SkillUpdateCheckReport {
+  checkedAt: string;            // ISO timestamp
+  source: GitHubSource;
+  baseUrl: string;              // raw.githubusercontent.com URL up to /skills/
+  skills: SkillUpdateStatus[];
+  summary: string;              // human-readable single-line summary
+  cached: boolean;              // whether this came from the in-memory TTL cache
+}
+
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
@@ -168,6 +203,252 @@ export class SkillsInstallerService {
   private async copySkill(srcDir: string, dstDir: string): Promise<void> {
     await fs.mkdir(dstDir, { recursive: true });
     await fs.cp(srcDir, dstDir, { recursive: true, force: true });
+  }
+
+  // -------------------------------------------------------------------
+  // GitHub update check + apply (v2.17.4, #138)
+  //
+  // Trust model: skills are *instructions to Claude*. Whoever controls
+  // the GitHub repo controls the LLM workflow. The check tool is read-
+  // only and surfaces "what would change" for human review. The apply
+  // tool requires explicit `skills: string[]` — no "update everything"
+  // shortcut. Auto-fetch at startup is intentionally NOT wired; this
+  // ships in user-confirmed mode only.
+  // -------------------------------------------------------------------
+
+  /** Build the raw.githubusercontent.com base for a given source. */
+  private rawBaseUrl(source: GitHubSource): string {
+    return `https://raw.githubusercontent.com/${source.owner}/${source.repo}/${source.ref}/skills/`;
+  }
+
+  /**
+   * Fetch a single text file from GitHub. Uses two endpoints:
+   *
+   *   - `raw.githubusercontent.com` for public repos (unauthenticated;
+   *     ignores Authorization headers, no rate-limit concerns at our
+   *     volume).
+   *   - GitHub Contents API with `Accept: application/vnd.github.raw`
+   *     when `IMAP_MCP_GITHUB_TOKEN` is set — works for private repos
+   *     and forks. The token is read from env at call time so users
+   *     can rotate it without restarting the server.
+   *
+   * Pick raw.githubusercontent.com whenever no token is set so unauth
+   * public-repo users don't burn the API rate limit (60/hr unauth vs
+   * effectively unlimited on raw.).
+   */
+  private async fetchTextFromGitHub(
+    source: GitHubSource,
+    pathInRepo: string,
+    timeoutMs = 10_000,
+  ): Promise<string> {
+    const token = process.env.IMAP_MCP_GITHUB_TOKEN;
+
+    const url = token
+      ? `https://api.github.com/repos/${source.owner}/${source.repo}/contents/skills/${pathInRepo}?ref=${encodeURIComponent(source.ref)}`
+      : this.rawBaseUrl(source) + pathInRepo;
+
+    const headers: Record<string, string> = {
+      'User-Agent': 'imap-mcp-pro skill-updater',
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+      headers['Accept'] = 'application/vnd.github.raw';
+      headers['X-GitHub-Api-Version'] = '2022-11-28';
+    }
+
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { signal: ac.signal, headers });
+      if (!res.ok) {
+        throw new Error(`GitHub returned ${res.status} ${res.statusText} for ${url}`);
+      }
+      return await res.text();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Fetch the version string for one skill from GitHub. Returns null on
+   * any error (network, parse, missing) — caller decides how to surface.
+   */
+  private async fetchRemoteVersion(
+    source: GitHubSource,
+    skillName: string,
+    timeoutMs = 10_000,
+  ): Promise<{ version: string | null; error: string | null }> {
+    try {
+      const raw = await this.fetchTextFromGitHub(source, `${skillName}/version.json`, timeoutMs);
+      const parsed = JSON.parse(raw) as SkillVersionFile;
+      if (typeof parsed.version === 'string') {
+        return { version: parsed.version, error: null };
+      }
+      return { version: null, error: 'version.json missing "version" field' };
+    } catch (e: any) {
+      return { version: null, error: e?.message ?? String(e) };
+    }
+  }
+
+  /**
+   * Check GitHub for newer skill versions without changing on-disk state.
+   * Reads the bundled manifest as the source of truth for skill names,
+   * compares each against installed and remote versions.
+   */
+  async checkForUpdates(options?: {
+    source?: GitHubSource;
+    timeoutMs?: number;
+  }): Promise<SkillUpdateCheckReport> {
+    const source = options?.source ?? defaultGitHubSource();
+    const timeoutMs = options?.timeoutMs ?? 10_000;
+
+    let manifest: BundleManifest;
+    try {
+      const raw = await fs.readFile(path.join(this.bundleDir, 'manifest.json'), 'utf8');
+      manifest = JSON.parse(raw) as BundleManifest;
+    } catch (e: any) {
+      // No bundle = nothing to check
+      return {
+        checkedAt: new Date().toISOString(),
+        source,
+        baseUrl: this.rawBaseUrl(source),
+        skills: [],
+        summary: 'No bundled manifest found.',
+        cached: false,
+      };
+    }
+
+    const statuses = await Promise.all(
+      manifest.skills.map(async (entry): Promise<SkillUpdateStatus> => {
+        const installed = await this.readInstalledVersion(
+          path.join(this.installDir, entry.name),
+        );
+        const remote = await this.fetchRemoteVersion(source, entry.name, timeoutMs);
+
+        // hasUpdate compares remote against what's *on disk* (or, when nothing
+        // is installed, against what would land via the bundle). This matches
+        // user intuition: "does GitHub have something newer than my actual
+        // installed copy?" Not "newer than the best source available."
+        const baseline = installed ?? entry.version;
+        const hasUpdate = remote.version !== null && compareSemver(remote.version, baseline) > 0;
+
+        return {
+          name: entry.name,
+          installed,
+          bundled: entry.version,
+          available: remote.version,
+          hasUpdate,
+          fetchError: remote.error,
+        };
+      }),
+    );
+
+    const updates = statuses.filter(s => s.hasUpdate);
+    const summary = updates.length === 0
+      ? `All ${statuses.length} skill(s) up to date at ${source.owner}/${source.repo}@${source.ref}`
+      : updates.map(s => `${s.name}: ${s.installed ?? '(none)'} → ${s.available} available`).join('; ');
+
+    return {
+      checkedAt: new Date().toISOString(),
+      source,
+      baseUrl: this.rawBaseUrl(source),
+      skills: statuses,
+      summary,
+      cached: false,
+    };
+  }
+
+  /**
+   * Apply an update for the named skills. Fetches SKILL.md + version.json
+   * from GitHub, writes to the install dir, preserves user edits unless
+   * `force: true`. Skills not in the manifest are rejected.
+   */
+  async updateFromGitHub(options: {
+    skills: string[];
+    source?: GitHubSource;
+    force?: boolean;
+    timeoutMs?: number;
+  }): Promise<SkillsInstallReport> {
+    const start = Date.now();
+    const source = options.source ?? defaultGitHubSource();
+    const timeoutMs = options.timeoutMs ?? 10_000;
+
+    const report: SkillsInstallReport = {
+      installed: [],
+      updated: [],
+      unchanged: [],
+      preserved: [],
+      skipped: false,
+      durationMs: 0,
+    };
+
+    if (!options.skills || options.skills.length === 0) {
+      throw new Error('updateFromGitHub requires an explicit non-empty `skills` array.');
+    }
+
+    let manifest: BundleManifest;
+    try {
+      const raw = await fs.readFile(path.join(this.bundleDir, 'manifest.json'), 'utf8');
+      manifest = JSON.parse(raw) as BundleManifest;
+    } catch {
+      manifest = { manifest_version: '1.0', publisher: 'imap-mcp-pro', skills: [] };
+    }
+    const knownSkills = new Set(manifest.skills.map(s => s.name));
+
+    await fs.mkdir(this.installDir, { recursive: true });
+
+    for (const skillName of options.skills) {
+      if (!knownSkills.has(skillName)) {
+        // Reject unknown to prevent path-injection-like behavior. The
+        // bundled manifest is the allowlist.
+        report.preserved.push(`${skillName} (unknown — not in bundle manifest)`);
+        continue;
+      }
+
+      try {
+        const [skillMd, versionJson] = await Promise.all([
+          this.fetchTextFromGitHub(source, `${skillName}/SKILL.md`, timeoutMs),
+          this.fetchTextFromGitHub(source, `${skillName}/version.json`, timeoutMs),
+        ]);
+
+        const remoteVersion = (() => {
+          try {
+            const v = JSON.parse(versionJson) as SkillVersionFile;
+            return typeof v.version === 'string' ? v.version : null;
+          } catch {
+            return null;
+          }
+        })();
+        if (!remoteVersion) {
+          report.preserved.push(`${skillName} (remote version.json malformed)`);
+          continue;
+        }
+
+        const skillDir = path.join(this.installDir, skillName);
+        const installedVersion = await this.readInstalledVersion(skillDir);
+
+        if (installedVersion && !options.force && compareSemver(installedVersion, remoteVersion) >= 0) {
+          report.unchanged.push(skillName);
+          continue;
+        }
+
+        await fs.mkdir(skillDir, { recursive: true });
+        await fs.writeFile(path.join(skillDir, 'SKILL.md'), skillMd, 'utf8');
+        await fs.writeFile(path.join(skillDir, 'version.json'), versionJson, 'utf8');
+
+        if (installedVersion) {
+          report.updated.push(skillName);
+        } else {
+          report.installed.push(skillName);
+        }
+      } catch (e: any) {
+        // Surface as preserved with reason — caller decides whether to retry.
+        report.preserved.push(`${skillName} (fetch failed: ${e?.message ?? String(e)})`);
+      }
+    }
+
+    report.durationMs = Date.now() - start;
+    return report;
   }
 }
 

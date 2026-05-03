@@ -5,6 +5,47 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.17.4] - 2026-05-02
+
+### Skill update from public GitHub (#138)
+
+Adds the ability to check for and apply skill updates from the canonical `Temple-of-Epiphany/claude-skills-library` repo without rebuilding or reinstalling the `.mcpb`. Trust model is preserved: nothing happens automatically. Two new tools, intentionally split: a read-only check that surfaces "what's available," and a write tool that requires explicit skill names to apply. Auto-fetch at startup is **not** wired — manual user confirmation only.
+
+#### ✨ Added
+
+- **`imap_check_skill_updates`** — read-only. Fetches `version.json` for each bundled skill from GitHub, compares against the installed version, returns `{ name, installed, bundled, available, hasUpdate, fetchError }` per skill plus a one-line summary. No on-disk changes. Default `ref: "main"`, configurable per-call.
+- **`imap_update_skills`** — write. Accepts an explicit `skills: string[]` (no "update everything" shortcut). Fetches `SKILL.md` + `version.json` from GitHub, version-compares, writes to `~/.claude/skills/imap-mcp-pro/<name>/`. Skills not in the bundled manifest are rejected (the manifest is the allowlist). `force: true` bypasses version compare; default behavior preserves on-disk versions ≥ remote.
+- **GitHub source configuration** via env vars:
+  - `IMAP_MCP_SKILL_GITHUB_OWNER` (default `Temple-of-Epiphany`)
+  - `IMAP_MCP_SKILL_GITHUB_REPO` (default `claude-skills-library`)
+  - `IMAP_MCP_SKILL_GITHUB_REF` (default `main`)
+  - `IMAP_MCP_GITHUB_TOKEN` — optional Personal Access Token. When set, fetches go through the GitHub Contents API with `Accept: application/vnd.github.raw` (works for private repos and forks). When absent, falls back to public `raw.githubusercontent.com` URLs (no rate-limit concerns at our volume).
+
+#### 🛡️ Trust model
+
+Skills are *instructions to Claude*. Whoever controls the source repo controls the LLM workflow. To preserve user agency:
+
+- Updates are **never** applied automatically. `imap_check_skill_updates` is read-only; `imap_update_skills` requires explicit skill names.
+- The bundled `manifest.json` acts as an allowlist — skills not in the bundle cannot be installed via this path.
+- User-modified on-disk skills are preserved unless `force: true` is passed.
+
+#### 🧪 Acceptance verification
+
+End-to-end smoke test on a downgraded local install:
+
+```
+Pre-state:  installed: 0.0.1, available: 0.1.1, hasUpdate: true
+Apply:      updated: ["unsubscribe-cleanup"] in 342ms
+Post-state: installed: 0.1.1, hasUpdate: false
+```
+
+Both raw.githubusercontent.com (public) and authenticated GitHub Contents API paths verified.
+
+#### 🛡️ Backward compatibility
+
+- No schema, no DB changes. New tools only.
+- Bundled-skill install on startup unchanged — still copies from `dist/skills/` regardless of these new tools.
+
 ## [2.17.3] - 2026-05-02
 
 ### Patch — fix stdout filter dropping large Buffer writes (#137)

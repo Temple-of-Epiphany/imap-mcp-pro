@@ -8,6 +8,7 @@ import { SentFolderService } from '../services/sent-folder-service.js';
 import { AppendRetryService } from '../services/append-retry-service.js';
 import { AttachmentStagingService } from '../services/attachment-staging-service.js';
 import { MessageCacheService } from '../services/message-cache-service.js';
+import { SkillsInstallerService } from '../services/skills-installer-service.js';
 import { accountTools } from './account-tools.js';
 import { emailTools } from './email-tools.js';
 import { folderTools } from './folder-tools.js';
@@ -21,6 +22,7 @@ import { dnsFirewallTools } from './dns-firewall-tools.js';
 import { categoryTools } from './category-tools.js';
 import { resultTools } from './result-tools.js';
 import { cacheTools } from './cache-tools.js';
+import { skillsTools } from './skills-tools.js';
 import { getAnnotations } from './annotations.js';
 
 /**
@@ -54,7 +56,8 @@ export function registerTools(
   sentFolder?: SentFolderService,
   appendRetry?: AppendRetryService,
   staging?: AttachmentStagingService,
-  messageCache?: MessageCacheService
+  messageCache?: MessageCacheService,
+  skillsInstaller?: SkillsInstallerService
 ): void {
   // Inject MCP annotations on every registerTool call (drives Claude
   // Desktop's Tool Permissions UI). Restored after the registration phase
@@ -100,6 +103,12 @@ export function registerTools(
   // Register v2.17.0 MVP cache tools (Issue #124)
   if (messageCache) {
     cacheTools(server, messageCache);
+  }
+
+  // Register v2.17.4 skill update tools (#138). Skips registration when no
+  // installer is wired (e.g. tests or environments without bundled skills).
+  if (skillsInstaller) {
+    skillsTools(server, skillsInstaller);
   }
 
   // Register meta/discovery tools
