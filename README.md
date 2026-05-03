@@ -26,6 +26,7 @@ An enterprise-grade Model Context Protocol (MCP) server that provides production
 - **UIDVALIDITY-aware delta sync**: subsequent syncs only fetch new UIDs. Mailbox renumbering is detected automatically and triggers a full resync.
 - **Cache-miss is explicit**: `imap_search_cache` returns a structured `cache_miss` error when a folder has not been synced — no silent IMAP fallback. The skill orchestrates the order.
 - **Auto-installed skills**: bundled Claude skills (`unsubscribe-cleanup` in v2.17.0) are copied to `~/.claude/skills/imap-mcp-pro/` on server startup. Idempotent: skips when versions match, updates when the bundle is newer, preserves on-disk content with a higher version. Disable via `IMAP_MCP_SKIP_SKILLS_INSTALL=1`.
+- **Skill updates from public GitHub** (v2.17.4+): two new tools, `imap_check_skill_updates` and `imap_update_skills`, let you pull newer skill versions from this repo without reinstalling the `.mcpb`. No PAT needed — the default source is the MCP's own public repo. See [`docs/SKILLS.md`](docs/SKILLS.md) for the full guide including the trust model.
 
 ### v2.0 Reliability & Attachments (v2.15.0+)
 
@@ -743,6 +744,7 @@ node dist/index.js --print-tools-manifest | jq '.tools | length'
 ## Documentation
 
 - [`EXAMPLES.md`](./EXAMPLES.md) — worked Claude conversation transcripts for common workflows
+- [`docs/SKILLS.md`](./docs/SKILLS.md) — bundled skills, auto-install behavior, GitHub-update tooling, contributor guide
 - [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — codebase map, startup stages, response-shape policy, contributor guide
 - [`docs/sdk_audit_2026-04-29.md`](./docs/sdk_audit_2026-04-29.md) — MCP SDK alignment audit
 - RFC 9051 (IMAP4rev2) full text in `rfc/rfc9051.txt`
