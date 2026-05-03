@@ -1,12 +1,12 @@
 {
   "manifest_version": "1.0",
   "publisher": "imap-mcp-pro",
-  "publisher_version": "2.17.1",
-  "description": "Skills bundled with imap-mcp-pro and auto-installed to the AI client's skills directory on startup. Source of truth lives in Temple-of-Epiphany/claude-skills-library; this bundle is a vendored snapshot at build time.",
+  "publisher_version": "2.17.6",
+  "description": "Skills bundled with imap-mcp-pro and auto-installed to the AI client's skills directory on startup. Source of truth lives in this repo at skills/<name>/; updates flow via imap_check_skill_updates / imap_update_skills.",
   "skills": [
     {
       "name": "unsubscribe-cleanup",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "description": "Find and execute newsletter unsubscribes safely. Wraps imap_sync_folder_cache + imap_search_cache + the existing PR #45 unsubscribe pipeline into a confirmation-gated workflow.",
       "content_path": "unsubscribe-cleanup/SKILL.md",
       "content_format": "markdown",
@@ -15,7 +15,6 @@
         "imap_sync_folder_cache",
         "imap_search_cache",
         "imap_list_unsubscribe_candidates",
-        "imap_get_unsubscribe_links",
         "imap_execute_unsubscribe",
         "imap_mark_subscription_unsubscribed"
       ],

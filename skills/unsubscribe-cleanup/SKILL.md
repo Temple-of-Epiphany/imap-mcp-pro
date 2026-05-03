@@ -1,9 +1,9 @@
 ---
 name: unsubscribe-cleanup
-version: "0.1.1"
+version: "0.1.2"
 description: "Find and execute newsletter unsubscribes safely using imap-mcp-pro. Enumerates senders ranked by message count, filters to genuine bulk-mail (List-Unsubscribe header present, never replied to), presents candidates for user confirmation, and executes selected unsubscribes via the existing imap_execute_unsubscribe pipeline. Use when the user wants to reduce newsletter clutter, stop receiving promotional mail, or clean up subscription noise."
 date_created: 2026-04-30
-date_updated: 2026-05-01
+date_updated: 2026-05-02
 ---
 
 # Unsubscribe Cleanup
@@ -163,11 +163,12 @@ Ask the user to pick which to unsubscribe — by number, by sender name, or "all
 
 For each selected sender:
 
-1. Get a representative message UID from cached results
-2. `imap_get_unsubscribe_links uid=<uid>` — extract the unsubscribe URL/mailto
-3. `imap_execute_unsubscribe` with the link — fire the action
-4. `imap_mark_subscription_unsubscribed` — record locally
-5. Report per-sender outcome inline: ✓ success, ✗ failed (with reason), ⚠ partial (e.g., mailto sent but unclear if processed)
+1. Pull the unsubscribe URL from the candidate row already returned by `imap_list_unsubscribe_candidates` (the `unsubscribe_link` field on each candidate is the same one that would be returned by the row-level read tool — no second fetch needed).
+2. `imap_execute_unsubscribe` with that link — fire the action
+3. `imap_mark_subscription_unsubscribed` — record locally
+4. Report per-sender outcome inline: ✓ success, ✗ failed (with reason), ⚠ partial (e.g., mailto sent but unclear if processed)
+
+**Do NOT call `imap_get_unsubscribe_links` for the row-level forensic view.** Tracked under issue #143: the row-level read tool can hang in some Claude clients when returning subjects/headers with parsing residue. The candidate row from step 5 already has the actionable `unsubscribe_link`. Reach for `imap_get_unsubscribe_links` only when the user explicitly asks for raw per-message detail (rare).
 
 **Safety throttle:** if the user selected more than 5 unsubscribes, pause every 5 and ask: *"5 done so far. Continue with the next 5?"* This prevents runaway execution and gives the user a chance to bail if outcomes look wrong.
 
