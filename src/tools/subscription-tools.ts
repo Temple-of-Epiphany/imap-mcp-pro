@@ -19,33 +19,7 @@ import { UnsubscribeService } from '../services/unsubscribe-service.js';
 import { UnsubscribeExecutorService } from '../services/unsubscribe-executor-service.js';
 import { withErrorHandling } from '../utils/error-handler.js';
 import { sanitizeText, sanitizeUrl } from '../utils/sanitize-content.js';
-
-/**
- * Thrown when the caller-supplied `userId` doesn't match any row in the
- * users table by UUID or by username. `withErrorHandling` converts this
- * into a structured error response back to the LLM with a clear hint.
- */
-class UnknownUserError extends Error {
-  constructor(provided: string) {
-    super(
-      `Unknown user: "${provided}". Pass a valid user_id (UUID) or a username ` +
-      `that exists in the users table. Call imap_list_users to see valid values.`
-    );
-    this.name = 'UnknownUserError';
-  }
-}
-
-/**
- * Resolve `userId` input (UUID or username) → canonical UUID. Throws
- * UnknownUserError if neither match — this stops FK constraint failures
- * deep in INSERT paths (issue #130) by failing fast at the tool boundary
- * with a clear, actionable error.
- */
-function resolveUserOrThrow(db: DatabaseService, input: string): string {
-  const resolved = db.resolveUserId(input);
-  if (!resolved) throw new UnknownUserError(input);
-  return resolved;
-}
+import { resolveUserOrThrow } from '../utils/user-resolver.js';
 
 export function registerSubscriptionTools(
   server: McpServer,

@@ -5,6 +5,66 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.17.7] - 2026-05-03
+
+### Patch — userId resolution on usercheck tools + skill-update response sanitization (#145)
+
+Two issues surfaced while expanding the v2.17.x acceptance test plan with UserCheck (Phase 6) and skill-update (Phase 8) coverage. Both are now fixed:
+
+#### 🐛 Fixed — userId on usercheck tools accepts username (matches subscription-tools behavior)
+
+`imap_add_usercheck_key` and the other 6 usercheck tools that accept `userId` were not running it through the v2.17.2 `resolveUserOrThrow` helper. Passing the username form (e.g., `"colin"`) returned `FOREIGN KEY constraint failed` deep in the INSERT path — same failure shape as #130 before that fix landed. The subscription tools were updated in v2.17.2; the usercheck tools were missed.
+
+- **Extracted** `resolveUserOrThrow` and `UnknownUserError` into `src/utils/user-resolver.ts` (was a private helper inside `subscription-tools.ts`).
+- **Applied** the resolver to all 7 usercheck tools that accept `userId`:
+  - `imap_add_usercheck_key`
+  - `imap_get_usercheck_key`
+  - `imap_check_email_spam`
+  - `imap_check_domain`
+  - `imap_check_emails_spam_bulk`
+  - `imap_check_folder_spam`
+  - `imap_scan_account_spam`
+- **Updated** every `userId` Zod description on those tools to match the documented contract: *"either canonical user_id UUID or username from the users table."*
+- **Subscription-tools** now imports the shared helper instead of carrying a local copy.
+
+`imap_delete_usercheck_key` doesn't take `userId` (it takes `keyId`), so no change needed.
+
+#### 🛡️ Mitigated — `imap_check_skill_updates` response trimmed and sanitized
+
+Same hang shape as the v2.17.5 `imap_get_unsubscribe_links` issue: server returns a valid response in 175ms via local stdio (verified), but Claude Desktop hangs on it. We can't fix CD's renderer from here, but we can give it less surface area to choke on.
+
+- **Removed** the `baseUrl` field from the response (informational — can be reconstructed from `source`).
+- **Sanitized** the `summary` and per-skill `fetchError` strings via `sanitizeText` (the v2.17.6 helper). Caps lengths, replaces control characters with spaces.
+- **Removed** `cached` field (was always `false` — never wired up).
+
+Response size dropped from 542 → 428 bytes (21% smaller, fewer string fields for CD to render). Whether this fully resolves the CD hang is for end-user verification post-install; if not, the v2.17.6 skill workaround pattern (avoid the affected tool in skill workflows) extends to anything that depends on `imap_check_skill_updates`.
+
+#### 🧪 Acceptance verification
+
+Local stdio MCP test against v2.17.7 build:
+
+```
+imap_check_skill_updates       → 175ms / 44ms cached, 428 bytes  (was 542 bytes)
+imap_get_subscription_summary  →   2ms,   4557 bytes  ✓ unchanged
+imap_list_unsubscribe_candidates → 0ms,   4732 bytes  ✓ unchanged
+imap_get_unsubscribe_links     →   1ms,  11589 bytes  ✓ unchanged
+```
+
+All 50 unit tests pass.
+
+userId resolution path verified by code review: all 7 usercheck handlers now extract via `userId: userIdRaw` then call `resolveUserOrThrow(db, userIdRaw)` at the top of the handler body, exactly matching the subscription-tools pattern shipped in v2.17.2.
+
+#### 🛡️ Backward compatibility
+
+- **userId is now strict superset** on usercheck tools — UUIDs that worked previously still work; usernames now also work.
+- **No schema changes.** No DB migration.
+- **`imap_check_skill_updates` response shape is a subset** of v2.17.6's. Callers that depended on the dropped fields (`baseUrl`, `cached`) will see them as `undefined`. Those fields were never used by the bundled `unsubscribe-cleanup` skill or any internal tool.
+
+#### 📋 Tracked
+
+- Issue #145 — root-cause filing with both bugs and the diagnostic data
+- v2.17.x test plan (Phase 6 + Phase 8) — first run-through to surface these issues during plan-authoring
+
 ## [2.17.6] - 2026-05-02
 
 ### Patch — sanitize unsubscribe content; skill avoids the row-level read tool (#143)
