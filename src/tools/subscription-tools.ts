@@ -18,6 +18,7 @@ import { SmtpService } from '../services/smtp-service.js';
 import { UnsubscribeService } from '../services/unsubscribe-service.js';
 import { UnsubscribeExecutorService } from '../services/unsubscribe-executor-service.js';
 import { withErrorHandling } from '../utils/error-handler.js';
+import { sanitizeText, sanitizeUrl } from '../utils/sanitize-content.js';
 
 /**
  * Thrown when the caller-supplied `userId` doesn't match any row in the
@@ -115,10 +116,18 @@ export function registerSubscriptionTools(
         // Extract unsubscribe info from the email body/headers
         const unsubscribeInfo = await unsubscribeService.extractFromEmail(emailSource);
 
-        if (unsubscribeInfo.unsubscribe_link || unsubscribeInfo.list_unsubscribe_header) {
+        // v2.17.6 (#143): sanitize before storing so future-stored URLs
+        // are free of parsing residue (`>™`, `]`, control chars). Existing
+        // stored data is sanitized on the read path; new writes get the
+        // benefit at the source.
+        const cleanLink = sanitizeUrl(unsubscribeInfo.unsubscribe_link);
+        const cleanHeader = sanitizeText(unsubscribeInfo.list_unsubscribe_header, 500);
+        const cleanSubject = sanitizeText(email.subject, 200);
+
+        if (cleanLink || cleanHeader) {
           results.linksFound++;
 
-          // Store to database
+          // Store to database with sanitized fields.
           unsubscribeService.storeUnsubscribeLink({
             user_id: userId,
             account_id: accountId,
@@ -126,9 +135,13 @@ export function registerSubscriptionTools(
             uid: email.uid,
             sender_email: email.from,
             sender_name: email.from.split('<')[0].trim(),
-            subject: email.subject,
+            subject: cleanSubject ?? undefined,
             message_date: email.date ? new Date(email.date) : undefined,
-            unsubscribe_info: unsubscribeInfo
+            unsubscribe_info: {
+              ...unsubscribeInfo,
+              unsubscribe_link: cleanLink ?? undefined,
+              list_unsubscribe_header: cleanHeader ?? undefined,
+            },
           });
 
           results.linksStored++;
@@ -136,11 +149,11 @@ export function registerSubscriptionTools(
           results.emails.push({
             uid: email.uid,
             from: email.from,
-            subject: email.subject,
+            subject: cleanSubject,
             date: email.date,
-            unsubscribe_link: unsubscribeInfo.unsubscribe_link,
+            unsubscribe_link: cleanLink,
             unsubscribe_method: unsubscribeInfo.unsubscribe_method,
-            has_list_unsubscribe_header: !!unsubscribeInfo.list_unsubscribe_header
+            has_list_unsubscribe_header: !!cleanHeader,
           });
         }
       } catch (error: any) {
@@ -343,18 +356,20 @@ export function registerSubscriptionTools(
         type: 'text',
         text: JSON.stringify({
           total: links.length,
+          // v2.17.6 (#143): sanitize on the read path so legacy data
+          // stored before sanitization is also clean for the LLM.
           links: links.map(link => ({
             id: link.id,
             account_id: link.account_id,
             folder: link.folder,
             uid: link.uid,
             sender_email: link.sender_email,
-            subject: link.subject,
+            subject: sanitizeText(link.subject, 200),
             message_date: link.message_date,
-            unsubscribe_link: link.unsubscribe_link,
-            list_unsubscribe_header: link.list_unsubscribe_header,
-            extracted_at: link.extracted_at
-          }))
+            unsubscribe_link: sanitizeUrl(link.unsubscribe_link),
+            list_unsubscribe_header: sanitizeText(link.list_unsubscribe_header, 500),
+            extracted_at: link.extracted_at,
+          })),
         }, null, 2)
       }]
     };
@@ -395,12 +410,15 @@ export function registerSubscriptionTools(
         type: 'text',
         text: JSON.stringify({
           total: subscriptions.length,
+          // v2.17.6 (#143): sanitize on the read path. unsubscribe_link
+          // is the only free-form field exposed here; sender_name and
+          // notes are pre-validated.
           candidates: subscriptions.map(s => ({
             sender_email: s.sender_email,
             sender_name: s.sender_name,
             sender_domain: s.sender_domain,
             subject_from_latest: `(${s.total_emails} emails)`,
-            unsubscribe_link: s.unsubscribe_link,
+            unsubscribe_link: sanitizeUrl(s.unsubscribe_link),
             unsubscribe_method: s.unsubscribe_method,
             total_emails: s.total_emails,
             category: s.category,
@@ -408,8 +426,8 @@ export function registerSubscriptionTools(
             last_seen: s.last_seen,
             unsubscribed: s.unsubscribed,
             unsubscribed_at: s.unsubscribed_at,
-            notes: s.notes
-          }))
+            notes: sanitizeText(s.notes, 500),
+          })),
         }, null, 2)
       }]
     };

@@ -5,6 +5,57 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.17.6] - 2026-05-02
+
+### Patch — sanitize unsubscribe content; skill avoids the row-level read tool (#143)
+
+`imap_get_unsubscribe_links` was reported hanging in Claude Desktop on every call regardless of result-set size (1 row hangs same as 19+). Local stdio reproduction shows the server returns valid responses in 0–2ms — the hang manifests only in CD's response handling. Two-pronged fix on our side: harden the response data we hand the LLM, and route the skill around the affected tool.
+
+#### 🛡️ Defensive sanitization (server-side)
+
+New `src/utils/sanitize-content.ts`:
+
+- **`sanitizeUrl(url)`** — trims trailing parsing residue (`>`, `]`, `™`, `®`, `©`, control chars, whitespace) that accumulates from header parsing of `<URL>` notation. Rejects URLs that aren't `http`, `https`, or `mailto`. Returns null on garbage input.
+- **`sanitizeText(text, maxLen)`** — replaces C0/C1 control characters with spaces, collapses whitespace, caps length with ellipsis. Default cap 200 chars; `list_unsubscribe_header` capped at 500.
+
+Applied at three points:
+
+- **`imap_extract_unsubscribe_links`** — sanitizes URL + subject + header *before* writing to the database. Future-stored data is clean at the source.
+- **`imap_get_unsubscribe_links`** — sanitizes on the read path so legacy data (stored before this release) is also clean for the LLM.
+- **`imap_list_unsubscribe_candidates`** — same read-path sanitization on `unsubscribe_link` and `notes`.
+
+22 unit tests cover the sanitizer (`sanitize-content.test.ts`).
+
+#### 🔧 Skill workaround — `unsubscribe-cleanup` 0.1.1 → 0.1.2
+
+Step 7 of the skill (Execute) used to call `imap_get_unsubscribe_links` to fetch the per-message unsubscribe URL before executing. The same URL is already on the candidate row returned by `imap_list_unsubscribe_candidates` in step 5 — fetching it twice was always redundant. The skill now uses the candidate-row URL directly and explicitly avoids `imap_get_unsubscribe_links` for the Execute path. The tool stays available for forensic per-message inspection when explicitly requested.
+
+Skill manifest updated: `imap_get_unsubscribe_links` removed from `depends_on.tools`.
+
+#### 🧪 Acceptance verification
+
+Local stdio MCP test (same path Claude Desktop uses):
+
+```
+imap_get_subscription_summary       →   2ms,   4557 bytes  ✓
+imap_list_unsubscribe_candidates    →   0ms,   4737 bytes  ✓ (sanitized URLs)
+imap_get_unsubscribe_links no filter →  1ms,  11601 bytes  ✓ (sanitized fields)
+imap_get_unsubscribe_links 1 row    →   0ms,    550 bytes  ✓ (sanitized fields)
+```
+
+CD-side rendering can't be confirmed locally, but the response content is now bounded (no >200-char subjects, no raw control chars, no malformed-URL trailing junk). The skill workaround ensures the user-facing flow works regardless of whether sanitization fixes CD's specific trigger.
+
+#### 🛡️ Backward compatibility
+
+- No schema changes (DB stays at 1.11.0). Existing stored URLs/subjects/headers are sanitized on read; the on-disk values stay as-is.
+- All tool surfaces preserved. `imap_get_unsubscribe_links` still accepts the same params and returns the same shape — fields are just cleaner.
+- Other clients (mcp-web-pro, the unsubscriber-pro website consumer) get the same sanitization automatically.
+
+#### 📋 Tracked
+
+- Issue #143 — root-cause filing with the diagnostic data
+- Upstream bug worth filing with Claude Desktop separately (a valid MCP response shouldn't hang any client)
+
 ## [2.17.5] - 2026-05-02
 
 ### Patch — skill update source defaults to imap-mcp-pro itself (no PAT needed)
