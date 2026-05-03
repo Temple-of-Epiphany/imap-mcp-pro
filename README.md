@@ -1,8 +1,19 @@
 # IMAP MCP Pro
 
+[![License: Dual — Personal Free / Commercial Paid](https://img.shields.io/badge/license-dual%20%E2%80%94%20personal%20free%20%2F%20commercial%20paid-blue)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/Temple-of-Epiphany/imap-mcp-pro)](https://github.com/Temple-of-Epiphany/imap-mcp-pro/releases)
+
 An enterprise-grade Model Context Protocol (MCP) server that provides production-ready IMAP email integration with advanced reliability features, comprehensive monitoring, and secure account management.
 
-> **Professional Edition** - Enhanced fork with Level 1-3 reliability features, circuit breaker pattern, metrics, and bulk operations for commercial and large-scale deployments.
+> **Professional Edition** — Enhanced fork with Level 1-3 reliability features, circuit breaker pattern, metrics, and bulk operations for commercial and large-scale deployments.
+
+> ### 📜 License at a glance
+>
+> **Free** for personal, educational, and non-profit use.
+> **Paid commercial license required** for any business, SaaS, revenue-generating, or multi-tenant deployment.
+>
+> Contact for commercial licensing: **colin.bitterfield@templeofepiphany.com**
+> Full terms: [LICENSE](LICENSE) · [License section below](#license)
 
 ## Features
 
@@ -751,19 +762,48 @@ node dist/index.js --print-tools-manifest | jq '.tools | length'
 
 ## License
 
-This software is available under a **Dual License Model**:
+> **Free for personal use. Paid for commercial use.**
 
-### Non-Commercial License (FREE)
-Free for personal, educational, and non-profit use. See [LICENSE](LICENSE) for full terms.
+This software is distributed under a **Dual License Model**. The license you operate under depends entirely on how you use the software.
 
-### Commercial License (PAID)
-Required for any commercial use, including:
-- Business email operations
-- SaaS products
-- Enterprise deployments
-- Revenue-generating services
+### ✅ Non-Commercial License — FREE
 
-**Contact for Commercial License:** colin.bitterfield@templeofepiphany.com
+You may use, copy, modify, and distribute this software at no cost when your use is **non-commercial**, including:
+
+- Personal email management on your own accounts
+- Educational use (students, instructors, classroom)
+- Academic research projects
+- Internal operations of qualifying non-profit organizations
+- Open source project development
+- Evaluation, testing, and proof-of-concept work
+
+Modifications you make under this license must be shared under the same non-commercial terms.
+
+### 💼 Commercial License — PAID (required)
+
+A paid commercial license is **required** before you may use this software for any of the following:
+
+- Business email operations of a for-profit company
+- Any SaaS product, hosted service, or paid offering
+- Multi-tenant or MSP (Managed Service Provider) deployments
+- Production deployments of revenue-generating services
+- Re-distribution as part of a commercial product
+- Use by an organization that generates revenue (other than qualifying non-profits' internal operations)
+
+If your use isn't on the free list above, you need a commercial license — even if you're not directly charging users for the email feature.
+
+### Getting a commercial license
+
+**Contact:** colin.bitterfield@templeofepiphany.com
+**Organization:** Temple of Epiphany
+
+Commercial license terms include support and maintenance, priority bug fixes, production deployment rights, and legal indemnification. Both perpetual and subscription options are available.
+
+### Not sure which applies to you?
+
+If your use case isn't an obvious fit for the non-commercial list, default to assuming you need a commercial license and email us — happy to clarify.
+
+Full legal terms: [LICENSE](LICENSE).
 
 ## Attribution
 
