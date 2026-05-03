@@ -82,11 +82,22 @@ export interface GitHubSource {
   ref: string;
 }
 
-/** Default GitHub source — overridable via env vars or per-call options. */
+/**
+ * Default GitHub source — overridable via env vars or per-call options.
+ *
+ * v2.17.5: defaults to the MCP's own repo (`Temple-of-Epiphany/imap-mcp-pro`)
+ * rather than the upstream `claude-skills-library`. Skills ship bundled with
+ * the MCP and live at `skills/<name>/` inside its repo, so the MCP repo IS
+ * the canonical update source. imap-mcp-pro is public, so the
+ * raw.githubusercontent.com fetch path works without a PAT.
+ *
+ * Override via `IMAP_MCP_SKILL_GITHUB_REPO` if you fork or maintain skills
+ * elsewhere; the back-compat env-var override path is intact.
+ */
 export function defaultGitHubSource(): GitHubSource {
   return {
     owner: process.env.IMAP_MCP_SKILL_GITHUB_OWNER ?? 'Temple-of-Epiphany',
-    repo: process.env.IMAP_MCP_SKILL_GITHUB_REPO ?? 'claude-skills-library',
+    repo: process.env.IMAP_MCP_SKILL_GITHUB_REPO ?? 'imap-mcp-pro',
     ref: process.env.IMAP_MCP_SKILL_GITHUB_REF ?? 'main',
   };
 }

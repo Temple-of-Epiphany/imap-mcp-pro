@@ -5,6 +5,31 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.17.5] - 2026-05-02
+
+### Patch — skill update source defaults to imap-mcp-pro itself (no PAT needed)
+
+v2.17.4 shipped with the GitHub update source defaulting to `Temple-of-Epiphany/claude-skills-library`. That repo is private, so out-of-the-box `imap_check_skill_updates` and `imap_update_skills` returned `fetchError: 404` for any user who hadn't set `IMAP_MCP_GITHUB_TOKEN`.
+
+Architecturally, the cleaner answer is: **skills ship bundled with the MCP, so the MCP's own repo is the canonical update source**. imap-mcp-pro is public, so the raw.githubusercontent.com fetch path works for everyone with no token, no setup. claude-skills-library can stay private and serve as the cross-cutting / standalone-skill registry; imap-mcp-pro is now self-contained.
+
+#### 🐛 Fixed
+
+- **`defaultGitHubSource()` defaults `repo` to `imap-mcp-pro`** (was `claude-skills-library`). Skills are fetched from `https://raw.githubusercontent.com/Temple-of-Epiphany/imap-mcp-pro/main/skills/<name>/...` — the same paths where bundled skills already live in this repo.
+- **No PAT required** for the default public-update path.
+- **Override path intact:** users with skills in a different repo (fork, private library, etc.) can still set `IMAP_MCP_SKILL_GITHUB_REPO` / `IMAP_MCP_SKILL_GITHUB_OWNER` / `IMAP_MCP_SKILL_GITHUB_REF` and it works as before.
+- **Verified end-to-end** with the public path:
+  ```
+  GET https://raw.githubusercontent.com/Temple-of-Epiphany/imap-mcp-pro/main/skills/unsubscribe-cleanup/version.json
+    → 200 OK, returns {"name":"unsubscribe-cleanup","version":"0.1.1",...}
+  ```
+
+#### 🛡️ Backward compatibility
+
+- No schema, API, or behavior changes for already-working calls.
+- Users who explicitly set `IMAP_MCP_SKILL_GITHUB_REPO=claude-skills-library` (or any other repo) keep that behavior.
+- Pure default-flip — anyone running the previous v2.17.4 build can update via the new v2.17.5 `.mcpb` and immediately get the public-fetch path.
+
 ## [2.17.4] - 2026-05-02
 
 ### Skill update from public GitHub (#138)
