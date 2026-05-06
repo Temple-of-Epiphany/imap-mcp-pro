@@ -37,7 +37,9 @@
         "IMAP_MCP_LOG_LEVEL": "${user_config.log_level}",
         "IMAP_MCP_ALLOWED_ATTACHMENT_DIRS": "${user_config.allowed_attachment_dirs}",
         "IMAP_MCP_ENCRYPTION_KEY": "${user_config.encryption_key}",
-        "IMAP_MCP_ATTACHMENT_MAX_BYTES": "${user_config.max_attachment_size_bytes}",
+        "IMAP_MCP_MAX_ATTACHMENT_SIZE_BYTES": "${user_config.max_attachment_size_bytes}",
+        "IMAP_MCP_MAX_TOTAL_ATTACHMENT_SIZE_BYTES": "${user_config.max_total_attachment_size_bytes}",
+        "IMAP_MCP_ALLOW_DOTFILES": "${user_config.allow_dotfiles}",
         "IMAP_MCP_AUTO_CREATE_SENT_FOLDER": "${user_config.auto_create_sent_folder}",
         "MCP_USER_ID": "${user_config.mcp_user_id}"
       }
@@ -76,12 +78,28 @@
     },
     "max_attachment_size_bytes": {
       "type": "number",
-      "title": "Maximum Attachment Size (bytes)",
-      "description": "Reject attachments larger than this value in bytes. Default 25 MiB.",
-      "default": 26214400,
+      "title": "Maximum Attachment Size — per file (bytes)",
+      "description": "Reject any single attachment larger than this value, in bytes. Applies uniformly to inline (base64-in-JSON), path-based, and staged attachment forms. Default 20 MiB (20971520). Range: 1 MiB to 100 MiB.",
+      "default": 20971520,
       "min": 1048576,
       "max": 104857600,
       "required": true
+    },
+    "max_total_attachment_size_bytes": {
+      "type": "number",
+      "title": "Maximum Attachment Size — aggregate per send (bytes)",
+      "description": "Reject a send whose attachments collectively exceed this value, in bytes. The budget spans all forms (inline + path + staged) in a single send. Default 20 MiB (20971520). Range: 1 MiB to 200 MiB. Most SMTP providers reject messages over 25–35 MiB; staying near the per-file cap is recommended.",
+      "default": 20971520,
+      "min": 1048576,
+      "max": 209715200,
+      "required": true
+    },
+    "allow_dotfiles": {
+      "type": "boolean",
+      "title": "Allow Dotfile / Dotdir Attachments",
+      "description": "When false (default and recommended), the server refuses to attach any file whose path or filename has a segment starting with '.' (.ssh, .aws, .config, .bashrc, .envrc, etc.). Most dotfile-prefixed paths are OS or app secrets and should never leave the host as an email attachment. Set to true only if you have a legitimate workflow that emails a dotfile.",
+      "default": false,
+      "required": false
     },
     "auto_create_sent_folder": {
       "type": "boolean",
