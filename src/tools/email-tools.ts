@@ -459,7 +459,13 @@ export function emailTools(
       'Send an email via SMTP and (by default) append the message to the IMAP Sent folder. ' +
       'Sent folder resolution: cache → SPECIAL-USE \\Sent flag → provider preset → fallback name probe. ' +
       'Gmail accounts skip the APPEND by default because Gmail server-copies sent messages; ' +
-      "pass forceAppendToSent=true to override. Bcc is preserved in the Sent copy per RFC 5322 §3.6.3.",
+      "pass forceAppendToSent=true to override. Bcc is preserved in the Sent copy per RFC 5322 §3.6.3. " +
+      'Attachment input — pick one form per file: ' +
+      '(1) `attachments` (inline base64) when the file lives in a sandbox the server cannot read ' +
+      '(Claude Desktop Workspace, Claude.ai code sandbox, remote host); ' +
+      '(2) `attachmentPaths` when the file is on the same host as this server and inside the ' +
+      'configured allow-list; ' +
+      '(3) `stagedAttachmentIds` only for files > ~10 MB that need chunked upload.',
     inputSchema: {
       accountId: z.string().describe('Account ID to send from'),
       to: z.union([z.string(), z.array(z.string())]).describe('Recipient email address(es)'),
@@ -470,16 +476,32 @@ export function emailTools(
       bcc: z.union([z.string(), z.array(z.string())]).optional().describe('BCC recipients'),
       replyTo: z.string().optional().describe('Reply-to address'),
       attachments: z.array(z.object({
-        filename: z.string().describe('Attachment filename'),
-        content: z.string().optional().describe('Base64 encoded content'),
-        path: z.string().optional().describe('File path to attach'),
-        contentType: z.string().optional().describe('MIME type'),
-      })).optional().describe('Email attachments (legacy form: { filename, content?, path?, contentType? }).'),
+        filename: z.string().describe('Attachment filename (used as the MIME part filename).'),
+        content: z.string().optional().describe(
+          'Base64-encoded file bytes. Use this when the file is not on the server host ' +
+          '(e.g., generated inside a Claude Desktop Workspace or Claude.ai sandbox).'
+        ),
+        path: z.string().optional().describe(
+          'DEPRECATED: prefer the top-level attachmentPaths field, which enforces the ' +
+          'attachment-directory allow-list. This inline path is forwarded directly to the SMTP ' +
+          'composer and bypasses allow-list validation; treat it as a legacy escape hatch.'
+        ),
+        contentType: z.string().optional().describe('MIME type. Auto-detected from filename if omitted.'),
+      })).optional().describe(
+        'INLINE FORM (preferred when the file is not on the server host). Each attachment carries ' +
+        'its bytes inline as base64 in the `content` field. One round-trip, no allow-list, no ' +
+        'staging. This is the right choice when the file lives in a Claude Desktop Workspace or ' +
+        'Claude.ai sandbox where /mnt/user-data/outputs/ paths are not visible to this server. ' +
+        'Practical size ceiling: ~10 MB per request (MCP transport limit). For larger files, use ' +
+        'stagedAttachmentIds.'
+      ),
       attachmentPaths: z.array(z.string()).optional().describe(
-        'WP1: array of absolute file paths to attach. Server reads, validates, and encodes ' +
-        'the files internally (no base64 in the JSON payload). Each path must resolve inside ' +
-        'one of the allowed attachment directories — see env IMAP_MCP_ALLOWED_ATTACHMENT_DIRS ' +
-        'or per-user override in users.allowed_attachment_dirs.'
+        'PATH FORM (preferred when the file is on the same host as this server). Array of ' +
+        'absolute file paths. The server reads, validates, and encodes the files internally. ' +
+        'Each path must resolve inside one of the allowed attachment directories (env ' +
+        'IMAP_MCP_ALLOWED_ATTACHMENT_DIRS, or per-user override in users.allowed_attachment_dirs). ' +
+        'If your file lives in a sandbox the server cannot read, use the inline `attachments` ' +
+        'form instead — the path-based form will fail with attachment_validation_failed.'
       ),
       attachmentContentTypes: z.array(z.string()).optional().describe(
         'Parallel array to attachmentPaths overriding the detected Content-Type. ' +
@@ -490,8 +512,10 @@ export function emailTools(
         'Use "" or omit an entry to keep the basename.'
       ),
       stagedAttachmentIds: z.array(z.string()).optional().describe(
-        'WP2: array of stagingIds from imap_attachment_stage_finalize. The server reads each ' +
-        'assembled blob, attaches it, and deletes the staging session on successful send.'
+        'STAGED FORM (for large files or streaming uploads). Array of stagingIds returned from ' +
+        'imap_attachment_stage_finalize. Use this only when the file exceeds the inline size ' +
+        'ceiling (~10 MB) and is not on the server host. For small files in a Workspace/sandbox, ' +
+        'prefer the inline `attachments` form — it avoids the multi-call staging dance.'
       ),
       appendToSent: z.boolean().optional().default(true).describe(
         'Append the sent message to the IMAP Sent folder after a successful SMTP send. Default true.'
@@ -534,12 +558,20 @@ export function emailTools(
       } : undefined
     };
 
+    // ---- shared attachment policy (applies to inline, path-based, staged) ----
+    const {
+      validateAttachmentPaths, resolveAllowedDirs, formatValidationErrors,
+      sanitizeFilename, isDotfileBasename,
+    } = await import('../services/attachment-validator.js');
+
+    const denyDotfiles = (process.env.IMAP_MCP_ALLOW_DOTFILES ?? '').toLowerCase() !== 'true';
+    const maxBytes = Number(process.env.IMAP_MCP_MAX_ATTACHMENT_SIZE_BYTES ?? 20 * 1024 * 1024);
+    const maxTotalBytes = Number(process.env.IMAP_MCP_MAX_TOTAL_ATTACHMENT_SIZE_BYTES ?? 20 * 1024 * 1024);
+    let runningTotalBytes = 0;
+
     // ---- WP1: resolve and validate path-based attachments ----
     const validatedPathAttachments: Array<{ filename: string; path: string; contentType: string }> = [];
     if (attachmentPaths && attachmentPaths.length > 0) {
-      const { validateAttachmentPaths, resolveAllowedDirs, formatValidationErrors } =
-        await import('../services/attachment-validator.js');
-
       const userId = (() => {
         try {
           const u = db.getUserByUsername(process.env.MCP_USER_ID || 'default');
@@ -553,9 +585,6 @@ export function emailTools(
         ? resolveAllowedDirs(db, userId, globalDirs)
         : globalDirs;
 
-      const maxBytes = Number(process.env.IMAP_MCP_MAX_ATTACHMENT_SIZE_BYTES ?? 25 * 1024 * 1024);
-      const maxTotalBytes = Number(process.env.IMAP_MCP_MAX_TOTAL_ATTACHMENT_SIZE_BYTES ?? 50 * 1024 * 1024);
-
       const inputs = attachmentPaths.map((p, i) => ({
         path: p,
         contentType: attachmentContentTypes?.[i] || undefined,
@@ -564,7 +593,12 @@ export function emailTools(
 
       const result = await validateAttachmentPaths(
         inputs,
-        { globalAllowedDirs: globalDirs, maxSizeBytes: maxBytes, maxTotalSizeBytes: maxTotalBytes },
+        {
+          globalAllowedDirs: globalDirs,
+          maxSizeBytes: maxBytes,
+          maxTotalSizeBytes: maxTotalBytes,
+          denyDotfiles,
+        },
         allowedDirs
       );
 
@@ -588,6 +622,63 @@ export function emailTools(
           path: a.realPath,
           contentType: a.contentType,
         });
+        runningTotalBytes += a.sizeBytes;
+      }
+    }
+
+    // ---- Inline attachments: sanitize, dotfile-reject, size cap ----
+    const sanitizedInlineAttachments: Array<{ filename: string; content?: Buffer; path?: string; contentType?: string }> = [];
+    if (attachments && attachments.length > 0) {
+      const inlineErrors: Array<{ kind: string; detail: string }> = [];
+      for (const att of attachments) {
+        const cleanName = sanitizeFilename(att.filename ?? '');
+        if (cleanName.length === 0) {
+          inlineErrors.push({ kind: 'invalid-filename', detail: `Inline attachment has no usable filename basename: ${JSON.stringify(att.filename)}` });
+          continue;
+        }
+        if (denyDotfiles && isDotfileBasename(cleanName)) {
+          inlineErrors.push({ kind: 'dotfile-or-dotdir-rejected', detail: `Inline attachment filename '${cleanName}' is a dotfile and is denied by default. Set IMAP_MCP_ALLOW_DOTFILES=true to opt back in.` });
+          continue;
+        }
+
+        let contentBuf: Buffer | undefined;
+        if (att.content) {
+          try {
+            contentBuf = Buffer.from(att.content, 'base64');
+          } catch {
+            inlineErrors.push({ kind: 'invalid-base64', detail: `Inline attachment '${cleanName}': content is not valid base64.` });
+            continue;
+          }
+          if (contentBuf.length > maxBytes) {
+            inlineErrors.push({ kind: 'size-exceeds-per-attachment', detail: `Inline attachment '${cleanName}' is ${contentBuf.length} bytes, exceeds per-attachment cap of ${maxBytes} bytes (override IMAP_MCP_MAX_ATTACHMENT_SIZE_BYTES).` });
+            continue;
+          }
+          if (runningTotalBytes + contentBuf.length > maxTotalBytes) {
+            inlineErrors.push({ kind: 'aggregate-size-exceeds', detail: `Inline attachment '${cleanName}' would push aggregate size to ${runningTotalBytes + contentBuf.length} bytes, exceeds total cap of ${maxTotalBytes} bytes (override IMAP_MCP_MAX_TOTAL_ATTACHMENT_SIZE_BYTES, or move large files to imap_attachment_stage_*).` });
+            continue;
+          }
+          runningTotalBytes += contentBuf.length;
+        }
+
+        sanitizedInlineAttachments.push({
+          filename: cleanName,
+          content: contentBuf,
+          path: att.path,
+          contentType: att.contentType,
+        });
+      }
+      if (inlineErrors.length > 0) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              result: 'attachment_validation_failed',
+              errors: inlineErrors.map(e => e.detail),
+              errorDetails: inlineErrors,
+            }, null, 2)
+          }]
+        };
       }
     }
 
@@ -625,18 +716,51 @@ export function emailTools(
         };
       }
       const missing: string[] = [];
+      const stagedErrors: Array<{ kind: string; detail: string }> = [];
       for (const sid of stagedAttachmentIds) {
         const f = staging.getFinalized(userId, sid);
         if (!f) {
           missing.push(sid);
           continue;
         }
+        const cleanName = sanitizeFilename(f.filename ?? '');
+        if (cleanName.length === 0) {
+          stagedErrors.push({ kind: 'invalid-filename', detail: `Staged attachment ${sid}: stored filename has no usable basename.` });
+          continue;
+        }
+        if (denyDotfiles && isDotfileBasename(cleanName)) {
+          stagedErrors.push({ kind: 'dotfile-or-dotdir-rejected', detail: `Staged attachment ${sid}: filename '${cleanName}' is a dotfile and is denied by default. Set IMAP_MCP_ALLOW_DOTFILES=true to opt back in.` });
+          continue;
+        }
+        const stagedSize = f.size;
+        if (stagedSize > maxBytes) {
+          stagedErrors.push({ kind: 'size-exceeds-per-attachment', detail: `Staged attachment '${cleanName}' is ${stagedSize} bytes, exceeds per-attachment cap of ${maxBytes} (override IMAP_MCP_MAX_ATTACHMENT_SIZE_BYTES).` });
+          continue;
+        }
+        if (runningTotalBytes + stagedSize > maxTotalBytes) {
+          stagedErrors.push({ kind: 'aggregate-size-exceeds', detail: `Staged attachment '${cleanName}' would push aggregate size to ${runningTotalBytes + stagedSize} bytes, exceeds total cap of ${maxTotalBytes} (override IMAP_MCP_MAX_TOTAL_ATTACHMENT_SIZE_BYTES).` });
+          continue;
+        }
+        runningTotalBytes += stagedSize;
         stagedAttachments.push({
-          filename: f.filename,
+          filename: cleanName,
           path: f.assembledPath,
           contentType: f.contentType,
           stagingId: sid,
         });
+      }
+      if (stagedErrors.length > 0) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              result: 'attachment_validation_failed',
+              errors: stagedErrors.map(e => e.detail),
+              errorDetails: stagedErrors,
+            }, null, 2)
+          }]
+        };
       }
       if (missing.length > 0) {
         return {
@@ -657,12 +781,7 @@ export function emailTools(
       from: account.user,
       to, subject, text, html, cc, bcc, replyTo,
       attachments: [
-        ...(attachments?.map(att => ({
-          filename: att.filename,
-          content: att.content ? Buffer.from(att.content, 'base64') : undefined,
-          path: att.path,
-          contentType: att.contentType,
-        })) ?? []),
+        ...sanitizedInlineAttachments,
         ...validatedPathAttachments,
         ...stagedAttachments.map(s => ({
           filename: s.filename,
@@ -905,10 +1024,15 @@ export function emailTools(
   if (staging) {
     server.registerTool('imap_attachment_stage_init', {
       description:
-        'Begin a chunked attachment upload. Returns a stagingId, server-recommended chunkSizeBytes ' +
-        '(default 256 KiB), and an expiresAt timestamp (default 1 hour). Subsequent chunks are sent ' +
-        'via imap_attachment_stage_append. Per-user disk quota is enforced — the call fails if the ' +
-        "session's expectedSize would exceed it.",
+        'Begin a chunked attachment upload. Use only when the file exceeds the ~10 MB inline ' +
+        'ceiling of imap_send_email\'s `attachments` form, or when streaming from a source that ' +
+        "cannot fit a single MCP request. For small files in a sandbox (Claude Desktop Workspace, " +
+        'Claude.ai /mnt/user-data/outputs/), prefer the inline `attachments` form on imap_send_email ' +
+        '— it is a single tool call, no chunking, no allow-list. ' +
+        'Returns a stagingId, server-recommended chunkSizeBytes (default 256 KiB), and an expiresAt ' +
+        'timestamp (default 1 hour). Subsequent chunks are sent via imap_attachment_stage_append. ' +
+        "Per-user disk quota is enforced — the call fails if the session's expectedSize would " +
+        'exceed it.',
       inputSchema: {
         filename: z.string().describe('Original filename (used as the attachment basename).'),
         expectedSize: z.number().int().nonnegative().describe('Total size the client intends to upload, in bytes.'),

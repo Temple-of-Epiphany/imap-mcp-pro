@@ -23,6 +23,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { withErrorHandling } from '../utils/error-handler.js';
+import { sanitizeText } from '../utils/sanitize-content.js';
 import {
   SkillsInstallerService,
   defaultGitHubSource,
@@ -52,10 +53,30 @@ export function skillsTools(
   }, withErrorHandling(async ({ ref, timeoutMs }) => {
     const source = ref ? { ...defaultGitHubSource(), ref } : defaultGitHubSource();
     const report = await installer.checkForUpdates({ source, timeoutMs });
+
+    // v2.17.7 (#145): minimize the response shape to reduce content
+    // surface area. Same defensive principle as v2.17.6 — bounded,
+    // sanitized strings for every field that's user-visible. Drop
+    // baseUrl (informational; can be reconstructed from `source`),
+    // cap fetchError to 200 chars, sanitize summary text.
+    const minimal = {
+      checkedAt: report.checkedAt,
+      source: report.source,
+      skills: report.skills.map(s => ({
+        name: s.name,
+        installed: s.installed,
+        bundled: s.bundled,
+        available: s.available,
+        hasUpdate: s.hasUpdate,
+        fetchError: sanitizeText(s.fetchError, 200),
+      })),
+      summary: sanitizeText(report.summary, 300) ?? '',
+    };
+
     return {
       content: [{
         type: 'text',
-        text: JSON.stringify(report, null, 2),
+        text: JSON.stringify(minimal, null, 2),
       }],
     };
   }));

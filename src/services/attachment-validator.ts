@@ -31,6 +31,15 @@ export interface ValidatorConfig {
   maxSizeBytes: number;
   /** Aggregate max bytes for one send. */
   maxTotalSizeBytes: number;
+  /**
+   * When true (default) reject any path with a segment starting with '.'
+   * (dotfiles/dotdirs like .ssh, .aws, .config) and any inline filename
+   * starting with '.'. Set false via IMAP_MCP_ALLOW_DOTFILES=true to opt
+   * back in. Reason: dotfile paths are overwhelmingly OS/app secrets
+   * (~/.ssh/id_rsa, ~/.aws/credentials, ~/.config/...) that should never
+   * leave the host as an email attachment.
+   */
+  denyDotfiles?: boolean;
 }
 
 export interface ValidatedAttachment {
@@ -55,7 +64,9 @@ export type ValidationFailure =
   | { kind: 'outside-allowed-dirs'; path: string; resolved: string }
   | { kind: 'size-exceeds-per-attachment'; path: string; sizeBytes: number; limitBytes: number }
   | { kind: 'aggregate-size-exceeds'; pendingPath: string; totalBytes: number; limitBytes: number }
-  | { kind: 'no-allowed-dirs-configured' };
+  | { kind: 'no-allowed-dirs-configured' }
+  | { kind: 'dotfile-or-dotdir-rejected'; path: string; component: string }
+  | { kind: 'invalid-filename'; raw: string };
 
 export interface ValidationResult {
   attachments: ValidatedAttachment[];
@@ -86,15 +97,49 @@ export function resolveAllowedDirs(
 }
 
 /**
- * Per RFC 2183: filenames must not contain path separators or control
- * chars. We also strip leading dots (avoid hidden-file confusion) and
- * cap to 255 bytes UTF-8.
+ * Strip any path component from a filename and clean it for use in a MIME
+ * Content-Disposition header (RFC 2183).
+ *
+ *   "/foo/bar/baz.txt"        -> "baz.txt"
+ *   "..\\..\\windows\\sec.dat" -> "sec.dat"
+ *   "report\x00.pdf"         -> "report.pdf"
+ *
+ * Leading dots are NOT stripped here — that is a policy decision exposed
+ * via the `denyDotfiles` config knob, so callers can choose to allow
+ * legitimate dotfile sends while the default rejects them outright.
+ *
+ * Returns an empty string if the input has no usable basename (e.g. "/"
+ * or "..."). Callers should treat empty as a validation failure.
  */
 export function sanitizeFilename(filename: string): string {
-  const noSep = filename.replace(/[\/\\]/g, '_');
-  const noCtl = noSep.replace(/[\x00-\x1f\x7f]/g, '');
-  const noLeadDot = noCtl.replace(/^\.+/, '');
-  return noLeadDot.slice(0, 255);
+  const base = path.basename(filename);
+  const noCtl = base.replace(/[\x00-\x1f\x7f]/g, '');
+  return noCtl.slice(0, 255);
+}
+
+/**
+ * Returns true when the basename indicates a dotfile (e.g. ".bashrc",
+ * "..hidden"). Distinct from path-component scanning: this only inspects
+ * a single sanitized filename string.
+ */
+export function isDotfileBasename(filename: string): boolean {
+  return filename.length > 0 && filename.startsWith('.');
+}
+
+/**
+ * Returns the first dot-prefixed segment of an absolute path, or null if
+ * none. Skips '.' and '..' (those are caught by the parent-traversal /
+ * realpath checks). Only the segments between separators are considered;
+ * symbolic-link resolution is the caller's responsibility (validate both
+ * the input path and the realpath).
+ */
+export function findDotSegment(absolutePath: string): string | null {
+  const segments = absolutePath.split(path.sep).filter(Boolean);
+  for (const s of segments) {
+    if (s === '.' || s === '..') continue;
+    if (s.startsWith('.')) return s;
+  }
+  return null;
 }
 
 /** True if `child` (after realpath) is inside `parent` (after realpath). */
@@ -162,12 +207,33 @@ export async function validateAttachmentPaths(
       continue;
     }
 
+    // Dotfile / dotdir reject (default-on). Scan the input path; we re-scan
+    // the realpath below in case a non-dotted symlink resolves into a dotted
+    // directory.
+    const denyDot = config.denyDotfiles !== false;
+    if (denyDot) {
+      const seg = findDotSegment(p);
+      if (seg) {
+        errors.push({ kind: 'dotfile-or-dotdir-rejected', path: p, component: seg });
+        continue;
+      }
+    }
+
     let realPath: string;
     try {
       realPath = await fs.promises.realpath(p);
     } catch {
       errors.push({ kind: 'not-found', path: p });
       continue;
+    }
+
+    // Re-scan after realpath to catch symlinks into dotdirs.
+    if (denyDot) {
+      const seg = findDotSegment(realPath);
+      if (seg) {
+        errors.push({ kind: 'dotfile-or-dotdir-rejected', path: p, component: seg });
+        continue;
+      }
     }
 
     // Containment check after realpath.
@@ -216,6 +282,14 @@ export async function validateAttachmentPaths(
 
     const baseName = path.basename(realPath);
     const filename = sanitizeFilename(input.filename ?? baseName);
+    if (filename.length === 0) {
+      errors.push({ kind: 'invalid-filename', raw: input.filename ?? baseName });
+      continue;
+    }
+    if (config.denyDotfiles !== false && isDotfileBasename(filename)) {
+      errors.push({ kind: 'dotfile-or-dotdir-rejected', path: p, component: filename });
+      continue;
+    }
     const contentType =
       input.contentType ??
       (mimeLookup(realPath) || 'application/octet-stream');
@@ -244,13 +318,42 @@ export function formatValidationErrors(errors: ValidationFailure[]): string[] {
       case 'not-found':                 return `File not found or unreadable: ${e.path}`;
       case 'not-regular-file':          return `Not a regular file: ${e.path}`;
       case 'not-readable':              return `File not readable by server: ${e.path}`;
-      case 'outside-allowed-dirs':      return `Path resolves outside allowed dirs: ${e.path} -> ${e.resolved}`;
+      case 'outside-allowed-dirs':
+        return (
+          `Path resolves outside allowed dirs: ${e.path} -> ${e.resolved}. ` +
+          'If this file lives in a sandbox the server cannot read (Claude Desktop Workspace, ' +
+          'Claude.ai /mnt/user-data/outputs/, remote host), pass it via the inline `attachments` ' +
+          'form: [{ filename, content: <base64>, contentType }]. That form does not consult the ' +
+          'allow-list and completes in one round-trip.'
+        );
       case 'size-exceeds-per-attachment':
         return `Attachment exceeds per-file limit: ${e.path} (${e.sizeBytes} bytes > ${e.limitBytes})`;
       case 'aggregate-size-exceeds':
         return `Aggregate attachments exceed limit at ${e.pendingPath}: ${e.totalBytes} bytes > ${e.limitBytes}`;
       case 'no-allowed-dirs-configured':
-        return 'No allowed attachment directories configured. Set IMAP_MCP_ALLOWED_ATTACHMENT_DIRS or users.allowed_attachment_dirs.';
+        return (
+          'No allowed attachment directories configured for path-based attachments. ' +
+          'Two ways forward: ' +
+          '(a) if your file lives in a sandbox the server cannot read (Claude Desktop Workspace, ' +
+          'Claude.ai /mnt/user-data/outputs/, remote host), retry with the inline `attachments` ' +
+          'form: [{ filename, content: <base64>, contentType }] — single round-trip, no ' +
+          'allow-list involvement; ' +
+          '(b) if your file is on this server host, set IMAP_MCP_ALLOWED_ATTACHMENT_DIRS ' +
+          '(env, comma-separated absolute paths) or populate users.allowed_attachment_dirs ' +
+          'for the active user, then retry with attachmentPaths.'
+        );
+      case 'dotfile-or-dotdir-rejected':
+        return (
+          `Refused: path or filename contains a dotfile/dotdir segment ('${e.component}') in ` +
+          `${e.path}. Dotfile-prefixed paths (.ssh, .aws, .config, .bashrc, etc.) are denied by ` +
+          'default to prevent accidental exfiltration of host secrets. To opt back in for a ' +
+          'legitimate dotfile send, set IMAP_MCP_ALLOW_DOTFILES=true on the server.'
+        );
+      case 'invalid-filename':
+        return (
+          `Refused: filename '${e.raw}' has no usable basename after sanitization (e.g. it was ` +
+          'just a path separator or all control chars). Provide a non-empty filename string.'
+        );
     }
   });
 }

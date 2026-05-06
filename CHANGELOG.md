@@ -5,6 +5,181 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.17.9] - 2026-05-06
+
+### Patch — attachment hardening: dotfile reject, 10 MB default cap, filename basename on all forms
+
+Closes the first batch of attachment-input security gaps surfaced while diagnosing the Claude Desktop Workspace attachment failure that motivated v2.17.8. v2.17.8 fixed *discoverability* (the inline form was buried as "legacy"). v2.17.9 fixes *enforcement* (the rules now apply to all three input forms — inline, path, staged — uniformly).
+
+#### 🛡️ New: dotfile / dotdir rejection (default-on, configurable)
+
+Any attachment whose path or filename contains a segment starting with `.` is now rejected by default. Catches the canonical exfiltration shapes (`~/.ssh/id_rsa`, `~/.aws/credentials`, `~/.config/...`, `~/.bashrc`, `~/.envrc`, etc.) without requiring the operator to enumerate every dotdir up front.
+
+- **Path form (`attachmentPaths`):** scans both the input path and the `realpath` (so a non-dotted symlink resolving into a dotdir is also rejected). Implemented via new `findDotSegment()` helper; `.` and `..` segments are skipped (they are caught by the pre-existing parent-traversal / realpath checks).
+- **Inline form (`attachments[].filename`):** filename is `path.basename`-ed and checked with `isDotfileBasename()` after sanitization.
+- **Staged form (`stagedAttachmentIds`):** stored filename from `imap_attachment_stage_init` is re-checked at send time.
+
+**Override:** set `IMAP_MCP_ALLOW_DOTFILES=true` in the server env to allow dotfile sends. Recommended only for narrow, audited use cases.
+
+**New `ValidationFailure` kinds:** `dotfile-or-dotdir-rejected` (with `path` and `component` fields), `invalid-filename` (when sanitization yields an empty basename).
+
+#### 🛡️ Default size caps now 20 MiB and enforced on every form
+
+Per-attachment and aggregate size caps now both default to **20 MiB** (20 971 520 bytes; was 25 MB / 50 MB respectively). Both are enforced against:
+
+- `attachmentPaths` — already enforced; default lowered.
+- `attachments[].content` — **was previously unbounded.** A caller could submit an arbitrarily large base64 blob and the server would buffer the decoded bytes in memory before nodemailer streamed to SMTP. Now decoded byte length is checked against the per-attachment cap, and the running aggregate spans inline + path + staged in a single budget.
+- `stagedAttachmentIds` — finalized session size from staging metadata is now checked at send time, in addition to the per-user disk quota that staging enforces at upload.
+
+**Overrides (env vars, applied before defaults):**
+- `IMAP_MCP_MAX_ATTACHMENT_SIZE_BYTES` — per-attachment ceiling.
+- `IMAP_MCP_MAX_TOTAL_ATTACHMENT_SIZE_BYTES` — aggregate ceiling for one send.
+
+The aggregate budget is shared across all three input forms, so mixing inline + path + staged in a single send still respects the total cap.
+
+**Claude Desktop UI surfaces:** the `.mcpb` extension manifest now exposes both ceilings as `user_config` entries (*"Maximum Attachment Size — per file (bytes)"* and *"Maximum Attachment Size — aggregate per send (bytes)"*), each defaulting to 20 MiB with sliders bounded at 1 MiB / 100 MiB and 1 MiB / 200 MiB respectively. The dotfile policy is exposed as a *"Allow Dotfile / Dotdir Attachments"* boolean defaulting to off.
+
+#### 🐛 Fixed manifest env-var name mismatch (latent since manifest first shipped)
+
+The `.mcpb` manifest's `max_attachment_size_bytes` user_config entry was wired to the env var name `IMAP_MCP_ATTACHMENT_MAX_BYTES`, but the server has always read `IMAP_MCP_MAX_ATTACHMENT_SIZE_BYTES`. The Claude Desktop UI control was therefore inert — a user could move the slider all day without the server cap changing. Renamed the manifest's env wiring to the canonical name so the user_config now actually drives the runtime cap. New `max_total_attachment_size_bytes` and `allow_dotfiles` entries were added with the correct names from the start.
+
+#### 🛡️ Filename basename on every form ("sanitize the path from the filename")
+
+`sanitizeFilename()` now uses `path.basename()` as its first step (previously it merely replaced `/` and `\` with `_`, preserving path-like noise in the filename). After basename, control characters are stripped and the result is capped at 255 bytes per RFC 2183. **Leading dots are no longer auto-stripped** — that was a silent renaming policy; the explicit `denyDotfiles` knob replaces it.
+
+Applied uniformly to:
+- Path-based attachments (filename derived from `realpath` basename or the `attachmentFilenames[]` override).
+- Inline attachments (`attachments[].filename`).
+- Staged attachments (filename stored from `imap_attachment_stage_init`).
+
+A filename that sanitizes to an empty string (e.g., input was just `/` or all control chars) is rejected with `invalid-filename` instead of silently being passed to the MIME composer.
+
+#### 🧪 New tests
+
+`src/services/attachment-validator.test.ts` (21 tests) covers:
+- `sanitizeFilename` basename behavior, control-char strip, length cap, leading-dot preservation.
+- `isDotfileBasename` and `findDotSegment` happy + edge cases.
+- `validateAttachmentPaths` dotfile rejection (default and `denyDotfiles=false` override) with real tmpdir filesystem fixtures.
+- Per-attachment and aggregate size cap enforcement.
+
+Total test count: **71/71 pass** (was 50).
+
+#### Backward compatibility
+
+- **Default size caps changed.** Per-attachment cap drops 25 MB → 20 MiB (a smaller change than first drafted at 10 MiB). Aggregate cap drops 50 MB → 20 MiB. Sends with attachments between 20 MiB and 25 MB that previously succeeded will now fail with `attachment_validation_failed` / `size-exceeds-per-attachment`. Raise either ceiling via the Claude Desktop user_config sliders or by setting `IMAP_MCP_MAX_ATTACHMENT_SIZE_BYTES` / `IMAP_MCP_MAX_TOTAL_ATTACHMENT_SIZE_BYTES` directly.
+- **Dotfile sends now refused by default.** Sends targeting `.bashrc`, `.envrc`, etc. will fail unless `IMAP_MCP_ALLOW_DOTFILES=true`. This is the intended safe default; the override exists for the narrow case where a user genuinely wants to email a dotfile.
+- **`sanitizeFilename` semantics changed.** Internal helper; the only external caller is `validateAttachmentPaths`, which now produces basename-only filenames instead of underscore-substituted full paths. Callers passing absolute paths as the *filename override* (`attachmentFilenames[i]`) will get the basename rather than a mangled long string.
+- **Validator no longer auto-strips leading dots from filenames.** Combined with the new `denyDotfiles` policy, the security posture is equivalent — and now explicit.
+- No tool-surface, no schema, no env-var rename. New env vars (`IMAP_MCP_ALLOW_DOTFILES`, lowered `IMAP_MCP_MAX_*` defaults) are additive / refined.
+
+#### Still open — tracked for follow-up
+
+- **Inline `attachments[].path` allow-list bypass.** The inline form's `path` field still forwards directly to nodemailer without going through `validateAttachmentPaths`. Flagged DEPRECATED in v2.17.8's schema description; routing it through the validator (or removing it) is the next iteration of attachment-input hardening.
+- **Per-user outbox dir** (auto-created, auto-allowlisted at `~/.imap-mcp/users/<userId>/outbox/`). Eliminates the "no allowed dirs configured" first-run friction without widening the attack surface beyond a server-managed dir. Tracked separately.
+
+## [2.17.8] - 2026-05-06
+
+### Patch — attachment-form discoverability + steering error messages (no behavior change)
+
+`imap_send_email` exposes three attachment input forms (inline base64 `attachments`, host-path `attachmentPaths`, chunked-upload `stagedAttachmentIds`). Schema descriptions did not communicate when each one applies, so callers driving the tool from a sandboxed environment (Claude Desktop Workspace, Claude.ai code sandbox where files live at `/mnt/user-data/outputs/`) reached for `attachmentPaths` first, hit `attachment_validation_failed`, retried with the staging API (multi-call dance), and still failed when the sandbox path remained unreadable to the server. The inline form — which has worked since v1, completes in one round-trip, and bypasses the allow-list because no path is involved — was buried as `(legacy form: ...)` in the description.
+
+This patch is documentation/error-text only. No behavior changes, no new code paths, no schema migrations.
+
+#### 📝 Schema descriptions rewritten on `imap_send_email`
+
+- **Tool top-level description** now ends with a one-line decision rule listing the three forms and when each one applies.
+- **`attachments`** (inline base64) is presented as **INLINE FORM (preferred when the file is not on the server host)** with explicit guidance pointing at Claude Desktop Workspace and Claude.ai sandbox cases. Mentions the ~10 MB MCP transport ceiling.
+- **`attachmentPaths`** is presented as **PATH FORM (preferred when the file is on the same host as this server)** with a steer to inline when the file lives in a sandbox.
+- **`stagedAttachmentIds`** is presented as **STAGED FORM (for large files or streaming uploads)**, explicitly de-recommended for small-file Workspace cases.
+- **`attachments[].path`** is now flagged DEPRECATED in its description: it is forwarded directly to the SMTP composer and bypasses the WP1 allow-list. Callers wanting host-path attachments should use the top-level `attachmentPaths` field, which goes through `validateAttachmentPaths`. (No code change yet — flagged for a follow-up issue. See *Known issue* below.)
+
+#### 🪧 Validation error messages now steer to the right form
+
+`formatValidationErrors` in `src/services/attachment-validator.ts` was rewriting two failure kinds in a way that told the caller *what* was wrong but not *what to do next*. Both now include an explicit recommendation:
+
+- **`no-allowed-dirs-configured`** — instead of just *"Set IMAP_MCP_ALLOWED_ATTACHMENT_DIRS"*, the message now offers two paths forward: (a) if the file is in a sandbox the server cannot read, retry with the inline form; (b) if the file is on the host, here is how to configure the allow-list.
+- **`outside-allowed-dirs`** — now includes the same inline-form fallback recommendation for the sandbox case.
+
+#### 📝 Staging tool description tightened
+
+`imap_attachment_stage_init` now opens with *"Use only when the file exceeds the ~10 MB inline ceiling… For small files in a sandbox, prefer the inline `attachments` form."* This stops the tool from being chosen as a first-line answer for cases where one inline call would suffice.
+
+#### Known issue — flagged for follow-up
+
+Surfaced while writing this patch, **not fixed here**: the inline `attachments[].path` field is forwarded directly to the SMTP composer (`src/tools/email-tools.ts` ~660) without going through `validateAttachmentPaths`. A caller can therefore pass `{ filename: 'x', path: '/etc/passwd' }` and bypass the WP1 allow-list. The `attachmentPaths` top-level field is the correctly-gated path-based input. This patch only flags the inline `path` field as DEPRECATED in the schema description — it does not remove or block the field, because that would be a breaking change for any external caller relying on the v1 shape. Tracking issue and removal will follow in a separate release.
+
+#### Verified
+
+- `npm run build`: clean.
+- `npm test`: existing 50/50 still pass (no test changes — these are description-text edits).
+- Manual: error envelope text confirmed via local stdio run.
+
+#### Backward compatibility
+
+- No tool surface change. Same arguments, same return shape, same env vars.
+- No schema migration. DB stays at 1.10.0.
+- Error envelopes for `attachment_validation_failed` keep the same `result` and `errorDetails[].kind` codes; only the human-readable `errors[]` strings grew longer.
+
+## [2.17.7] - 2026-05-03
+
+### Patch — userId resolution on usercheck tools + skill-update response sanitization (#145)
+
+Two issues surfaced while expanding the v2.17.x acceptance test plan with UserCheck (Phase 6) and skill-update (Phase 8) coverage. Both are now fixed:
+
+#### 🐛 Fixed — userId on usercheck tools accepts username (matches subscription-tools behavior)
+
+`imap_add_usercheck_key` and the other 6 usercheck tools that accept `userId` were not running it through the v2.17.2 `resolveUserOrThrow` helper. Passing the username form (e.g., `"colin"`) returned `FOREIGN KEY constraint failed` deep in the INSERT path — same failure shape as #130 before that fix landed. The subscription tools were updated in v2.17.2; the usercheck tools were missed.
+
+- **Extracted** `resolveUserOrThrow` and `UnknownUserError` into `src/utils/user-resolver.ts` (was a private helper inside `subscription-tools.ts`).
+- **Applied** the resolver to all 7 usercheck tools that accept `userId`:
+  - `imap_add_usercheck_key`
+  - `imap_get_usercheck_key`
+  - `imap_check_email_spam`
+  - `imap_check_domain`
+  - `imap_check_emails_spam_bulk`
+  - `imap_check_folder_spam`
+  - `imap_scan_account_spam`
+- **Updated** every `userId` Zod description on those tools to match the documented contract: *"either canonical user_id UUID or username from the users table."*
+- **Subscription-tools** now imports the shared helper instead of carrying a local copy.
+
+`imap_delete_usercheck_key` doesn't take `userId` (it takes `keyId`), so no change needed.
+
+#### 🛡️ Mitigated — `imap_check_skill_updates` response trimmed and sanitized
+
+Same hang shape as the v2.17.5 `imap_get_unsubscribe_links` issue: server returns a valid response in 175ms via local stdio (verified), but Claude Desktop hangs on it. We can't fix CD's renderer from here, but we can give it less surface area to choke on.
+
+- **Removed** the `baseUrl` field from the response (informational — can be reconstructed from `source`).
+- **Sanitized** the `summary` and per-skill `fetchError` strings via `sanitizeText` (the v2.17.6 helper). Caps lengths, replaces control characters with spaces.
+- **Removed** `cached` field (was always `false` — never wired up).
+
+Response size dropped from 542 → 428 bytes (21% smaller, fewer string fields for CD to render). Whether this fully resolves the CD hang is for end-user verification post-install; if not, the v2.17.6 skill workaround pattern (avoid the affected tool in skill workflows) extends to anything that depends on `imap_check_skill_updates`.
+
+#### 🧪 Acceptance verification
+
+Local stdio MCP test against v2.17.7 build:
+
+```
+imap_check_skill_updates       → 175ms / 44ms cached, 428 bytes  (was 542 bytes)
+imap_get_subscription_summary  →   2ms,   4557 bytes  ✓ unchanged
+imap_list_unsubscribe_candidates → 0ms,   4732 bytes  ✓ unchanged
+imap_get_unsubscribe_links     →   1ms,  11589 bytes  ✓ unchanged
+```
+
+All 50 unit tests pass.
+
+userId resolution path verified by code review: all 7 usercheck handlers now extract via `userId: userIdRaw` then call `resolveUserOrThrow(db, userIdRaw)` at the top of the handler body, exactly matching the subscription-tools pattern shipped in v2.17.2.
+
+#### 🛡️ Backward compatibility
+
+- **userId is now strict superset** on usercheck tools — UUIDs that worked previously still work; usernames now also work.
+- **No schema changes.** No DB migration.
+- **`imap_check_skill_updates` response shape is a subset** of v2.17.6's. Callers that depended on the dropped fields (`baseUrl`, `cached`) will see them as `undefined`. Those fields were never used by the bundled `unsubscribe-cleanup` skill or any internal tool.
+
+#### 📋 Tracked
+
+- Issue #145 — root-cause filing with both bugs and the diagnostic data
+- v2.17.x test plan (Phase 6 + Phase 8) — first run-through to surface these issues during plan-authoring
+
 ## [2.17.6] - 2026-05-02
 
 ### Patch — sanitize unsubscribe content; skill avoids the row-level read tool (#143)

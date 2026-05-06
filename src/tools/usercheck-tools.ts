@@ -15,6 +15,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { withErrorHandling } from '../utils/error-handler.js';
+import { resolveUserOrThrow } from '../utils/user-resolver.js';
 import { UserCheckService, SpamCheckCriteria } from '../services/usercheck-service.js';
 import { DatabaseService } from '../services/database-service.js';
 import { ImapService } from '../services/imap-service.js';
@@ -27,12 +28,13 @@ export function userCheckTools(server: McpServer, db: DatabaseService, imapServi
   server.registerTool('imap_add_usercheck_key', {
     description: 'Add a UserCheck API key for a user (admin or own user only)',
     inputSchema: {
-      userId: z.string().describe('User ID to add the key for'),
+      userId: z.string().describe('User ID — either canonical user_id UUID or username from the users table. Call imap_list_users for valid values.'),
       apiKey: z.string().describe('UserCheck API key from https://usercheck.com/register?platform=api'),
       dailyLimit: z.number().optional().default(1000).describe('Daily API call limit (default: 1000)'),
       notes: z.string().optional().describe('Optional notes about this API key')
     }
-  }, withErrorHandling(async ({ userId, apiKey, dailyLimit, notes }) => {
+  }, withErrorHandling(async ({ userId: userIdRaw, apiKey, dailyLimit, notes }) => {
+    const userId = resolveUserOrThrow(db, userIdRaw);
     // Issue #83: Use DatabaseService method instead of direct SQL
     const result = db.createUserCheckKey({
       user_id: userId,
@@ -57,9 +59,10 @@ export function userCheckTools(server: McpServer, db: DatabaseService, imapServi
   server.registerTool('imap_get_usercheck_key', {
     description: 'Get UserCheck API key information for a user',
     inputSchema: {
-      userId: z.string().describe('User ID')
+      userId: z.string().describe('User ID — either canonical user_id UUID or username from the users table.')
     }
-  }, withErrorHandling(async ({ userId }) => {
+  }, withErrorHandling(async ({ userId: userIdRaw }) => {
+    const userId = resolveUserOrThrow(db, userIdRaw);
     // Issue #83: Use DatabaseService method instead of direct SQL
     const keys = db.listUserCheckKeys(userId);
 
@@ -110,7 +113,7 @@ export function userCheckTools(server: McpServer, db: DatabaseService, imapServi
   server.registerTool('imap_check_email_spam', {
     description: 'Check a single email address against UserCheck for spam',
     inputSchema: {
-      userId: z.string().describe('User ID (must have active UserCheck API key)'),
+      userId: z.string().describe('User ID — either canonical user_id UUID or username from the users table (must have active UserCheck API key).'),
       email: z.string().email().describe('Email address to check'),
       checkDisposable: z.boolean().optional().default(true).describe('Flag disposable email addresses'),
       checkBlocklisted: z.boolean().optional().default(true).describe('Flag blocklisted email addresses'),
@@ -119,7 +122,8 @@ export function userCheckTools(server: McpServer, db: DatabaseService, imapServi
       allowPublicDomains: z.boolean().optional().default(true).describe('Allow public email domains'),
       useCache: z.boolean().optional().default(true).describe('Use cached results if available')
     }
-  }, withErrorHandling(async ({ userId, email, checkDisposable, checkBlocklisted, checkRoleAccount, checkMx, allowPublicDomains, useCache }) => {
+  }, withErrorHandling(async ({ userId: userIdRaw, email, checkDisposable, checkBlocklisted, checkRoleAccount, checkMx, allowPublicDomains, useCache }) => {
+    const userId = resolveUserOrThrow(db, userIdRaw);
     const criteria: SpamCheckCriteria = {
       checkDisposable,
       checkBlocklisted,
@@ -166,14 +170,15 @@ export function userCheckTools(server: McpServer, db: DatabaseService, imapServi
   server.registerTool('imap_check_domain', {
     description: 'Check a domain against UserCheck for spam/validity',
     inputSchema: {
-      userId: z.string().describe('User ID (must have active UserCheck API key)'),
+      userId: z.string().describe('User ID — either canonical user_id UUID or username from the users table (must have active UserCheck API key).'),
       domain: z.string().describe('Domain to validate (e.g., example.com)'),
       checkDisposable: z.boolean().optional().default(true).describe('Flag disposable/temporary domains'),
       checkBlocklisted: z.boolean().optional().default(true).describe('Flag blocklisted domains'),
       checkMx: z.boolean().optional().default(true).describe('Check MX records'),
       allowPublicDomains: z.boolean().optional().default(true).describe('Allow public email domains')
     }
-  }, withErrorHandling(async ({ userId, domain, checkDisposable, checkBlocklisted, checkMx, allowPublicDomains }) => {
+  }, withErrorHandling(async ({ userId: userIdRaw, domain, checkDisposable, checkBlocklisted, checkMx, allowPublicDomains }) => {
+    const userId = resolveUserOrThrow(db, userIdRaw);
     const criteria: SpamCheckCriteria = {
       checkDisposable,
       checkBlocklisted,
@@ -198,7 +203,7 @@ export function userCheckTools(server: McpServer, db: DatabaseService, imapServi
   server.registerTool('imap_check_emails_spam_bulk', {
     description: 'Check multiple email addresses against UserCheck for spam (max 1000)',
     inputSchema: {
-      userId: z.string().describe('User ID (must have active UserCheck API key)'),
+      userId: z.string().describe('User ID — either canonical user_id UUID or username from the users table (must have active UserCheck API key).'),
       emails: z.array(z.string().email()).max(1000).describe('Array of email addresses to check'),
       checkDisposable: z.boolean().optional().default(true).describe('Flag disposable email addresses'),
       checkBlocklisted: z.boolean().optional().default(true).describe('Flag blocklisted email addresses'),
@@ -207,7 +212,8 @@ export function userCheckTools(server: McpServer, db: DatabaseService, imapServi
       allowPublicDomains: z.boolean().optional().default(true).describe('Allow public email domains'),
       useCache: z.boolean().optional().default(true).describe('Use cached results if available')
     }
-  }, withErrorHandling(async ({ userId, emails, checkDisposable, checkBlocklisted, checkRoleAccount, checkMx, allowPublicDomains, useCache }) => {
+  }, withErrorHandling(async ({ userId: userIdRaw, emails, checkDisposable, checkBlocklisted, checkRoleAccount, checkMx, allowPublicDomains, useCache }) => {
+    const userId = resolveUserOrThrow(db, userIdRaw);
     const criteria: SpamCheckCriteria = {
       checkDisposable,
       checkBlocklisted,
@@ -269,7 +275,7 @@ export function userCheckTools(server: McpServer, db: DatabaseService, imapServi
   server.registerTool('imap_check_folder_spam', {
     description: 'Check all emails in a folder against UserCheck and return spam messages',
     inputSchema: {
-      userId: z.string().describe('User ID (must have active UserCheck API key)'),
+      userId: z.string().describe('User ID — either canonical user_id UUID or username from the users table (must have active UserCheck API key).'),
       accountId: z.string().describe('IMAP account ID'),
       folder: z.string().default('INBOX').describe('Folder to check'),
       limit: z.number().optional().default(100).describe('Maximum emails to check'),
@@ -280,7 +286,8 @@ export function userCheckTools(server: McpServer, db: DatabaseService, imapServi
       allowPublicDomains: z.boolean().optional().default(true).describe('Allow public email domains'),
       useCache: z.boolean().optional().default(true).describe('Use cached results if available')
     }
-  }, withErrorHandling(async ({ userId, accountId, folder, limit, checkDisposable, checkBlocklisted, checkRoleAccount, checkMx, allowPublicDomains, useCache }) => {
+  }, withErrorHandling(async ({ userId: userIdRaw, accountId, folder, limit, checkDisposable, checkBlocklisted, checkRoleAccount, checkMx, allowPublicDomains, useCache }) => {
+    const userId = resolveUserOrThrow(db, userIdRaw);
     const criteria: SpamCheckCriteria = {
       checkDisposable,
       checkBlocklisted,
@@ -342,7 +349,7 @@ export function userCheckTools(server: McpServer, db: DatabaseService, imapServi
   server.registerTool('imap_scan_account_spam', {
     description: 'Scan entire IMAP account for spam using UserCheck, checking all folders',
     inputSchema: {
-      userId: z.string().describe('User ID (must have active UserCheck API key)'),
+      userId: z.string().describe('User ID — either canonical user_id UUID or username from the users table (must have active UserCheck API key).'),
       accountId: z.string().describe('IMAP account ID'),
       maxEmailsPerFolder: z.number().optional().default(100).describe('Max emails to check per folder'),
       checkDisposable: z.boolean().optional().default(true).describe('Flag disposable email addresses'),
@@ -351,7 +358,8 @@ export function userCheckTools(server: McpServer, db: DatabaseService, imapServi
       checkMx: z.boolean().optional().default(true).describe('Check MX records'),
       allowPublicDomains: z.boolean().optional().default(true).describe('Allow public email domains')
     }
-  }, withErrorHandling(async ({ userId, accountId, maxEmailsPerFolder, checkDisposable, checkBlocklisted, checkRoleAccount, checkMx, allowPublicDomains }) => {
+  }, withErrorHandling(async ({ userId: userIdRaw, accountId, maxEmailsPerFolder, checkDisposable, checkBlocklisted, checkRoleAccount, checkMx, allowPublicDomains }) => {
+    const userId = resolveUserOrThrow(db, userIdRaw);
     const criteria: SpamCheckCriteria = {
       checkDisposable,
       checkBlocklisted,
