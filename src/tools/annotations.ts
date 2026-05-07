@@ -121,9 +121,10 @@ export const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
   'imap_delete_folder':                WRITE_REMOTE,
   'imap_rename_folder':                WRITE_REMOTE,
 
-  // ---- meta-tools (7) ----
+  // ---- meta-tools (8) ----
   'imap_about':                        READ_ONLY,
   'imap_list_tools':                   READ_ONLY,
+  'imap_open_web_ui':                  WRITE_LOCAL,
   'imap_connect':                      NEUTRAL_IDEMPOTENT,
   'imap_disconnect':                   NEUTRAL_IDEMPOTENT,
   'imap_get_metrics':                  READ_ONLY,

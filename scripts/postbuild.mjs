@@ -76,6 +76,28 @@ try {
 }
 
 // ---------------------------------------------------------------------------
+// Web UI assets: public/ -> dist/public (v2.17.10, #150)
+// ---------------------------------------------------------------------------
+//
+// The embedded WebUIServer (src/web/server.ts) probes two static-asset
+// candidates: ../../public (dev: src/web/../../public) and ../public
+// (prod: dist/web/../public = dist/public). Without this stage the prod
+// path 404s every request. dxt/build.mjs copies dist/ into the .mcpb
+// recursively, so dist/public/ flows through into the extension bundle
+// for free.
+
+let publicAssetCount = 0;
+try {
+  await stat('public');
+  await cp('public', 'dist/public', { recursive: true });
+  const publicEntries = await readdir('dist/public', { recursive: true });
+  publicAssetCount = publicEntries.length;
+} catch (e) {
+  if (e.code !== 'ENOENT') throw e;
+  // No public/ at repo root — Web UI is intentionally absent.
+}
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 
@@ -84,5 +106,6 @@ const parts = [
 ];
 if (manifestCopied) parts.push('migrations-manifest.json');
 if (skillsCopied > 0) parts.push(`${skillsCopied} bundled skill${skillsCopied === 1 ? '' : 's'}`);
+if (publicAssetCount > 0) parts.push(`${publicAssetCount} web UI asset${publicAssetCount === 1 ? '' : 's'}`);
 
 console.log(`[postbuild] copied ${parts.join(' + ')}`);

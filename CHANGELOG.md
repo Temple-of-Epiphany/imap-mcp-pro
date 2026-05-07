@@ -5,6 +5,79 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.17.10] - 2026-05-07
+
+### Patch — embedded Web UI: bundle into .mcpb, auto-start with port-collision fallback (closes #150)
+
+The Web UI (`src/web/server.ts` + `public/`) was code-present but non-functional in every distribution path: `npm run web` returned `Cannot GET /` (static-path bug), `dist/public/` didn't exist (postbuild gap), and the `.mcpb` extension never bundled or started it (entry-point gap). v2.17.10 fixes all three plus adds the configurable port + collision-handling that makes the embedded Web UI safe to ship as always-on infrastructure.
+
+#### 🐛 Static-path resolution multi-candidate
+
+`src/web/server.ts:111` was hard-coded to `path.join(__dirname, '../public')`. The leading comment correctly noted the dev case needs `../../public`, but the code only handled prod. Result: `npm run web` returned 404 because Express's static handler resolved to `src/public/` (which doesn't exist).
+
+Fixed: probe both candidates, fail loudly with a precise error message if neither resolves. Adds a startup log line confirming which path served the request (`[WebUIServer] serving static assets from <path>`).
+
+#### 📦 `postbuild.mjs` stages `public/` → `dist/public/`
+
+Previously only `src/database/` and `skills/` were copied during postbuild. The compiled prod path resolved to `dist/web/../public = dist/public/` which didn't exist. Now `postbuild.mjs` copies `public/` recursively into `dist/`. The `dxt/build.mjs` step that follows already does `cpr(dist, server/dist)` recursively, so `dist/public/` flows into the `.mcpb` bundle for free — no `dxt/build.mjs` changes needed.
+
+Postbuild summary line now reports: `schema.sql + N migrations + … + N web UI assets` so you can verify staging from the build log.
+
+#### 🚀 Always-on Web UI in the .mcpb extension
+
+The Web UI now boots automatically when the MCP server boots — present in every Claude Desktop session, not just first-run. Lifecycle is owned by a new `WebUIManager` service (`src/services/web-ui-manager.ts`) constructed during pre-handshake and started in post-handshake (so the MCP transport is responsive first; Web UI startup is detached and never blocks tool calls).
+
+`WebUIServer`'s constructor was widened to accept an object form `{ port, db, imapService }` so the embedded boot path can share the live `DatabaseService` and `ImapService` handles already wired up in `src/index.ts` (no double-opening of `~/.imap-mcp/data.db`). The legacy positional `new WebUIServer(4500)` call shape used by `src/setup.ts` still works.
+
+Auto-open in the embedded path is **off by default** — the .mcpb shouldn't pop a browser tab on every Claude Desktop launch. Opening is opt-in via the new MCP tool below.
+
+#### 🔌 Port-probe with +100 fallback (configurable)
+
+The Web UI port is now a Claude Desktop user_config slider:
+
+> **Web UI Port (preferred)** — default `4500`, range `1024..65000`, mapped to env `IMAP_MCP_WEB_UI_PORT`.
+
+At boot, `WebUIManager.start()` calls `findFreePort(preferred)` which probes the configured port; if it's in use, it increments by **100** (not 1) — so the fallback sequence is `4500 → 4600 → 4700 → ...` up to 10 attempts (`4500..5400`). The +100 spacing means a parallel project occupying a few ports doesn't push the fallback into an unpredictable slot. The actual chosen port and any tried-but-busy ports are logged via `[startup] component=web-ui` so a user with a misconfigured machine can see what happened.
+
+If every candidate is busy, the post-handshake step logs the failure but does not crash the MCP server — tool invocations remain available.
+
+#### 🆕 New MCP tool — `imap_open_web_ui`
+
+```json
+{
+  "openInBrowser": false
+}
+```
+
+Returns the live Web UI URL and port. When `openInBrowser` is `true`, also launches the user's default browser to that URL via the `open` package (best-effort — failure to open is non-fatal; the URL is still returned). Annotated `WRITE_LOCAL` (it spawns a browser process; not destructive but not read-only either).
+
+This is the canonical answer to *"open the dashboard for me"* in agent workflows. The Web UI is already running; the tool just surfaces the URL because the actual port may differ from the configured default if there was a collision.
+
+Tool count: **93 → 94**.
+
+#### 🧪 New tests
+
+`src/services/web-ui-manager.test.ts` (4 tests):
+- `findFreePort` returns preferred when free
+- skips a bound port and returns next +100
+- walks multiple bound candidates
+- returns `null` when every candidate in the 10-port sweep is taken
+
+Total: **75/75 pass** (was 71).
+
+#### Backward compatibility
+
+- `WebUIServer(4500)` legacy constructor signature still accepted (used by `src/setup.ts`).
+- `npm run web` standalone still works — actually works now, as opposed to the silent 404 it has been returning since the static-path comment was added.
+- No DB schema change. No tool-surface removals — only the new `imap_open_web_ui` addition.
+- Existing `.mcpb` user_config sliders unchanged; one new entry (`web_ui_port`) added with a sensible default.
+- The new env var `IMAP_MCP_WEB_UI_PORT` is additive; if unset, the embedded boot uses `4500`.
+
+#### Known limitations
+
+- The `findFreePort` probe has the usual TOCTOU race: a port observed free may be claimed before `WebUIServer.listen()` runs. The window is sub-millisecond on localhost startup; if the race fires anyway, the bind fails synchronously and the post-handshake step logs the error instead of crashing — same posture as any other unrecoverable startup component. A user can retry via `imap_open_web_ui` once the conflicting process is dealt with.
+- `WebUIManager.start()` is not currently re-callable after a successful start — it returns the existing URL on subsequent calls instead of reopening on a different port. Restarting on a different port requires restarting the MCP server.
+
 ## [2.17.9] - 2026-05-06
 
 ### Patch — attachment hardening: dotfile reject, 10 MB default cap, filename basename on all forms

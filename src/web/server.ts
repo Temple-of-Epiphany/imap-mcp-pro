@@ -20,6 +20,15 @@ import crypto from 'crypto';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+export interface WebUIServerOptions {
+  /** Preferred port. Defaults to 4500. Actual bind port may differ if a collision triggers fallback. */
+  port?: number;
+  /** Optional shared DatabaseService — pass when embedding inside the MCP server process to avoid double-opening data.db. */
+  db?: DatabaseService;
+  /** Optional shared ImapService — pass alongside `db` when embedding. */
+  imapService?: ImapService;
+}
+
 export class WebUIServer {
   private app: express.Application;
   private db: DatabaseService;
@@ -28,11 +37,21 @@ export class WebUIServer {
   private defaultUserId: string;
   private authLimiter: any; // Rate limiter for auth endpoints
 
-  constructor(port: number = 4500) {
+  /**
+   * Construct a WebUIServer.
+   *
+   * Two call shapes are supported for backward compatibility:
+   *   - `new WebUIServer(4500)` — legacy positional port (used by setup.ts CLI path)
+   *   - `new WebUIServer({ port, db, imapService })` — modern object form (used when
+   *     embedding inside the MCP server process; shares the live DB/IMAP handles)
+   */
+  constructor(opts: number | WebUIServerOptions = 4500) {
+    const o: WebUIServerOptions =
+      typeof opts === 'number' ? { port: opts } : opts;
     this.app = express();
-    this.port = port;
-    this.db = new DatabaseService();
-    this.imapService = new ImapService(this.db); // Pass db for auto-capability storage (Issue #58)
+    this.port = o.port ?? 4500;
+    this.db = o.db ?? new DatabaseService();
+    this.imapService = o.imapService ?? new ImapService(this.db); // Pass db for auto-capability storage (Issue #58)
 
     // Use same user resolution logic as MCP server (from tool-context.ts)
     // Get username from environment (set in MCP config) or fall back to 'default'
@@ -105,10 +124,26 @@ export class WebUIServer {
     this.app.use(globalLimiter);
     this.app.use(speedLimiter);
 
-    // Serve static files from public directory
-    // In development: __dirname = src/web, public is at ../../public
-    // In production: __dirname = web (inside install dir), public is at ../public
-    const publicPath = path.join(__dirname, '../public');
+    // Serve static files from public directory.
+    // Path resolution differs between dev and prod:
+    //   - dev (tsx src/web/server.ts):    __dirname = repo/src/web   -> ../../public
+    //   - prod (node dist/web/server.js): __dirname = repo/dist/web  -> ../public  (postbuild stages public/)
+    // Probe both candidates and fail loudly if neither exists, instead of silently 404-ing.
+    const candidates = [
+      path.join(__dirname, '../../public'),
+      path.join(__dirname, '../public'),
+    ];
+    const publicPath = candidates.find(p => {
+      try { return fs.statSync(p).isDirectory(); }
+      catch { return false; }
+    });
+    if (!publicPath) {
+      throw new Error(
+        `[WebUIServer] Web UI assets not found. Tried:\n  ${candidates.join('\n  ')}\n` +
+        `Run 'npm run build' (postbuild stages public/ -> dist/public/) or check that the .mcpb extension was built with v2.17.10+.`
+      );
+    }
+    console.log(`[WebUIServer] serving static assets from ${publicPath}`);
     this.app.use(express.static(publicPath));
   }
 
@@ -1288,6 +1323,12 @@ export class WebUIServer {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
   }
+
+  /** Port this server is configured to bind on. After successful start(), this is the live port. */
+  getPort(): number { return this.port; }
+
+  /** URL the server (will be / is) reachable at on localhost. */
+  getUrl(): string { return `http://localhost:${this.port}`; }
 
   async start(autoOpen: boolean = true): Promise<void> {
     return new Promise((resolve) => {
