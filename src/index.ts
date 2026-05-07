@@ -15,6 +15,7 @@ import { AppendRetryService } from './services/append-retry-service.js';
 import { AttachmentStagingService, DEFAULT_STAGING_CONFIG } from './services/attachment-staging-service.js';
 import { MessageCacheService } from './services/message-cache-service.js';
 import { SkillsInstallerService } from './services/skills-installer-service.js';
+import { WebUIManager } from './services/web-ui-manager.js';
 import os from 'os';
 import { WorkerPool } from './utils/worker-pool.js';
 import { registerTools } from './tools/index.js';
@@ -73,7 +74,7 @@ await dispatchCli({
 const {
   server, imapService, smtpService, db, fileExport, results, workerPool,
   sentFolderService, appendRetryService, attachmentStaging, messageCache,
-  skillsInstaller,
+  skillsInstaller, webUIManager,
 } = await timeStage('pre-handshake', async () => {
     // 1. Load + validate config
     let config;
@@ -139,11 +140,17 @@ const {
     const bundleSkillsDir = path.join(__dirname, '..', 'skills');
     const skillsInstaller = new SkillsInstallerService(bundleSkillsDir);
 
+    // 6f. v2.17.10 (#150): Web UI manager — owns the embedded WebUIServer
+    //     when running as a Claude Desktop extension. Construction is cheap
+    //     (no port probing, no listen). Actual start happens in post-handshake
+    //     so the MCP transport is responsive first.
+    const webUIManager = new WebUIManager(db, imapService);
+
     // 7. Tool schema registration
     registerTools(
       server, imapService, db, smtpService, results, workerPool,
       sentFolderService, appendRetryService, attachmentStaging, messageCache,
-      skillsInstaller
+      skillsInstaller, webUIManager
     );
 
     // Mark unused config field as intentional for now
@@ -152,7 +159,7 @@ const {
     return {
       server, imapService, smtpService, db, fileExport, results, workerPool,
       sentFolderService, appendRetryService, attachmentStaging, messageCache,
-      skillsInstaller,
+      skillsInstaller, webUIManager,
     };
   });
 
@@ -213,6 +220,23 @@ void timeStage('post-handshake', async () => {
     });
   } catch (e: any) {
     logEvent('[startup]', { component: 'skills-install', outcome: 'error', error: e?.message });
+  }
+
+  // v2.17.10 (#150): always-on Web UI for the embedded extension case.
+  // Probes ports starting at IMAP_MCP_WEB_UI_PORT (default 4500), incrementing
+  // by 100 on EADDRINUSE up to 10 attempts. Best-effort: a failure here logs
+  // but never blocks the MCP server from serving tool calls.
+  try {
+    const r = await webUIManager.start({ autoOpen: false });
+    logEvent('[startup]', {
+      component: 'web-ui',
+      url: r.url,
+      port: r.port,
+      alreadyRunning: r.alreadyRunning,
+      triedPorts: r.triedPorts,
+    });
+  } catch (e: any) {
+    logEvent('[startup]', { component: 'web-ui', outcome: 'error', error: e?.message });
   }
 });
 

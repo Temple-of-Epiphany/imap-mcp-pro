@@ -2,12 +2,14 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { withErrorHandling } from '../utils/error-handler.js';
 import { PACKAGE_NAME, PACKAGE_VERSION } from '../utils/package-info.js';
+import { WebUIManager } from '../services/web-ui-manager.js';
+import open from 'open';
 
 /**
  * Meta tools for service discovery and information
  * These tools allow Claude to query the service itself for capabilities and version info
  */
-export function metaTools(server: McpServer): void {
+export function metaTools(server: McpServer, webUIManager?: WebUIManager): void {
   // About tool - returns comprehensive service information
   server.registerTool('imap_about', {
     description: 'Get comprehensive information about the IMAP MCP Pro service including version, features, and capabilities',
@@ -435,4 +437,58 @@ export function metaTools(server: McpServer): void {
       }]
     };
   }));
+
+  // imap_open_web_ui — return the live URL of the embedded Web UI and
+  // optionally open it in the user's default browser. The Web UI is
+  // already running (auto-started in post-handshake per #150); this tool
+  // surfaces the URL because the actual port may have moved off the
+  // configured default if there was a collision.
+  if (webUIManager) {
+    server.registerTool('imap_open_web_ui', {
+      description:
+        'Return the URL of the embedded Web UI (account management, DNS firewall, ' +
+        'categories, Claude Desktop auto-setup) and optionally open it in the default browser. ' +
+        'The Web UI auto-starts when the MCP server boots; the actual port may differ from the ' +
+        'configured default if there was a collision (probes the configured port then ' +
+        'increments by 100 up to 10 attempts). Use this tool when the user asks to "open the ' +
+        'web UI" or "show the dashboard".',
+      inputSchema: {
+        openInBrowser: z.boolean().optional().default(false).describe(
+          'When true, open the URL in the user default browser. When false (default), only return the URL.'
+        ),
+      },
+    }, withErrorHandling(async ({ openInBrowser }) => {
+      if (!webUIManager.isRunning()) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: false,
+              result: 'web_ui_not_running',
+              hint: 'The embedded Web UI failed to start at MCP server boot. ' +
+                'Check the server log for [startup] component=web-ui error messages, ' +
+                'or set IMAP_MCP_WEB_UI_PORT to a different starting port if 4500–5400 are all taken.',
+            }, null, 2)
+          }]
+        };
+      }
+      const url = webUIManager.getUrl()!;
+      const port = webUIManager.getPort()!;
+      if (openInBrowser) {
+        try { await open(url); }
+        catch { /* best-effort — return URL even if the open command fails */ }
+      }
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            url,
+            port,
+            openedInBrowser: openInBrowser ?? false,
+          }, null, 2)
+        }]
+      };
+    }));
+  }
 }

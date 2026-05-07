@@ -9,6 +9,7 @@ import { AppendRetryService } from '../services/append-retry-service.js';
 import { AttachmentStagingService } from '../services/attachment-staging-service.js';
 import { MessageCacheService } from '../services/message-cache-service.js';
 import { SkillsInstallerService } from '../services/skills-installer-service.js';
+import { WebUIManager } from '../services/web-ui-manager.js';
 import { accountTools } from './account-tools.js';
 import { emailTools } from './email-tools.js';
 import { folderTools } from './folder-tools.js';
@@ -57,7 +58,8 @@ export function registerTools(
   appendRetry?: AppendRetryService,
   staging?: AttachmentStagingService,
   messageCache?: MessageCacheService,
-  skillsInstaller?: SkillsInstallerService
+  skillsInstaller?: SkillsInstallerService,
+  webUIManager?: WebUIManager
 ): void {
   // Inject MCP annotations on every registerTool call (drives Claude
   // Desktop's Tool Permissions UI). Restored after the registration phase
@@ -111,8 +113,9 @@ export function registerTools(
     skillsTools(server, skillsInstaller);
   }
 
-  // Register meta/discovery tools
-  metaTools(server);
+  // Register meta/discovery tools (passes webUIManager so meta-tools can expose
+  // the imap_open_web_ui MCP tool when the embedded Web UI is available).
+  metaTools(server, webUIManager);
 
   restoreRegisterTool();
 }

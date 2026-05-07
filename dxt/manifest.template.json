@@ -41,6 +41,7 @@
         "IMAP_MCP_MAX_TOTAL_ATTACHMENT_SIZE_BYTES": "${user_config.max_total_attachment_size_bytes}",
         "IMAP_MCP_ALLOW_DOTFILES": "${user_config.allow_dotfiles}",
         "IMAP_MCP_AUTO_CREATE_SENT_FOLDER": "${user_config.auto_create_sent_folder}",
+        "IMAP_MCP_WEB_UI_PORT": "${user_config.web_ui_port}",
         "MCP_USER_ID": "${user_config.mcp_user_id}"
       }
     }
@@ -113,6 +114,15 @@
       "title": "User ID",
       "description": "Username for tool-context resolution (multi-tenant deployments). Single-user installs can leave as 'default'.",
       "default": "default",
+      "required": true
+    },
+    "web_ui_port": {
+      "type": "number",
+      "title": "Web UI Port (preferred)",
+      "description": "Preferred port for the embedded Web UI (account management, DNS firewall, categories, Claude Desktop auto-setup). The server probes this port first; if it is in use, it increments by 100 (e.g. 4500 → 4600 → 4700) up to 10 attempts before giving up. The Web UI binds to 127.0.0.1 only and is never exposed to the network. Default 4500.",
+      "default": 4500,
+      "min": 1024,
+      "max": 65000,
       "required": true
     }
   }
