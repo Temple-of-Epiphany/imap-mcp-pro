@@ -5,6 +5,64 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.17.12] - 2026-05-08
+
+### Patch — IMAP username override on provider tools (#87) + new `imap_test_account` tool (#90)
+
+Two small upstream-port additions bundled together because both touch `account-tools.ts` and target the same "post-add account verification" flow that an agent walking a user through onboarding would use.
+
+#### 🆕 `imap_add_account_with_provider` and `imap_add_account_auto` accept `imapUsername` (#87)
+
+Both provider-based account-creation tools now expose an optional `imapUsername` parameter. When set, it overrides the IMAP login username (which previously was hardcoded to `email`); when unset, behavior is unchanged (`username = email`). The same value is also used as the SMTP username when SMTP is enabled.
+
+This unblocks the Exchange-style case where the IMAP login is `DOMAIN\user` while the email is `user@domain.com`. Previously the only path was `imap_add_account` (manual config); the provider/auto-detect helpers couldn't be used.
+
+Schema is fine — `accounts.username` has been a separate column from any email field since v1.7.0. No DB migration. ~12 lines of code total across the two tool registrations.
+
+#### 🆕 New tool `imap_test_account` (#90)
+
+```json
+{ "accountId": "<uuid-from-imap_list_accounts>" }
+```
+
+One-shot connectivity probe against an existing account using its stored credentials. Spawns a fresh ImapFlow client that **does not** interact with the connection pool, retry queue, or circuit breaker — the probe is for diagnostics, not for warming up state.
+
+Returns:
+```json
+{
+  "success": true,
+  "accountId": "...",
+  "accountName": "...",
+  "host": "imap.example.com",
+  "port": 993,
+  "tls": true,
+  "folderCount": 12,
+  "inboxMessageCount": 1638,
+  "durationMs": 412
+}
+```
+
+On failure, the same envelope with `success: false`, the `error` string from ImapFlow (auth / TLS / DNS / timeout — passes through verbatim so the operator can diagnose), and `durationMs` so partial timeouts are visible.
+
+Implementation lives in two pieces:
+
+- `ImapService.testConnection(account)` (new method, ~30 lines): connect → list → status INBOX → logout. Catches errors and returns structured success/failure instead of throwing, so the tool wrapper can produce a clean envelope without bouncing through `withErrorHandling`. INBOX status is tried after `list()`; if it fails the probe still returns `ok: true` with `folderCount` set and `inboxMessageCount` undefined (rare but possible on misconfigured servers).
+- `imap_test_account` MCP tool (new registration in `src/tools/account-tools.ts`): looks up the account, verifies caller ownership against `MCP_USER_ID`, calls the service method, formats the envelope. Annotated `READ_ONLY` (no state mutation; just connects and queries).
+
+Tool count: **94 → 95**.
+
+#### Backward compatibility
+
+- `imap_add_account_with_provider` and `imap_add_account_auto` accept the new `imapUsername` parameter as **optional**. Existing callers passing only `{providerId, name, email, password, smtpEnabled}` work unchanged.
+- `imap_test_account` is a pure addition. No removal, no schema change.
+- No tool surface change beyond the additions. No DB schema change.
+
+#### Verified
+
+- `npm run build` clean.
+- `npm test`: 75/75 pass.
+- Manual smoke test deferred until installed `.mcpb` updates (requires a fresh release tag).
+
 ## [2.17.11] - 2026-05-07
 
 ### Patch — close inline `attachments[].path` allow-list bypass (closes #147)

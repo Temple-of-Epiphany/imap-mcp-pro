@@ -547,6 +547,52 @@ export class ImapService {
   }
 
   /**
+   * One-shot connectivity probe (#90). Spawns a fresh ImapFlow client so the
+   * test does not interact with the connection pool, retry queue, or circuit
+   * breaker — the probe is for diagnostics, not for warming up state. Returns
+   * a structured result instead of throwing so the tool wrapper can produce a
+   * clean envelope on failure (auth error, DNS, TLS, etc.) without bouncing
+   * through withErrorHandling.
+   */
+  async testConnection(account: ImapAccount): Promise<{
+    ok: boolean;
+    folderCount?: number;
+    inboxMessageCount?: number;
+    error?: string;
+    durationMs: number;
+  }> {
+    const t0 = Date.now();
+    const client = new ImapFlow({
+      host: account.host,
+      port: account.port,
+      secure: account.tls,
+      auth: { user: account.user, pass: account.password },
+      logger: false,
+      emitLogs: false,
+      verifyOnly: false,
+      socketTimeout: account.connTimeout ?? 10000,
+    });
+    try {
+      await client.connect();
+      const list = await client.list();
+      const folderCount = list.length;
+      let inboxMessageCount: number | undefined;
+      try {
+        const status = await client.status('INBOX', { messages: true });
+        inboxMessageCount = status.messages;
+      } catch {
+        // INBOX may not exist on this server (rare) — fold into a successful
+        // probe with folderCount but no inboxMessageCount.
+      }
+      return { ok: true, folderCount, inboxMessageCount, durationMs: Date.now() - t0 };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err), durationMs: Date.now() - t0 };
+    } finally {
+      try { await client.logout(); } catch { /* best-effort */ }
+    }
+  }
+
+  /**
    * Get active connection or throw error
    */
   private getConnection(accountId: string): ImapFlow {
