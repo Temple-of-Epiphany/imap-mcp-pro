@@ -56,6 +56,7 @@ export const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
   'imap_remove_account':               WRITE_LOCAL,
   'imap_list_accounts':                READ_ONLY,
   'imap_test_account':                 READ_ONLY,
+  'imap_get_outbox_dir':               READ_ONLY,
   'imap_list_providers':               READ_ONLY,
   'imap_share_account':                WRITE_LOCAL,
   'imap_unshare_account':              WRITE_LOCAL,

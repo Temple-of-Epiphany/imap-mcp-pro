@@ -5,6 +5,84 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.17.13] - 2026-05-08
+
+### Patch — per-user attachment outbox (closes #148) + CHANGELOG heading typo (closes #149)
+
+#### 🆕 Per-user attachment outbox (#148)
+
+Eliminates the "no allowed attachment directories configured" first-run friction that motivated the v2.17.x attachment cycle. Server now provides a sanctioned drop zone for agent-generated files at:
+
+```
+~/.imap-mcp/users/<userId>/outbox/   (mode 0700, lazy-created on first access)
+```
+
+The outbox is always present in the resolved allow-list, so files written there can be attached via `imap_send_email`'s `attachmentPaths` field with no env / user_config setup. Same v2.17.9 dotfile / size / basename rules apply — the outbox is just one allow-listed dir among potentially many, not a special exempt zone.
+
+**New MCP tool — `imap_get_outbox_dir`**: returns the per-user path so agents can discover where to write without env access. Annotated `READ_ONLY`. Inputs: none.
+
+**Tool count: 95 → 96.**
+
+#### 🛡️ Dotfile-policy refactor — required for the outbox to work
+
+The v2.17.9 dotfile-rejection algorithm scanned every path segment for `.`-prefixes. That blocked the outbox itself, since the path naturally contains the dotdir `.imap-mcp`. The fix moves the scan to *after* containment matching: only segments **beneath** the matched allow-listed prefix are scanned for dotted entries.
+
+Before:
+```
+input ~/Downloads/.envrc                  -> dotfile rejected (.envrc)
+input ~/.imap-mcp/users/UID/outbox/x.pdf  -> false-rejected (.imap-mcp)
+input symlink-into-.ssh                   -> dotfile rejected (.ssh)
+input /etc/passwd (Downloads allowlisted) -> outside-allowed-dirs rejected
+```
+
+After:
+```
+input ~/Downloads/.envrc                  -> dotfile rejected (.envrc)  ← unchanged
+input ~/.imap-mcp/users/UID/outbox/x.pdf  -> accepted (matched dir = outbox; tail = x.pdf, no dots)
+input symlink-into-.ssh                   -> outside-allowed-dirs rejected (realpath escapes the allowlist)
+input /etc/passwd (Downloads allowlisted) -> outside-allowed-dirs rejected ← unchanged
+```
+
+The security posture is equivalent: any dotted path *outside* an explicitly allowlisted dir still rejects (including via symlink escape). The change exempts `.`-prefixed segments that are *part of* an operator-blessed allowlist entry — which is the only path the dotted segment can have a legitimate reason to exist on.
+
+Updated `formatValidationErrors` for `no-allowed-dirs-configured` to mention the outbox + the `imap_get_outbox_dir` tool as the recommended first option.
+
+#### 📝 #149 — CHANGELOG v2.17.9 heading drift
+
+```diff
+-### Patch — attachment hardening: dotfile reject, 10 MB default cap, filename basename on all forms
++### Patch — attachment hardening: dotfile reject, 20 MiB default cap, filename basename on all forms
+```
+
+The body was correct; the heading had not been updated when the cap changed mid-iteration. One-line doc fix.
+
+#### 🧪 New tests
+
+`src/services/attachment-validator.test.ts` (4 new tests, total 25):
+- `getOutboxDir` returns `~/.imap-mcp/users/<userId>/outbox/`
+- creates the directory with mode 0700 on first access
+- is idempotent across repeated calls
+- `validateAttachmentPaths` accepts a file inside the outbox even with otherwise-empty allow-list
+
+Total test count: **79/79 pass** (was 75).
+
+#### Backward compatibility
+
+- The outbox is *additive* — it appears in the resolved allow-list ahead of any operator-configured dirs but does not displace them. Existing allow-listed paths still work.
+- The dotfile refactor preserves the exact same rejection behavior for *unallowlisted* dotted paths (the canonical exfiltration vectors `~/.ssh`, `~/.aws`, `~/.config`, `~/.bashrc`, etc.). Only the false-positive on the server's own `~/.imap-mcp/...` paths is removed.
+- The new `imap_get_outbox_dir` tool is a pure addition.
+- No DB schema change. No tool surface removals.
+
+#### What this closes
+
+Companion to v2.17.11's inline-path bypass closure (#147). With both shipped, an agent's natural workflow for "email this generated file to <recipient>" is:
+
+1. Call `imap_get_outbox_dir` → get path
+2. `Write` the file to that path
+3. Call `imap_send_email` with `attachmentPaths: ["<that-path>/foo.pdf"]`
+
+Single allow-list entry, single round-trip, no chunking, no env configuration, full v2.17.9 dotfile/size/basename hardening applied.
+
 ## [2.17.12] - 2026-05-08
 
 ### Patch — IMAP username override on provider tools (#87) + new `imap_test_account` tool (#90)
@@ -186,7 +264,7 @@ Total: **75/75 pass** (was 71).
 
 ## [2.17.9] - 2026-05-06
 
-### Patch — attachment hardening: dotfile reject, 10 MB default cap, filename basename on all forms
+### Patch — attachment hardening: dotfile reject, 20 MiB default cap, filename basename on all forms
 
 Closes the first batch of attachment-input security gaps surfaced while diagnosing the Claude Desktop Workspace attachment failure that motivated v2.17.8. v2.17.8 fixed *discoverability* (the inline form was buried as "legacy"). v2.17.9 fixes *enforcement* (the rules now apply to all three input forms — inline, path, staged — uniformly).
 

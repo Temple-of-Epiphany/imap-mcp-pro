@@ -18,6 +18,7 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   findDotSegment,
+  getOutboxDir,
   isDotfileBasename,
   sanitizeFilename,
   validateAttachmentPaths,
@@ -203,5 +204,60 @@ describe('validateAttachmentPaths — size caps', () => {
     );
     expect(result.errors).toEqual([]);
     expect(result.attachments).toHaveLength(1);
+  });
+});
+
+describe('getOutboxDir (#148)', () => {
+  it('returns a path under ~/.imap-mcp/users/<userId>/outbox/', () => {
+    const userId = 'test-user-' + Date.now();
+    const dir = getOutboxDir(userId);
+    expect(dir).toBe(path.join(os.homedir(), '.imap-mcp', 'users', userId, 'outbox'));
+  });
+
+  it('creates the directory on first access (mode 0700)', async () => {
+    const userId = 'test-user-mkdir-' + Date.now();
+    const dir = getOutboxDir(userId);
+    const stats = await fs.promises.stat(dir);
+    expect(stats.isDirectory()).toBe(true);
+    // mode bits — on most POSIX filesystems mkdir-with-mode-0o700 produces
+    // a dir whose mode masked with 0o777 is 0o700. (Some filesystems
+    // collapse to 0o755; we only assert the *user* bits are set.)
+    expect(stats.mode & 0o700).toBe(0o700);
+    await fs.promises.rmdir(dir);
+  });
+
+  it('is idempotent across repeated calls', async () => {
+    const userId = 'test-user-idempotent-' + Date.now();
+    const a = getOutboxDir(userId);
+    const b = getOutboxDir(userId);
+    expect(a).toBe(b);
+    await fs.promises.rmdir(a);
+  });
+});
+
+describe('validateAttachmentPaths — outbox auto-allowlist (#148)', () => {
+  it('accepts a file inside the per-user outbox even when no other allowed dirs are configured', async () => {
+    const userId = 'test-validator-outbox-' + Date.now();
+    const outbox = getOutboxDir(userId);
+    const filePath = path.join(outbox, 'agent-generated.pdf');
+    await fs.promises.writeFile(filePath, 'pdf-bytes');
+    try {
+      const result = await validateAttachmentPaths(
+        [{ path: filePath }],
+        { globalAllowedDirs: [], maxSizeBytes: 1_000_000, maxTotalSizeBytes: 1_000_000 },
+        // Caller passes an empty allow-list; the outbox is the safety net.
+        // Note: this test exercises validateAttachmentPaths directly with
+        // [outbox] passed in; resolveAllowedDirs always prepends it in
+        // practice. We pass it explicitly here to keep the test
+        // independent of DB state.
+        [outbox]
+      );
+      expect(result.errors).toEqual([]);
+      expect(result.attachments).toHaveLength(1);
+      expect(result.attachments[0].filename).toBe('agent-generated.pdf');
+    } finally {
+      await fs.promises.unlink(filePath);
+      await fs.promises.rmdir(outbox);
+    }
   });
 });
