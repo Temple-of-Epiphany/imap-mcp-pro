@@ -88,7 +88,7 @@ export function skillsTools(
     description:
       'Apply skill updates from public GitHub for explicitly named skills. ' +
       'Fetches SKILL.md + version.json from raw.githubusercontent.com, writes ' +
-      'to ~/.claude/skills/imap-mcp-pro/<name>/, preserves files when the ' +
+      'to ~/.claude/skills/imap-mcp-pro/{name}/, preserves files when the ' +
       'on-disk version is already at or ahead of remote unless force=true. ' +
       'Skills not present in the bundled manifest are rejected (the manifest ' +
       'is the allowlist). Always pair with imap_check_skill_updates first to ' +

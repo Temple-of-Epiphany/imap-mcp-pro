@@ -501,7 +501,7 @@ export function emailTools(
         'absolute file paths. The server reads, validates, and encodes the files internally. ' +
         'Each path must resolve inside one of the allowed attachment directories (env ' +
         'IMAP_MCP_ALLOWED_ATTACHMENT_DIRS, per-user override in users.allowed_attachment_dirs, ' +
-        'or the always-present per-user outbox dir at ~/.imap-mcp/users/<userId>/outbox/ — ' +
+        'or the always-present per-user outbox dir at ~/.imap-mcp/users/{userId}/outbox/ — ' +
         'discoverable via the imap_get_outbox_dir tool). For agent-generated files on this host, ' +
         'write to the outbox dir and reference by absolute path here; no env setup required. ' +
         'If your file lives in a sandbox the server cannot read, use the inline `attachments` ' +
