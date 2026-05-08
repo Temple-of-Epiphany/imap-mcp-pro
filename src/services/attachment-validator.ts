@@ -20,9 +20,36 @@
  */
 
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { lookup as mimeLookup } from 'mime-types';
 import { DatabaseService } from './database-service.js';
+
+/**
+ * Per-user attachment outbox directory (#148). Server-managed sanctioned
+ * drop zone for agent-generated files. Auto-created on first access with
+ * mode 0700 and always present in the resolved allow-list, so an
+ * unconfigured server still has *one* path that path-based attachments
+ * (`attachmentPaths`) can target without the operator setting
+ * `IMAP_MCP_ALLOWED_ATTACHMENT_DIRS`.
+ *
+ * Path: ~/.imap-mcp/users/<userId>/outbox/
+ *
+ * The same v2.17.9 dotfile / size / basename rules apply -- the outbox
+ * is just one allow-listed dir among potentially many, not a special
+ * exempt zone.
+ */
+export function getOutboxDir(userId: string): string {
+  const dir = path.join(os.homedir(), '.imap-mcp', 'users', userId, 'outbox');
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  } catch {
+    // Best effort. If mkdir fails (permission, disk full), the validator's
+    // realpath check will reject any attachment path inside this dir
+    // anyway -- preferable to crashing the whole imap_send_email call.
+  }
+  return dir;
+}
 
 export interface ValidatorConfig {
   /** Global allowed dirs from ServerConfig (already absolute paths). */
@@ -74,14 +101,20 @@ export interface ValidationResult {
 }
 
 /**
- * Resolve the per-user allowed dirs (CSV) plus the global ones.
- * User column wins when present (could be the empty string to opt out).
+ * Resolve the per-user allowed dirs (CSV) plus the global ones, with the
+ * per-user outbox dir (#148) always prepended. User column wins over globals
+ * when present (could be the empty string to opt out of globals); the outbox
+ * is always present regardless. Outbox is created lazily on first call.
  */
 export function resolveAllowedDirs(
   db: DatabaseService,
   userId: string,
   globalDirs: string[]
 ): string[] {
+  // Outbox first so resolvedAllowed.find(isInside) prefers it for files
+  // written there. Lazy-creates the dir.
+  const outbox = getOutboxDir(userId);
+
   let raw: string | null = null;
   try {
     const row = db.getDb()
@@ -92,8 +125,11 @@ export function resolveAllowedDirs(
     // Column may not exist (pre-1.9.0 schema) — fall through to globals.
     raw = null;
   }
-  if (raw === null) return globalDirs;
-  return raw.split(',').map((s) => s.trim()).filter(Boolean);
+  const userOrGlobal = raw === null
+    ? globalDirs
+    : raw.split(',').map((s) => s.trim()).filter(Boolean);
+
+  return [outbox, ...userOrGlobal];
 }
 
 /**
@@ -207,18 +243,6 @@ export async function validateAttachmentPaths(
       continue;
     }
 
-    // Dotfile / dotdir reject (default-on). Scan the input path; we re-scan
-    // the realpath below in case a non-dotted symlink resolves into a dotted
-    // directory.
-    const denyDot = config.denyDotfiles !== false;
-    if (denyDot) {
-      const seg = findDotSegment(p);
-      if (seg) {
-        errors.push({ kind: 'dotfile-or-dotdir-rejected', path: p, component: seg });
-        continue;
-      }
-    }
-
     let realPath: string;
     try {
       realPath = await fs.promises.realpath(p);
@@ -227,20 +251,37 @@ export async function validateAttachmentPaths(
       continue;
     }
 
-    // Re-scan after realpath to catch symlinks into dotdirs.
+    // Containment check after realpath. Find the longest matching allow-list
+    // entry — that's the prefix we'll exempt from the dotfile scan below
+    // (a path *inside* an explicitly allowlisted dotdir like .imap-mcp/outbox
+    // is intentional; only segments *beneath* the allow-listed prefix are
+    // suspicious).
+    let matchedDir: string | null = null;
+    for (const dir of resolvedAllowed) {
+      if (isInside(realPath, dir)) {
+        if (!matchedDir || dir.length > matchedDir.length) matchedDir = dir;
+      }
+    }
+    if (!matchedDir) {
+      errors.push({ kind: 'outside-allowed-dirs', path: p, resolved: realPath });
+      continue;
+    }
+
+    // Dotfile / dotdir reject (default-on), scanned only on the path tail
+    // *below* the allow-listed prefix. Catches `~/Downloads/.envrc` (when
+    // Downloads is allowlisted) without false-rejecting the per-user
+    // outbox at `~/.imap-mcp/users/<id>/outbox/...` whose own prefix
+    // contains `.imap-mcp`.
+    const denyDot = config.denyDotfiles !== false;
     if (denyDot) {
-      const seg = findDotSegment(realPath);
+      const relativeTail = path.relative(matchedDir, realPath);
+      // Prefix with separator so findDotSegment's split sees an "absolute"
+      // form. (findDotSegment skips empty segments from the leading sep.)
+      const seg = findDotSegment(path.sep + relativeTail);
       if (seg) {
         errors.push({ kind: 'dotfile-or-dotdir-rejected', path: p, component: seg });
         continue;
       }
-    }
-
-    // Containment check after realpath.
-    const inside = resolvedAllowed.some((dir) => isInside(realPath, dir));
-    if (!inside) {
-      errors.push({ kind: 'outside-allowed-dirs', path: p, resolved: realPath });
-      continue;
     }
 
     let stat: fs.Stats;
@@ -332,15 +373,18 @@ export function formatValidationErrors(errors: ValidationFailure[]): string[] {
         return `Aggregate attachments exceed limit at ${e.pendingPath}: ${e.totalBytes} bytes > ${e.limitBytes}`;
       case 'no-allowed-dirs-configured':
         return (
-          'No allowed attachment directories configured for path-based attachments. ' +
-          'Two ways forward: ' +
+          'No allowed attachment directories configured for path-based attachments — including ' +
+          'the per-user outbox, which would normally always be present. This usually means the ' +
+          'outbox could not be created (disk full, permission, ~/.imap-mcp/ unwritable). ' +
+          'Three ways forward: ' +
           '(a) if your file lives in a sandbox the server cannot read (Claude Desktop Workspace, ' +
           'Claude.ai /mnt/user-data/outputs/, remote host), retry with the inline `attachments` ' +
           'form: [{ filename, content: <base64>, contentType }] — single round-trip, no ' +
           'allow-list involvement; ' +
-          '(b) if your file is on this server host, set IMAP_MCP_ALLOWED_ATTACHMENT_DIRS ' +
-          '(env, comma-separated absolute paths) or populate users.allowed_attachment_dirs ' +
-          'for the active user, then retry with attachmentPaths.'
+          '(b) call imap_get_outbox_dir to discover the per-user outbox path, then write your ' +
+          'file there and reference it via attachmentPaths; ' +
+          '(c) set IMAP_MCP_ALLOWED_ATTACHMENT_DIRS (env, comma-separated absolute paths) or ' +
+          'populate users.allowed_attachment_dirs for the active user, then retry with attachmentPaths.'
         );
       case 'dotfile-or-dotdir-rejected':
         return (

@@ -500,7 +500,10 @@ export function emailTools(
         'PATH FORM (preferred when the file is on the same host as this server). Array of ' +
         'absolute file paths. The server reads, validates, and encodes the files internally. ' +
         'Each path must resolve inside one of the allowed attachment directories (env ' +
-        'IMAP_MCP_ALLOWED_ATTACHMENT_DIRS, or per-user override in users.allowed_attachment_dirs). ' +
+        'IMAP_MCP_ALLOWED_ATTACHMENT_DIRS, per-user override in users.allowed_attachment_dirs, ' +
+        'or the always-present per-user outbox dir at ~/.imap-mcp/users/<userId>/outbox/ — ' +
+        'discoverable via the imap_get_outbox_dir tool). For agent-generated files on this host, ' +
+        'write to the outbox dir and reference by absolute path here; no env setup required. ' +
         'If your file lives in a sandbox the server cannot read, use the inline `attachments` ' +
         'form instead — the path-based form will fail with attachment_validation_failed.'
       ),

@@ -361,6 +361,39 @@ export function accountTools(
     };
   })));
 
+  // imap_get_outbox_dir (#148): return the per-user attachment outbox path.
+  // Creates the dir on first access (mode 0700). The dir is always present
+  // in the resolved allow-list, so writing files there means imap_send_email
+  // can attach them via attachmentPaths without any env / user_config setup.
+  server.registerTool('imap_get_outbox_dir', {
+    description:
+      'Return the per-user attachment outbox directory path. Files written to this directory ' +
+      'can be attached via imap_send_email\'s attachmentPaths field with no additional setup — ' +
+      'the directory is always present in the resolved allow-list. The same v2.17.9 dotfile / ' +
+      'size / filename rules apply as for any allow-listed dir; this is a sanctioned drop zone, ' +
+      'not a special exempt zone. The directory is created lazily on first access (mode 0700) ' +
+      'under ~/.imap-mcp/users/<userId>/outbox/. Use this when an agent needs to email a file ' +
+      'it just generated on the server host, instead of base64-inlining the bytes through MCP.',
+    inputSchema: {}
+  }, withErrorHandling(withUserAuthorization(db, async (_args, context) => {
+    const { getOutboxDir } = await import('../services/attachment-validator.js');
+    const outboxDir = getOutboxDir(context.userId);
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          success: true,
+          outboxDir,
+          userId: context.userId,
+          username: context.username,
+          usage:
+            'Write attachment files to this directory, then reference them via attachmentPaths ' +
+            'in imap_send_email. Same dotfile / size / filename rules apply as for any allow-listed dir.',
+        }, null, 2)
+      }]
+    };
+  })));
+
   // imap_test_account (#90): one-shot connectivity probe against an existing
   // account using stored credentials. Spawns a fresh ImapFlow client to avoid
   // touching the connection pool / circuit breaker — useful right after
