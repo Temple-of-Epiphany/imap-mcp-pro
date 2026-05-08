@@ -482,9 +482,10 @@ export function emailTools(
           '(e.g., generated inside a Claude Desktop Workspace or Claude.ai sandbox).'
         ),
         path: z.string().optional().describe(
-          'DEPRECATED: prefer the top-level attachmentPaths field, which enforces the ' +
-          'attachment-directory allow-list. This inline path is forwarded directly to the SMTP ' +
-          'composer and bypasses allow-list validation; treat it as a legacy escape hatch.'
+          'Absolute file path on the server host. Validated against the same allow-list, ' +
+          'dotfile-policy, and size caps as the top-level attachmentPaths field (since v2.17.11 / ' +
+          '#147). Prefer the top-level attachmentPaths form for new code — this inline-path field ' +
+          'remains for backward compatibility and is targeted for removal in v3.0.'
         ),
         contentType: z.string().optional().describe('MIME type. Auto-detected from filename if omitted.'),
       })).optional().describe(
@@ -569,38 +570,38 @@ export function emailTools(
     const maxTotalBytes = Number(process.env.IMAP_MCP_MAX_TOTAL_ATTACHMENT_SIZE_BYTES ?? 20 * 1024 * 1024);
     let runningTotalBytes = 0;
 
+    // Hoist user + allow-list resolution so both the path-based block AND
+    // the inline `attachments[].path` validation (#147) share one source of
+    // truth. Computed once per call regardless of which forms the caller
+    // uses; cheap (single SELECT) and avoids drift between the two paths.
+    const callerUserId = (() => {
+      try {
+        const u = db.getUserByUsername(process.env.MCP_USER_ID || 'default');
+        return u?.user_id ?? null;
+      } catch { return null; }
+    })();
+    const globalAllowedDirs = (process.env.IMAP_MCP_ALLOWED_ATTACHMENT_DIRS ?? '')
+      .split(',').map(s => s.trim()).filter(Boolean);
+    const callerAllowedDirs = callerUserId
+      ? resolveAllowedDirs(db, callerUserId, globalAllowedDirs)
+      : globalAllowedDirs;
+    const validatorConfig = {
+      globalAllowedDirs,
+      maxSizeBytes: maxBytes,
+      maxTotalSizeBytes: maxTotalBytes,
+      denyDotfiles,
+    };
+
     // ---- WP1: resolve and validate path-based attachments ----
     const validatedPathAttachments: Array<{ filename: string; path: string; contentType: string }> = [];
     if (attachmentPaths && attachmentPaths.length > 0) {
-      const userId = (() => {
-        try {
-          const u = db.getUserByUsername(process.env.MCP_USER_ID || 'default');
-          return u?.user_id ?? null;
-        } catch { return null; }
-      })();
-
-      const globalDirs = (process.env.IMAP_MCP_ALLOWED_ATTACHMENT_DIRS ?? '')
-        .split(',').map(s => s.trim()).filter(Boolean);
-      const allowedDirs = userId
-        ? resolveAllowedDirs(db, userId, globalDirs)
-        : globalDirs;
-
       const inputs = attachmentPaths.map((p, i) => ({
         path: p,
         contentType: attachmentContentTypes?.[i] || undefined,
         filename: attachmentFilenames?.[i] || undefined,
       }));
 
-      const result = await validateAttachmentPaths(
-        inputs,
-        {
-          globalAllowedDirs: globalDirs,
-          maxSizeBytes: maxBytes,
-          maxTotalSizeBytes: maxTotalBytes,
-          denyDotfiles,
-        },
-        allowedDirs
-      );
+      const result = await validateAttachmentPaths(inputs, validatorConfig, callerAllowedDirs);
 
       if (result.errors.length > 0) {
         return {
@@ -627,22 +628,37 @@ export function emailTools(
     }
 
     // ---- Inline attachments: sanitize, dotfile-reject, size cap ----
+    //
+    // Three input shapes supported on each entry:
+    //   1. { filename, content (base64) }            - inline bytes
+    //   2. { filename, path }                        - host-resident file
+    //   3. { filename, content, path }               - both; content wins,
+    //                                                  path is ignored
+    //
+    // Shape 2 (the inline `path` field) was historically forwarded straight
+    // to nodemailer, bypassing the WP1 (#100) allow-list and v2.17.9 dotfile
+    // / size / basename rules. v2.17.11 (#147) closes that bypass: any inline
+    // entry with `path` set goes through validateAttachmentPaths with the
+    // same policies that gate `attachmentPaths`. Result is byte-for-byte
+    // equivalent to using `attachmentPaths` directly; the inline `path` form
+    // remains for backward compat and will be removed in v3.0.
     const sanitizedInlineAttachments: Array<{ filename: string; content?: Buffer; path?: string; contentType?: string }> = [];
     if (attachments && attachments.length > 0) {
       const inlineErrors: Array<{ kind: string; detail: string }> = [];
       for (const att of attachments) {
-        const cleanName = sanitizeFilename(att.filename ?? '');
-        if (cleanName.length === 0) {
-          inlineErrors.push({ kind: 'invalid-filename', detail: `Inline attachment has no usable filename basename: ${JSON.stringify(att.filename)}` });
-          continue;
-        }
-        if (denyDotfiles && isDotfileBasename(cleanName)) {
-          inlineErrors.push({ kind: 'dotfile-or-dotdir-rejected', detail: `Inline attachment filename '${cleanName}' is a dotfile and is denied by default. Set IMAP_MCP_ALLOW_DOTFILES=true to opt back in.` });
-          continue;
-        }
-
-        let contentBuf: Buffer | undefined;
+        // Bytes-shape branch (`content` set; `path` ignored if also present).
         if (att.content) {
+          const cleanName = sanitizeFilename(att.filename ?? '');
+          if (cleanName.length === 0) {
+            inlineErrors.push({ kind: 'invalid-filename', detail: `Inline attachment has no usable filename basename: ${JSON.stringify(att.filename)}` });
+            continue;
+          }
+          if (denyDotfiles && isDotfileBasename(cleanName)) {
+            inlineErrors.push({ kind: 'dotfile-or-dotdir-rejected', detail: `Inline attachment filename '${cleanName}' is a dotfile and is denied by default. Set IMAP_MCP_ALLOW_DOTFILES=true to opt back in.` });
+            continue;
+          }
+
+          let contentBuf: Buffer;
           try {
             contentBuf = Buffer.from(att.content, 'base64');
           } catch {
@@ -658,13 +674,51 @@ export function emailTools(
             continue;
           }
           runningTotalBytes += contentBuf.length;
+
+          sanitizedInlineAttachments.push({
+            filename: cleanName,
+            content: contentBuf,
+            contentType: att.contentType,
+          });
+          continue;
         }
 
-        sanitizedInlineAttachments.push({
-          filename: cleanName,
-          content: contentBuf,
-          path: att.path,
-          contentType: att.contentType,
+        // Path-shape branch (`path` set, `content` not). Closes #147 bypass:
+        // route through the same validator that gates `attachmentPaths`.
+        if (att.path) {
+          const result = await validateAttachmentPaths(
+            [{ path: att.path, contentType: att.contentType, filename: att.filename }],
+            validatorConfig,
+            callerAllowedDirs
+          );
+          if (result.errors.length > 0) {
+            for (const e of result.errors) {
+              inlineErrors.push({
+                kind: e.kind,
+                detail: formatValidationErrors([e])[0],
+              });
+            }
+            continue;
+          }
+          for (const a of result.attachments) {
+            if (runningTotalBytes + a.sizeBytes > maxTotalBytes) {
+              inlineErrors.push({ kind: 'aggregate-size-exceeds', detail: `Inline path attachment '${a.filename}' would push aggregate size to ${runningTotalBytes + a.sizeBytes} bytes, exceeds total cap of ${maxTotalBytes} bytes (override IMAP_MCP_MAX_TOTAL_ATTACHMENT_SIZE_BYTES).` });
+              continue;
+            }
+            runningTotalBytes += a.sizeBytes;
+            sanitizedInlineAttachments.push({
+              filename: a.filename,
+              path: a.realPath,
+              contentType: a.contentType,
+            });
+          }
+          continue;
+        }
+
+        // Neither `content` nor `path` set — nothing to attach.
+        inlineErrors.push({
+          kind: 'empty-attachment',
+          detail: `Inline attachment '${att.filename ?? '<unnamed>'}' has neither 'content' (base64) nor 'path' set.`,
         });
       }
       if (inlineErrors.length > 0) {

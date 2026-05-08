@@ -5,6 +5,54 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.17.11] - 2026-05-07
+
+### Patch — close inline `attachments[].path` allow-list bypass (closes #147)
+
+The inline `attachments[]` form on `imap_send_email` accepted a `path` field that was forwarded straight to nodemailer at `src/tools/email-tools.ts:660`, completely bypassing the WP1 (#100) allow-list and the v2.17.9 dotfile / size / basename rules. v2.17.8 flagged the field DEPRECATED in the schema description and v2.17.9 hardened every other attachment input — leaving this as the last un-gated entry point. v2.17.11 closes it.
+
+#### 🛡️ Security — inline path now validated identically to `attachmentPaths`
+
+Each inline attachment is now classified at handler time:
+
+- **Bytes shape** (`{ filename, content (base64) }`) — same v2.17.9 size + dotfile + basename rules as before. Decoded bytes capped against the per-attachment + aggregate size budget. If both `content` and `path` are passed, `content` wins (forward-compat: it has been the documented primary field since v1).
+- **Path shape** (`{ filename, path }`) — **new in v2.17.11.** Routed through `validateAttachmentPaths()` against the caller's allow-list, dotfile policy, and size caps. The same envelope (`attachment_validation_failed`, `errorDetails[].kind`) is returned on rejection as the top-level `attachmentPaths` field already produced. The validated `realPath` and basename'd filename are used downstream — symbolic-link traversal into a dotdir is rejected, paths outside the allow-list are rejected, files over the per-attachment cap are rejected, and the running aggregate budget is shared across all three attachment forms in one send.
+- **Empty shape** (neither `content` nor `path`) — now rejected with `empty-attachment` instead of being silently passed to the MIME composer (which would have produced a zero-byte attachment).
+
+User + allow-list resolution was hoisted to handler scope so the inline-path validation and the top-level `attachmentPaths` validation share one source of truth instead of duplicating the lookup. No behavior change for callers using `attachmentPaths` only — same SQL queries, same env reads, same outcomes.
+
+#### 📝 Schema description updated
+
+`attachments[].path` is no longer flagged DEPRECATED-as-bypass. New text:
+
+> *"Absolute file path on the server host. Validated against the same allow-list, dotfile-policy, and size caps as the top-level attachmentPaths field (since v2.17.11 / #147). Prefer the top-level attachmentPaths form for new code — this inline-path field remains for backward compatibility and is targeted for removal in v3.0."*
+
+The v3.0 removal target is preserved — long-term, `attachmentPaths` is the canonical host-path entry and the inline `attachments` form is for inline bytes only.
+
+#### Backward compatibility
+
+- Callers using `attachments: [{ filename, content }]` only: **no change.** Same behavior as v2.17.9 / v2.17.10.
+- Callers using `attachments: [{ filename, path }]`: **breaking change in the unsafe direction.** Previously an unconfigured server (`IMAP_MCP_ALLOWED_ATTACHMENT_DIRS` empty + per-user override null) accepted any path; now it rejects with `no-allowed-dirs-configured`. Configure the allow-list via the user_config slider or the env var, then retry.
+- Callers passing both `content` and `path` on the same entry: **content now wins decisively.** Previously both were forwarded to nodemailer and behavior depended on nodemailer's preference. Now `content` is used and `path` is ignored.
+- No tool surface change. No DB schema change.
+
+#### Verified
+
+- `npm run build`: clean.
+- `npm test`: 75/75 pass (the v2.17.9 attachment-validator tests cover the validator logic this patch reuses; the new code is a routing change, not new validation logic).
+- Schema description rewrite is the user-visible API change; verified to be backward-readable for any LLM client driving `imap_send_email`.
+
+#### What this closes
+
+The last attachment-input gap surfaced by the v2.17.7→v2.17.10 work. Per-form summary:
+
+| Form | Allow-list | Dotfile reject | Size caps | Filename basename |
+|---|---|---|---|---|
+| `attachmentPaths` | ✅ since #100 | ✅ v2.17.9 | ✅ v2.17.9 | ✅ v2.17.9 |
+| `attachments[].content` (base64) | n/a | ✅ v2.17.9 | ✅ v2.17.9 | ✅ v2.17.9 |
+| `attachments[].path` | ✅ **v2.17.11** | ✅ **v2.17.11** | ✅ **v2.17.11** | ✅ **v2.17.11** |
+| `stagedAttachmentIds` | ✅ implicit (server owns the bytes) | ✅ v2.17.9 | ✅ v2.17.9 | ✅ v2.17.9 |
+
 ## [2.17.10] - 2026-05-07
 
 ### Patch — embedded Web UI: bundle into .mcpb, auto-start with port-collision fallback (closes #150)
