@@ -372,8 +372,9 @@ export function accountTools(
       'the directory is always present in the resolved allow-list. The same v2.17.9 dotfile / ' +
       'size / filename rules apply as for any allow-listed dir; this is a sanctioned drop zone, ' +
       'not a special exempt zone. The directory is created lazily on first access (mode 0700) ' +
-      'under ~/.imap-mcp/users/<userId>/outbox/. Use this when an agent needs to email a file ' +
-      'it just generated on the server host, instead of base64-inlining the bytes through MCP.',
+      'under ~/.imap-mcp/users/{userId}/outbox/ (curly braces are placeholder syntax — call this ' +
+      'tool to get the resolved path). Use this when an agent needs to email a file it just ' +
+      'generated on the server host, instead of base64-inlining the bytes through MCP.',
     inputSchema: {}
   }, withErrorHandling(withUserAuthorization(db, async (_args, context) => {
     const { getOutboxDir } = await import('../services/attachment-validator.js');

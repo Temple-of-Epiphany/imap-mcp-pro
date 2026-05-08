@@ -112,7 +112,7 @@ export const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
   // ---- v2.17.4 skill update from GitHub (#138) ----
   // check: read-only network call to raw.githubusercontent.com.
   'imap_check_skill_updates':          READ_REMOTE,
-  // update: writes to ~/.claude/skills/imap-mcp-pro/<name>/ from GitHub.
+  // update: writes to ~/.claude/skills/imap-mcp-pro/{name}/ from GitHub.
   'imap_update_skills':                WRITE_LOCAL,
 
   // ---- folder-tools (6) ----

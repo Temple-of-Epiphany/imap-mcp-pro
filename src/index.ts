@@ -76,6 +76,12 @@ const {
   sentFolderService, appendRetryService, attachmentStaging, messageCache,
   skillsInstaller, webUIManager,
 } = await timeStage('pre-handshake', async () => {
+    // 0. Heal env vars Claude Desktop failed to substitute (#156). Runs
+    //    before loadConfig() / DatabaseService construction so every
+    //    downstream consumer sees the cleaned-up values.
+    const { resolveEnvPlaceholdersWithLogging } = await import('./utils/env-resolver.js');
+    resolveEnvPlaceholdersWithLogging();
+
     // 1. Load + validate config
     let config;
     try {

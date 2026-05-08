@@ -5,6 +5,66 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.17.14] - 2026-05-08
+
+### Patch — two P0 fixes from v2.17.13 test-plan execution (closes #155, #156)
+
+#### 🐛 #155 — `imap_get_outbox_dir` no longer hangs in Claude Desktop
+
+The tool description contained the literal substring `<userId>` as a placeholder gloss for the per-user path. Claude Desktop's tool dispatcher silently refused to send `tools/call` for any tool whose description contains `<word>`-style angle-bracket tokens (apparent XML/HTML sanitization at the client side). Server logs showed zero `tools/call` entries during the 4-minute timeout window — the request never made it to the wire.
+
+Fix: replace `<userId>` and `<name>` placeholder syntax with curly-brace `{userId}` / `{name}`. Affects three tool descriptions:
+
+- `imap_get_outbox_dir` — `~/.imap-mcp/users/<userId>/outbox/` → `~/.imap-mcp/users/{userId}/outbox/`
+- `imap_send_email` (the `attachmentPaths` field gloss) — same change
+- `imap_update_skills` — `~/.claude/skills/imap-mcp-pro/<name>/` → `…/{name}/`
+
+Plus a regression test (`src/tools/tool-descriptions.test.ts`) that walks every string literal in `src/tools/*.ts` and fails CI if any contain `<word>`-style tokens. Allowlists obvious-non-XML cases (`html`, `body`, `br`, etc.) so error-message references to email content tags don't false-trip.
+
+#### 🐛 #156 — Manifest user_config substitution leaks literal placeholders
+
+Claude Desktop has two distinct failure modes when handing user_config values to the extension's child process:
+
+1. **Array-typed fields** (`type: "directory"` + `multiple: true`) ship as the literal string `"${user_config.<field>}"` because Desktop has no rule for serializing an array into a single env-var string.
+2. **Default values containing `${HOME}`** ship verbatim because Desktop only substitutes `${user_config.X}` references, not POSIX-style shell variables.
+
+Both observed against Claude Desktop 1.5354. Both make the path-based attachment feature non-functional out of the box (`attachmentPaths` rejects every send with `outside-allowed-dirs`).
+
+Fix: server-side env-resolver runs in the very-early pre-handshake stage, before any other code reads env. New module `src/utils/env-resolver.ts`:
+
+- **Expands `${HOME}` and `${USER}`** in any `IMAP_MCP_*` env var (so the `database_path` default works without help from Desktop).
+- **Detects literal `${user_config.X}` and other lingering `${...}` placeholders** and clears the variable (lets server-side defaults apply).
+- **Recovers `IMAP_MCP_ALLOWED_ATTACHMENT_DIRS` from the saved settings JSON** when the env var is unset or got cleared. Looks up `~/Library/Application Support/Claude/Claude Extensions Settings/*imap-mcp-pro.json` (and platform equivalents on Linux / Windows), reads `userConfig.allowed_attachment_dirs`, expands `~` and `${HOME}` in each entry, joins with `,`, and re-exports as the env var.
+- **Logs every cleanup** via `[startup] component=env-resolver expanded=[…] cleared=[…] recoveredFromSettings=[…]` so the operator can see exactly what was rewritten.
+
+End-to-end smoke verified with `node dist/index.js` launched with the buggy env Claude Desktop produces:
+
+```
+IMAP_MCP_ALLOWED_ATTACHMENT_DIRS=${user_config.allowed_attachment_dirs}
+IMAP_MCP_DATABASE_PATH=${HOME}/.imap-mcp/data.db
+```
+
+Server cleans both up at startup, recovers `[/tmp, /Users/<u>/Downloads]` from the settings JSON, and `imap_send_email` with `attachmentPaths: ["/tmp/foo.txt"]` succeeds.
+
+#### 🧪 New tests
+
+- `src/tools/tool-descriptions.test.ts` (1 test) — regression guard for #155.
+- `src/utils/env-resolver.test.ts` (7 tests) — `${HOME}`/`${USER}` expansion, placeholder clearing, no-op on well-formed env, settings JSON recovery (darwin only — other platforms are a no-op against the test fixture's directory layout).
+
+Total: **87/87 pass** (was 80).
+
+#### Backward compatibility
+
+- Pure additive on the env side: well-formed env values pass through unchanged. The resolver only rewrites values it can prove are broken.
+- No tool-surface change. No DB schema change.
+- The settings-JSON recovery path is best-effort: if the settings file is missing, malformed, or on a non-Desktop platform, the resolver no-ops and the server falls back to its zero-allow-list default (which is then still ameliorated by the per-user outbox from v2.17.13).
+
+#### Recommended action for users
+
+Reinstall the v2.17.14 `.mcpb` once it builds. After restart, `imap_get_outbox_dir` should return immediately, and `attachmentPaths` should work for any directory listed in the *Allowed Attachment Directories* user_config slider.
+
+If you still see issues, the `[startup] component=env-resolver` log line tells the full story of what got rewritten — paste that into a new issue.
+
 ## [2.17.13] - 2026-05-08
 
 ### Patch — per-user attachment outbox (closes #148) + CHANGELOG heading typo (closes #149)
