@@ -219,13 +219,21 @@ export function accountTools(
       email: z.string().describe('Email address'),
       password: z.string().describe('Password or app-specific password (see provider notes)'),
       smtpEnabled: z.boolean().default(false).describe('Enable SMTP for sending emails (default: false)'),
+      imapUsername: z.string().optional().describe(
+        'Override the IMAP login username. Defaults to the email address. Set this when the ' +
+        'provider requires a non-email login form (e.g., "DOMAIN\\\\user" on Exchange, a short ' +
+        'username on certain hosting setups). When set, the same value is also used as the SMTP ' +
+        'username unless overridden separately.'
+      ),
     }
-  }, withErrorHandling(withUserAuthorization(db, async ({ providerId, name, email, password, smtpEnabled }, context) => {
+  }, withErrorHandling(withUserAuthorization(db, async ({ providerId, name, email, password, smtpEnabled, imapUsername }, context) => {
     // Get provider preset
     const provider = getProviderById(providerId);
     if (!provider) {
       throw new Error(`Unknown provider: ${providerId}. Use imap_list_providers to see available providers.`);
     }
+
+    const loginUsername = imapUsername ?? email;
 
     // Create account with provider settings
     const account = db.createAccount({
@@ -233,14 +241,14 @@ export function accountTools(
       name,
       host: provider.imapHost,
       port: provider.imapPort,
-      username: email,
+      username: loginUsername,
       password,
       tls: provider.imapSecurity === 'SSL' || provider.imapSecurity === 'TLS',
       is_active: true,
       smtp_host: smtpEnabled && provider.smtpHost ? provider.smtpHost : undefined,
       smtp_port: smtpEnabled && provider.smtpPort ? provider.smtpPort : undefined,
       smtp_secure: smtpEnabled && provider.smtpSecurity ? (provider.smtpSecurity === 'SSL' || provider.smtpSecurity === 'TLS') : undefined,
-      smtp_username: smtpEnabled ? email : undefined,
+      smtp_username: smtpEnabled ? loginUsername : undefined,
       smtp_password: smtpEnabled ? password : undefined,
     });
 
@@ -286,13 +294,20 @@ export function accountTools(
       email: z.string().describe('Email address (provider will be auto-detected from domain)'),
       password: z.string().describe('Password or app-specific password'),
       smtpEnabled: z.boolean().default(false).describe('Enable SMTP for sending emails (default: false)'),
+      imapUsername: z.string().optional().describe(
+        'Override the IMAP login username. Defaults to the email address. Set this when the ' +
+        'provider requires a non-email login form (e.g., "DOMAIN\\\\user" on Exchange). When set, ' +
+        'the same value is also used as the SMTP username.'
+      ),
     }
-  }, withErrorHandling(withUserAuthorization(db, async ({ name, email, password, smtpEnabled }, context) => {
+  }, withErrorHandling(withUserAuthorization(db, async ({ name, email, password, smtpEnabled, imapUsername }, context) => {
     // Auto-detect provider from email
     const provider = getProviderByEmail(email);
     if (!provider) {
       throw new Error(`Could not auto-detect provider for ${email}. Use imap_add_account for manual configuration or imap_add_account_with_provider with a specific provider.`);
     }
+
+    const loginUsername = imapUsername ?? email;
 
     // Create account with auto-detected provider settings
     const account = db.createAccount({
@@ -300,14 +315,14 @@ export function accountTools(
       name,
       host: provider.imapHost,
       port: provider.imapPort,
-      username: email,
+      username: loginUsername,
       password,
       tls: provider.imapSecurity === 'SSL' || provider.imapSecurity === 'TLS',
       is_active: true,
       smtp_host: smtpEnabled && provider.smtpHost ? provider.smtpHost : undefined,
       smtp_port: smtpEnabled && provider.smtpPort ? provider.smtpPort : undefined,
       smtp_secure: smtpEnabled && provider.smtpSecurity ? (provider.smtpSecurity === 'SSL' || provider.smtpSecurity === 'TLS') : undefined,
-      smtp_username: smtpEnabled ? email : undefined,
+      smtp_username: smtpEnabled ? loginUsername : undefined,
       smtp_password: smtpEnabled ? password : undefined,
     });
 
@@ -341,6 +356,82 @@ export function accountTools(
               security: provider.smtpSecurity,
             } : undefined,
           },
+        }, null, 2)
+      }]
+    };
+  })));
+
+  // imap_test_account (#90): one-shot connectivity probe against an existing
+  // account using stored credentials. Spawns a fresh ImapFlow client to avoid
+  // touching the connection pool / circuit breaker — useful right after
+  // imap_add_account_with_provider to confirm the credentials work without
+  // first calling imap_connect (which would warm up state and reroute through
+  // breaker logic).
+  server.registerTool('imap_test_account', {
+    description:
+      'Test an existing account\'s IMAP connectivity using its stored credentials. ' +
+      'Spawns a one-shot connection that does not affect the persistent connection pool ' +
+      'or circuit breaker state. Returns folder count and INBOX message count on success, ' +
+      'or a structured error (TLS / auth / DNS / timeout) on failure with a duration in ms. ' +
+      'Useful immediately after imap_add_account_with_provider or imap_add_account_auto to ' +
+      'verify credentials before relying on the account.',
+    inputSchema: {
+      accountId: z.string().describe('Account ID to test (from imap_list_accounts).'),
+    }
+  }, withErrorHandling(withUserAuthorization(db, async ({ accountId }, context) => {
+    const dbAccount = db.getDecryptedAccount(accountId);
+    if (!dbAccount) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            result: 'account_not_found',
+            accountId,
+          }, null, 2)
+        }]
+      };
+    }
+    if (dbAccount.user_id !== context.userId) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            result: 'account_not_owned_by_caller',
+            accountId,
+            hint: 'The accountId belongs to a different user. Pass an accountId returned by imap_list_accounts for the current MCP_USER_ID.',
+          }, null, 2)
+        }]
+      };
+    }
+
+    const account = {
+      id: dbAccount.account_id,
+      name: dbAccount.name,
+      host: dbAccount.host,
+      port: dbAccount.port,
+      user: dbAccount.username,
+      password: dbAccount.password,
+      tls: dbAccount.tls,
+    };
+
+    const result = await imapService.testConnection(account);
+
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          success: result.ok,
+          accountId,
+          accountName: dbAccount.name,
+          host: dbAccount.host,
+          port: dbAccount.port,
+          tls: dbAccount.tls,
+          folderCount: result.folderCount,
+          inboxMessageCount: result.inboxMessageCount,
+          error: result.error,
+          durationMs: result.durationMs,
         }, null, 2)
       }]
     };
