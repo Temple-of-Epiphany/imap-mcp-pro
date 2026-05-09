@@ -31,13 +31,28 @@ const PORT_INCREMENT = 100;
 const MAX_PORT_ATTEMPTS = 10;
 const DEFAULT_PORT = 4500;
 
+/** Per-port probe timeout. If neither 'error' nor 'listening' fires inside
+ *  this window, treat the port as unusable and move on. Prevents a stalled
+ *  bind from hanging the entire post-handshake stage and suppressing the
+ *  component=web-ui startup log line (#158). */
+const PROBE_TIMEOUT_MS = 1000;
+
 /** Probe whether `port` can be bound on 127.0.0.1 right now. */
 async function isPortFree(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const tester = net.createServer();
-    tester.once('error', () => resolve(false));
+    let settled = false;
+    const finish = (free: boolean) => {
+      if (settled) return;
+      settled = true;
+      try { tester.close(); } catch { /* ignore */ }
+      resolve(free);
+    };
+    const timer = setTimeout(() => finish(false), PROBE_TIMEOUT_MS);
+    tester.once('error', () => { clearTimeout(timer); finish(false); });
     tester.once('listening', () => {
-      tester.close(() => resolve(true));
+      clearTimeout(timer);
+      tester.close(() => finish(true));
     });
     tester.listen(port, '127.0.0.1');
   });

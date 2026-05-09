@@ -232,10 +232,16 @@ void timeStage('post-handshake', async () => {
   // Probes ports starting at IMAP_MCP_WEB_UI_PORT (default 4500), incrementing
   // by 100 on EADDRINUSE up to 10 attempts. Best-effort: a failure here logs
   // but never blocks the MCP server from serving tool calls.
+  //
+  // Logging: emit a 'starting' breadcrumb BEFORE the await so a hang during
+  // port probing or listen() still produces a startup log entry (#158). Then
+  // emit a final success/error line after the call resolves.
+  logEvent('[startup]', { component: 'web-ui', outcome: 'starting' });
   try {
     const r = await webUIManager.start({ autoOpen: false });
     logEvent('[startup]', {
       component: 'web-ui',
+      outcome: 'success',
       url: r.url,
       port: r.port,
       alreadyRunning: r.alreadyRunning,

@@ -36,6 +36,7 @@ export class WebUIServer {
   private port: number;
   private defaultUserId: string;
   private authLimiter: any; // Rate limiter for auth endpoints
+  private publicPath!: string; // resolved during setupMiddleware; SPA catch-all uses it
 
   /**
    * Construct a WebUIServer.
@@ -143,7 +144,9 @@ export class WebUIServer {
         `Run 'npm run build' (postbuild stages public/ -> dist/public/) or check that the .mcpb extension was built with v2.17.10+.`
       );
     }
-    console.log(`[WebUIServer] serving static assets from ${publicPath}`);
+    this.publicPath = publicPath;
+    // stderr so Claude Desktop captures it; stdout is reserved for JSON-RPC.
+    console.error(`[WebUIServer] serving static assets from ${publicPath}`);
     this.app.use(express.static(publicPath));
   }
 
@@ -1300,6 +1303,24 @@ export class WebUIServer {
         });
       }
     });
+
+    // ---- SPA catch-all (#159) ----
+    // The Web UI is a single-page app: /, /accounts, /dns-firewall, etc.
+    // are all rendered client-side from public/index.html. Without this
+    // catch-all, deep links and browser refresh on a sub-route 404. Match
+    // every GET that:
+    //   - is not under /api/  (those should still 404 cleanly)
+    //   - does not look like a static asset by extension (so missing
+    //     assets fail honestly rather than silently returning HTML)
+    // Falls through to publicPath/index.html for everything else.
+    const ASSET_EXT_RE = /\.(js|css|map|json|png|jpg|jpeg|gif|svg|ico|webp|woff2?|ttf|eot|otf)$/i;
+    this.app.get(/^\/(?!api\/).*/, (req, res, next) => {
+      if (ASSET_EXT_RE.test(req.path)) return next();
+      const indexFile = path.join(this.publicPath, 'index.html');
+      res.sendFile(indexFile, (err) => {
+        if (err) next(err);
+      });
+    });
   }
 
   private getClaudeConfigPath(): string {
@@ -1334,8 +1355,9 @@ export class WebUIServer {
     return new Promise((resolve) => {
       // SECURITY: Explicitly bind to localhost (127.0.0.1) to prevent external access
       const server = this.app.listen(this.port, '127.0.0.1', () => {
-        console.log(`🌐 Web UI server running at http://localhost:${this.port}`);
-        console.log(`🔒 Security: Server bound to localhost only (127.0.0.1)`);
+        // stderr (Claude Desktop captures stderr; stdout is JSON-RPC).
+        console.error(`🌐 Web UI server running at http://localhost:${this.port}`);
+        console.error(`🔒 Security: Server bound to localhost only (127.0.0.1)`);
 
         if (autoOpen) {
           // Open browser after a short delay
