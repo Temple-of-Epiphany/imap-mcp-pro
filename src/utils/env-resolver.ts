@@ -2,7 +2,47 @@
  * env-resolver.ts (#156) — heal env vars that Claude Desktop fails to
  * substitute before launching the extension's child process.
  *
- * Two failure modes observed in v2.17.13 + Claude Desktop 1.5354:
+ * # Precedence (#160)
+ *
+ * The bundle has TWO config sources of truth. They are consulted in this
+ * order; the first non-empty value wins:
+ *
+ *   1. process.env, AFTER this module finishes its cleanup pass:
+ *        - lingering "${user_config.X}" or "${HOME}" placeholders are
+ *          treated as "broken substitution" and CLEARED before any other
+ *          code reads the value
+ *        - "${HOME}" / "${USER}" inside otherwise-valid values are
+ *          expanded in place
+ *      A non-empty value at this point is treated as authoritative —
+ *      i.e., a future Claude Desktop release that ships properly-
+ *      substituted user_config values is always preferred over the
+ *      fallback below.
+ *
+ *   2. The saved per-extension settings JSON
+ *      (~/Library/Application Support/Claude/Claude Extensions Settings/
+ *       *imap-mcp-pro.json on darwin; platform equivalents elsewhere).
+ *      Read directly when env was cleared in step 1. Currently scoped to
+ *      IMAP_MCP_ALLOWED_ATTACHMENT_DIRS only — that's the single field
+ *      Claude Desktop 1.5354 cannot ship correctly via env (array
+ *      values stringify as the literal placeholder).
+ *
+ *   3. Server-side code defaults — applied by the consumer (e.g., the
+ *      attachment validator's empty allow-list rejects every path).
+ *
+ * # Known edge case
+ *
+ * `if (!process.env.X)` treats both undefined AND empty string as
+ * missing. If a future Claude Desktop release fixes substitution and
+ * ships an explicit empty value (user opted out), the fallback in step 2
+ * will fire and may incorrectly repopulate the value from the settings
+ * JSON. This is acceptable today (v2.17.x users are not in that scenario
+ * — the env is broken, not legitimately empty), but worth distinguishing
+ * if/when Desktop ships its own fix. Tracked on #160.
+ *
+ * # Why two failure modes
+ *
+ * Two distinct Claude Desktop substitution gaps observed against
+ * Claude Desktop 1.5354:
  *
  *   1. user_config fields with `type: "directory"` + `multiple: true`
  *      (i.e., array values) ship as the literal string

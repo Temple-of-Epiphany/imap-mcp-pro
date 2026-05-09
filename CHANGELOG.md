@@ -5,6 +5,79 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.17.15] - 2026-05-08
+
+### Patch — three observability/UX fixes from the v2.17.14 retrospective (closes #158, #159, #160)
+
+#### 🐛 #158 — `[startup] component=web-ui` log line now reliably emitted
+
+The log line documenting the Web UI's bound URL/port was missing in v2.17.14 test runs. Three improvements stack so the breadcrumb is unmissable:
+
+1. **Pre-await breadcrumb.** `src/index.ts` now emits `[startup] component=web-ui outcome=starting` *before* awaiting `webUIManager.start()`, so even a hang during port probing or `listen()` produces a startup log entry. The post-await log (`outcome=success` or `outcome=error`) keeps the existing fields (`url`, `port`, `triedPorts`, `alreadyRunning`).
+2. **Port-probe timeout.** `src/services/web-ui-manager.ts`'s `isPortFree()` now caps each probe at 1 second. If neither `error` nor `listening` fires within the window the port is treated as unusable and the next +100 candidate is tried. Prevents a stalled bind from hanging the entire post-handshake stage.
+3. **stderr-only console output.** `WebUIServer` was using `console.log` for its `🌐 Web UI server running at...` and `[WebUIServer] serving static assets from...` banners. Stdout is reserved for JSON-RPC, so those lines could be filtered by the v2.17.3 stdout sanitizer. Switched to `console.error` so Claude Desktop captures them via stderr alongside the structured `logEvent` lines.
+
+Net effect: a v2.17.15 install will produce the following sequence in `~/Library/Logs/Claude/mcp-server-IMAP MCP Pro.log`:
+
+```
+[startup] component=web-ui outcome=starting
+[WebUIServer] serving static assets from <path>
+🌐 Web UI server running at http://localhost:<port>
+🔒 Security: Server bound to localhost only (127.0.0.1)
+[startup] component=web-ui outcome=success url=<url> port=<port> ...
+```
+
+The `outcome=starting` line guarantees a visible breadcrumb even if the `outcome=success` line never fires.
+
+#### 🐛 #159 — Web UI Express SPA catch-all
+
+The Web UI's client-side router handles routes like `/accounts`, `/dns-firewall`, `/categories`, `/claudeSetup`, `/spamCheck`, `/profile`, `/rules`. Without an Express catch-all, `curl http://localhost:4500/accounts` returns 404 (and `<browser refresh on a sub-page>` shows the same 404). Now: an Express middleware at the end of `setupRoutes()` falls through to `index.html` for any GET that:
+
+- is not under `/api/*` (those still 404 cleanly)
+- does not match a known static-asset extension (`.js .css .json .map .png .jpg .jpeg .gif .svg .ico .webp .woff(2) .ttf .eot .otf` — those 404 honestly so missing-asset bugs surface)
+
+Verified with a smoke-test loop:
+
+```
+/                  HTTP 200 | 40080 bytes
+/accounts          HTTP 200 | 40080 bytes
+/dns-firewall      HTTP 200 | 40080 bytes
+/categories        HTTP 200 | 40080 bytes
+/claudeSetup       HTTP 200 | 40080 bytes
+/nonexistent       HTTP 200 | 40080 bytes  ← intentional; SPA renders 404 client-side
+/api/nope          HTTP 404                 ← API namespace excluded
+/missing.js        HTTP 404                 ← asset miss surfaces honestly
+/index.html        HTTP 200                 ← static handler still wins
+```
+
+`publicPath` was promoted from a `setupMiddleware()` local to a `WebUIServer` instance field so the catch-all in `setupRoutes()` can reference it.
+
+#### 📝 #160 — env-resolver precedence now documented
+
+`src/utils/env-resolver.ts` got an expanded header comment that explicitly states the precedence:
+
+1. process.env (after this module's cleanup pass — placeholders cleared, `${HOME}` expanded) is authoritative
+2. Saved per-extension settings JSON is the fallback for `IMAP_MCP_ALLOWED_ATTACHMENT_DIRS` only
+3. Server-side code defaults apply when neither yields a value
+
+Plus an explicit note about the known edge case: `if (!process.env.X)` treats both undefined and empty string as missing, so a future Claude Desktop release that ships an explicit empty value would still trigger the settings-JSON fallback. Acceptable for the v2.17.x cohort; worth distinguishing if/when Desktop ships its own substitution fix.
+
+#### Backward compatibility
+
+- All changes are additive on the observability side: existing log consumers continue to see all the v2.17.14 fields. The new `outcome=starting` and `outcome=success` lines are new keys, not replacements.
+- SPA catch-all only fires for routes that currently return 404 — any route handler registered earlier in the chain still wins.
+- env-resolver behavior is unchanged; only the comments grew.
+- No tool surface change. No DB schema change.
+
+#### Tests
+
+- All 87/87 still pass. The SPA catch-all is verified via the smoke-test transcript above; adding a unit test would require booting Express in-process and isn't worth the harness complexity for a 7-line route.
+
+#### Still open from v2.17.14 retrospective
+
+- **#161** Replicate the `usage` workflow-hint pattern on other discovery-style tools (`imap_list_accounts`, `imap_list_users`, `imap_list_providers`, etc.). Enhancement, not behavior.
+- **#162** Test plan tweaks (merge A1+A2, clarify D2 browser-not-curl, add Phase E claude.ai parallel test). Documentation, applies to next test cycle.
+
 ## [2.17.14] - 2026-05-08
 
 ### Patch — two P0 fixes from v2.17.13 test-plan execution (closes #155, #156)
