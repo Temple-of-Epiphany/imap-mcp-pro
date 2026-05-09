@@ -94,6 +94,12 @@ export function accountTools(
             user: acc.username,
             tls: acc.tls,
           })),
+          usage:
+            "Each entry's `id` (UUID) is the value to pass as `accountId` to imap_send_email, " +
+            'imap_search_emails, imap_get_email, imap_test_account, imap_connect, etc. ' +
+            'imap_test_account is the cheapest way to verify connectivity without warming the ' +
+            'connection pool. The IMAP `user`/`host`/`port` fields are diagnostic-only — do not ' +
+            'pass them anywhere; the server resolves them from the stored account row.',
         }, null, 2)
       }]
     };
@@ -205,6 +211,14 @@ export function accountTools(
           success: true,
           count: providers.length,
           providers,
+          usage:
+            "Pass an entry's `id` as `providerId` to imap_add_account_with_provider. If " +
+            '`requiresAppPassword` is true, the user must generate a provider-specific app ' +
+            'password before adding the account (Gmail, iCloud, Yahoo, Outlook with 2FA all ' +
+            'require this). `oauth2Supported` is informational; OAuth2 onboarding flows are not ' +
+            'yet wired into this server. For Exchange-style accounts where the IMAP login is ' +
+            'a non-email form (e.g., DOMAIN\\\\user), pass the `imapUsername` parameter to ' +
+            'imap_add_account_with_provider to override the default (which uses the email).',
         }, null, 2)
       }]
     };

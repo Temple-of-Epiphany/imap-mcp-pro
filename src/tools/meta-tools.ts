@@ -128,7 +128,16 @@ export function metaTools(server: McpServer, webUIManager?: WebUIManager): void 
           'Michael Nikolaus (original author)'
         ],
         basedOn: 'Original IMAP MCP Server by Michael Nikolaus (MIT License)'
-      }
+      },
+      usage:
+        'Use the `service.version` field to gate feature availability when authoring agents or ' +
+        'skills. Recent feature gates worth checking: imap_get_outbox_dir requires v2.17.13+ ' +
+        '(working call requires v2.17.14+ which fixed the dispatch hang), imap_open_web_ui ' +
+        'requires v2.17.10+, the per-form attachment hardening matrix (allow-list / dotfile / ' +
+        'size / basename) is complete as of v2.17.11, and the env-resolver heal for Claude ' +
+        'Desktop placeholder leakage is v2.17.14+. Use imap_list_tools for a categorized index ' +
+        'of every tool surface; imap_list_users + imap_list_accounts for the data the active ' +
+        'session can act on.'
     };
 
     return {
@@ -427,7 +436,17 @@ export function metaTools(server: McpServer, webUIManager?: WebUIManager): void 
         category: tool.category,
         description: tool.description,
         parameters: tool.parameters
-      }))
+      })),
+      usage:
+        'Each `tool.name` is a valid MCP tool name callable on this server. Pass a `category` ' +
+        'argument to scope the listing (one of: user, account, email, bulk, folder, sending, ' +
+        'metrics, meta). For full per-tool input schemas, the schema lives on the registered ' +
+        'tool itself (visible via the MCP tools/list method); this tool returns a hand-curated ' +
+        'parameter summary only. Common workflow chains: ' +
+        '(a) imap_list_users -> imap_list_accounts -> imap_search_emails / imap_send_email; ' +
+        '(b) imap_list_providers -> imap_add_account_with_provider -> imap_test_account; ' +
+        '(c) imap_get_outbox_dir -> Write file -> imap_send_email(attachmentPaths). For server ' +
+        'self-information call imap_about; for the embedded Web UI URL call imap_open_web_ui.'
     };
 
     return {
