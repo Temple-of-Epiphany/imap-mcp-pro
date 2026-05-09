@@ -69,6 +69,13 @@ export function userTools(
             organization: u.organization,
             createdAt: u.created_at
           })),
+          usage:
+            "Each entry's `userId` (UUID) is the canonical reference. Tools that take a `userId` " +
+            'parameter (e.g., imap_extract_unsubscribe_links, imap_check_email_spam, ' +
+            'imap_get_outbox_dir context) accept either the UUID or the `username` form via the ' +
+            'v2.17.7 / v2.17.2 resolver — pass whichever is more convenient. The MCP server ' +
+            'resolves the active user from the `MCP_USER_ID` env var (set by the user_config in ' +
+            'the .mcpb manifest); imap_about returns the resolved username at runtime.',
         }, null, 2)
       }]
     };

@@ -1718,6 +1718,13 @@ export function emailTools(
             ...metrics,
             lastOperationTime: metrics.lastOperationTime?.toISOString(),
           },
+          usage:
+            '`failedOperations > 0` with the breaker still CLOSED indicates errors that did not ' +
+            'trip the breaker (commonly idle disconnects from Hostinger / Yahoo / similar — ' +
+            'fixed in v2.16.0 #116 by removing client.error from the breaker trip path). For the ' +
+            'breaker state itself call imap_get_circuit_breaker. To clear counters call ' +
+            'imap_reset_metrics. For per-operation latency / success-rate breakdown call ' +
+            'imap_get_operation_metrics with this same accountId.',
         }, null, 2)
       }]
     };
@@ -1742,6 +1749,11 @@ export function emailTools(
             ...m,
             lastExecuted: m.lastExecuted?.toISOString(),
           })),
+          usage:
+            'Per-operation counters across the lifetime of the connection. Pass `operationName` ' +
+            'on the input to filter to a single operation (e.g., "fetch", "search", "store"). ' +
+            'Compare to imap_get_metrics for per-account aggregate; compare to ' +
+            'imap_get_circuit_breaker for the protection state derived from these counters.',
         }, null, 2)
       }]
     };
@@ -1758,13 +1770,32 @@ export function emailTools(
     }
   }, withErrorHandling(async ({ accountId }) => {
     const state = imapService.getCircuitBreakerState(accountId);
+    if (!state) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            error: `No circuit breaker state for account ${accountId}`,
+            usage:
+              'No state yet — the circuit breaker is created lazily on the first connection. ' +
+              'Call imap_connect first, then re-invoke this tool to inspect state.',
+          }, null, 2)
+        }]
+      };
+    }
     return {
       content: [{
         type: 'text',
-        text: JSON.stringify(
-          state ?? { error: `No circuit breaker state for account ${accountId}` },
-          null, 2
-        )
+        text: JSON.stringify({
+          ...state,
+          usage:
+            'CLOSED = healthy, OPEN = blocked (operations short-circuit until timeoutMs elapses), ' +
+            'HALF_OPEN = trial state allowing one test call. To force a recovery, call ' +
+            'imap_reset_circuit_breaker. To see the underlying counters that drove the trip, ' +
+            'call imap_get_metrics. v2.16.0 (#116) removed idle-disconnect events from the ' +
+            'trip path, so a CLOSED breaker with non-zero failedOperations in metrics is ' +
+            'expected on Hostinger / Yahoo / similar providers.',
+        }, null, 2)
       }]
     };
   }));

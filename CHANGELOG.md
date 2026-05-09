@@ -5,6 +5,51 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.17.16] - 2026-05-08
+
+### Patch — replicate the v2.17.13 `usage` hint pattern across discovery tools (closes #161)
+
+`imap_get_outbox_dir` shipped a `usage` field on its response in v2.17.13 — a single short string telling the calling agent the next-step workflow. Worked well enough to be worth replicating on every discovery-style tool, so an LLM driving the server doesn't have to round-trip through the schema or invent a wrong follow-up call.
+
+**Discovery tools now shipping `usage` hints in their response envelope:**
+
+| Tool | Hint covers |
+|---|---|
+| `imap_list_accounts` | `id` is `accountId`; `imap_test_account` for cheap connectivity check; IMAP `user`/`host`/`port` are diagnostic-only |
+| `imap_list_users` | `userId` is canonical; UUID and `username` both accepted by tools that take `userId` (per the v2.17.7 / v2.17.2 resolver); `MCP_USER_ID` resolves the active user |
+| `imap_list_providers` | `id` → `providerId`; `requiresAppPassword: true` means generate one first; `imapUsername` override for Exchange-style |
+| `imap_about` | Recent feature gates by version (outbox v2.17.13+, dispatch fix v2.17.14+, web UI v2.17.10+, attachment-hardening matrix complete v2.17.11+, env-resolver v2.17.14+) |
+| `imap_list_tools` | Tool-name callability + canonical workflow chains (account add → test, outbox → write → send, etc.) |
+| `imap_get_metrics` | `failedOperations > 0` with breaker CLOSED is expected on aggressive-disconnect providers (Hostinger/Yahoo) since v2.16.0 #116; cross-references to circuit-breaker / per-op metrics tools |
+| `imap_get_operation_metrics` | Per-op vs aggregate distinction; cross-references to imap_get_metrics + imap_get_circuit_breaker |
+| `imap_get_circuit_breaker` | CLOSED/OPEN/HALF_OPEN semantics; `imap_reset_circuit_breaker` for manual recovery; non-zero `failedOperations` doesn't trip breaker since v2.16.0 |
+
+The hints are deliberately specific — they reference other tool names by exact MCP name and call out non-obvious gotchas (the breaker-metrics relationship, the per-Exchange-account login form, the placeholder leakage in older versions). Generic platitudes get filtered out at draft time.
+
+`imap_get_circuit_breaker` was also tightened: the no-state branch now returns a structured envelope (`error`, `usage`) instead of a bare error object, so callers can detect "no state yet" without parsing the message.
+
+#### End-to-end verification
+
+```
+imap_about              has usage: YES (608 chars)
+imap_list_accounts      has usage: YES (392 chars)
+imap_list_users         has usage: YES (474 chars)
+imap_list_providers     has usage: YES (549 chars)
+imap_list_tools         has usage: YES (720 chars)
+```
+
+Confirmed via direct stdio MCP probe of the compiled server.
+
+#### Backward compatibility
+
+- Pure additive on response shape: every existing field preserved, only the new top-level `usage` string added.
+- No tool-surface change. No DB schema change. No new env vars.
+- Callers that JSON.parse the response and ignore unknown keys (the default agent posture) just see the new field as extra context. Callers that schema-validate will need to extend their schemas — but no first-party caller does that.
+
+#### Still open from #161
+
+- A lint test that asserts every "discovery" tool returns `usage` is deferred — would require either AST parsing (messy) or a runtime probe across the live tool surface (boots the whole server). The eight tools above cover the obvious surface; future contributors can follow the pattern by reading any of them as a template. If new discovery tools are added without `usage`, the omission shows up at next inspection rather than at CI time. Acceptable trade-off for now.
+
 ## [2.17.15] - 2026-05-08
 
 ### Patch — three observability/UX fixes from the v2.17.14 retrospective (closes #158, #159, #160)
