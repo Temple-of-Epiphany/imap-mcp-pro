@@ -682,6 +682,43 @@ export class WebUIServer {
       }
     });
 
+    // Check email with UserCheck (backs the "Test" button in the SPAM Check view)
+    this.app.post('/api/usercheck/check-email', async (req, res) => {
+      try {
+        const { email, checkDisposable, checkBlocklisted, checkMx, checkRoleAccount, allowPublicDomains } = req.body;
+
+        if (!email) {
+          return res.status(400).json({
+            success: false,
+            error: 'Email is required'
+          });
+        }
+
+        const userCheckService = new UserCheckService(this.db);
+        const result = await userCheckService.checkEmail(
+          this.defaultUserId,
+          email,
+          {
+            checkDisposable: checkDisposable !== false,
+            checkBlocklisted: checkBlocklisted !== false,
+            checkMx: checkMx !== false,
+            checkRoleAccount: checkRoleAccount !== false,
+            allowPublicDomains: allowPublicDomains !== false
+          }
+        );
+
+        res.json({
+          success: true,
+          result
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to check email'
+        });
+      }
+    });
+
     // Check domain with UserCheck
     this.app.post('/api/usercheck/check-domain', async (req, res) => {
       try {
