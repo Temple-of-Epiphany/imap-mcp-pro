@@ -16,6 +16,7 @@ import { WebUIServer } from './server.js';
 
 let created: any[] = [];
 let deleted: string[] = [];
+let updated: { id: string; updates: any }[] = [];
 
 function makeDb() {
   return {
@@ -29,6 +30,8 @@ function makeDb() {
     ],
     createAccount: (input: any) => { created.push(input); return { account_id: 'new-1', ...input }; },
     deleteAccount: (id: string) => { deleted.push(id); },
+    updateAccount: (id: string, updates: any) => { updated.push({ id, updates }); },
+    getAccount: (id: string) => ({ account_id: id, name: 'Renamed', username: 'me@x.com', host: 'imap.x.com', port: 993, tls: true }),
   } as any;
 }
 
@@ -53,7 +56,7 @@ afterAll(async () => {
   await new Promise<void>((r) => server.close(() => r()));
 });
 
-beforeEach(() => { created = []; deleted = []; });
+beforeEach(() => { created = []; deleted = []; updated = []; });
 
 describe('WebUIServer /api routes', () => {
   it('GET /api/providers returns the provider catalog', async () => {
@@ -97,6 +100,22 @@ describe('WebUIServer /api routes', () => {
     const body = await res.json();
     expect(body.account.host).toBe('mail.corp.com');
     expect(created[0]).toMatchObject({ host: 'mail.corp.com', port: 143, tls: false });
+  });
+
+  it('PUT /api/accounts/:id sends only defined fields and maps email→username', async () => {
+    const res = await fetch(`${base}/api/accounts/a1`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Renamed', email: 'me@x.com' }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(updated).toHaveLength(1);
+    expect(updated[0]).toEqual({ id: 'a1', updates: { name: 'Renamed', username: 'me@x.com' } });
+    // undefined fields (password/host/port/tls) are omitted, not nulled
+    expect(updated[0].updates).not.toHaveProperty('password');
+    expect(updated[0].updates).not.toHaveProperty('host');
   });
 
   it('DELETE /api/accounts/:id disconnects and deletes', async () => {

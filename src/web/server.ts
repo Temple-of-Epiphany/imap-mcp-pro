@@ -17,6 +17,11 @@ import { dnsProviders } from '../providers/dns-providers.js';
 import { ImapAccount } from '../types/index.js';
 import crypto from 'crypto';
 
+/** Return a copy of `obj` with all `undefined`-valued keys removed. */
+function pickDefined(obj: Record<string, any>): Record<string, any> {
+  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined));
+}
+
 /** Project a decrypted DB account row into the web UI's account shape. */
 function toWebAccount(acc: any) {
   return {
@@ -319,13 +324,7 @@ export class WebUIServer {
       try {
         const { name, email, password, host, port, tls, smtp } = req.body;
 
-        const updates: any = {};
-        if (name !== undefined) updates.name = name;
-        if (email !== undefined) updates.username = email;
-        if (password !== undefined) updates.password = password;
-        if (host !== undefined) updates.host = host;
-        if (port !== undefined) updates.port = port;
-        if (tls !== undefined) updates.tls = tls;
+        const updates: any = pickDefined({ name, username: email, password, host, port, tls });
 
         // Handle SMTP configuration
         if ('smtp' in req.body) {
