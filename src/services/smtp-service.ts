@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LicenseRef-ImapMcpPro-Dual
 /**
  * SmtpService — pooled SMTP send with retry classification + metrics
  *
@@ -134,27 +135,27 @@ export class SmtpService {
   // ---------- transport / pool ----------
 
   async createTransporter(account: ImapAccount): Promise<nodemailer.Transporter> {
-    const existing = this.transporters.get(account.id);
-    if (existing) return existing;
+    const cached = this.transporters.get(account.id);
+    if (cached) return cached;
 
-    const smtpConfig = account.smtp || this.getDefaultSmtpConfig(account);
+    const smtp = account.smtp ?? this.getDefaultSmtpConfig(account);
 
     const transporter = nodemailer.createTransport({
-      host: smtpConfig.host,
-      port: smtpConfig.port,
-      secure: smtpConfig.secure,
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.secure,
       auth: {
-        user: smtpConfig.user || account.user,
-        pass: smtpConfig.password || account.password,
+        user: smtp.user || account.user,
+        pass: smtp.password || account.password,
       },
-      tls: smtpConfig.tls,
+      tls: smtp.tls,
       pool: true,
       maxConnections: this.poolOptions.maxConnections,
-      // pool-idle: SMTP servers commonly drop after ~60-300s; keep our
-      // pool's idle below that to avoid surprise EOFs on send.
+      // Bound message reuse and keep the idle window under the ~60-300s
+      // window after which servers tend to drop the socket, so a pooled
+      // connection is not reaped mid-send.
       maxMessages: 100,
       socketTimeout: this.poolOptions.idleTimeoutSeconds * 1000,
-      // Health-check via NOOP-equivalent: nodemailer's verify() runs an EHLO.
     });
 
     if (this.poolOptions.healthCheck) {
@@ -165,16 +166,21 @@ export class SmtpService {
     return transporter;
   }
 
+  // Best-effort submission endpoint for accounts added without explicit SMTP
+  // settings: known IMAP hosts map to their documented submission server; any
+  // other host is derived from the IMAP hostname.
   private getDefaultSmtpConfig(account: ImapAccount): SmtpConfig {
-    const presets: { [key: string]: SmtpConfig } = {
-      'imap.gmail.com':       { host: 'smtp.gmail.com',           port: 587, secure: false },
-      'outlook.office365.com':{ host: 'smtp.office365.com',       port: 587, secure: false },
-      'imap-mail.outlook.com':{ host: 'smtp-mail.outlook.com',    port: 587, secure: false },
-      'imap.mail.yahoo.com':  { host: 'smtp.mail.yahoo.com',      port: 587, secure: false },
-      'imap.aol.com':         { host: 'smtp.aol.com',             port: 587, secure: false },
-      'imap.fastmail.com':    { host: 'smtp.fastmail.com',        port: 587, secure: false },
+    const submissionByImapHost: Record<string, SmtpConfig> = {
+      'imap.gmail.com':        { host: 'smtp.gmail.com',        port: 587, secure: false },
+      'outlook.office365.com': { host: 'smtp.office365.com',    port: 587, secure: false },
+      'imap-mail.outlook.com': { host: 'smtp-mail.outlook.com', port: 587, secure: false },
+      'imap.mail.yahoo.com':   { host: 'smtp.mail.yahoo.com',   port: 587, secure: false },
+      'imap.aol.com':          { host: 'smtp.aol.com',          port: 587, secure: false },
+      'imap.fastmail.com':     { host: 'smtp.fastmail.com',     port: 587, secure: false },
     };
-    if (presets[account.host]) return presets[account.host];
+
+    const known = submissionByImapHost[account.host];
+    if (known) return known;
 
     return {
       host: account.host.replace('imap.', 'smtp.').replace('imap-', 'smtp-'),
@@ -225,10 +231,10 @@ export class SmtpService {
 
   // ---------- send ----------
 
-  /** Backward-compat shim — returns just the messageId. */
+  /** Backward-compatible helper that returns only the Message-ID. */
   async sendEmail(accountId: string, account: ImapAccount, email: EmailComposer): Promise<string> {
-    const outcome = await this.sendEmailWithCopy(accountId, account, email);
-    return outcome.messageId;
+    const { messageId } = await this.sendEmailWithCopy(accountId, account, email);
+    return messageId;
   }
 
   /**
@@ -470,16 +476,15 @@ export class SmtpService {
   // ---------- shutdown ----------
 
   disconnect(accountId: string): void {
-    const t = this.transporters.get(accountId);
-    if (t) {
-      t.close();
-      this.transporters.delete(accountId);
-    }
+    const transporter = this.transporters.get(accountId);
+    if (!transporter) return;
+    transporter.close();
+    this.transporters.delete(accountId);
   }
 
   disconnectAll(): void {
-    for (const [, t] of this.transporters) {
-      try { t.close(); } catch {}
+    for (const transporter of this.transporters.values()) {
+      try { transporter.close(); } catch {}
     }
     this.transporters.clear();
   }
