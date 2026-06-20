@@ -635,7 +635,7 @@ src/
 ├── services/
 │   ├── imap-service.ts    # IMAP connection management
 │   ├── smtp-service.ts    # SMTP service for sending emails
-│   └── account-manager.ts # Account configuration
+│   └── database-service.ts # Encrypted account/user storage (SQLite)
 ├── tools/
 │   ├── index.ts          # Tool registration
 │   ├── account-tools.ts  # Account management tools
