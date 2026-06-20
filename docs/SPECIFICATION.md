@@ -121,7 +121,6 @@ imap-mcp-pro/
 │   │   ├── imap-service.ts         # IMAP operations & connection pooling
 │   │   ├── smtp-service.ts         # SMTP email sending
 │   │   ├── database-service.ts     # User/account management
-│   │   ├── account-manager.ts      # DEPRECATED (use DatabaseService)
 │   │   └── ...scoring/firewall     # Optional integrations
 │   ├── tools/
 │   │   ├── account-tools.ts        # Account management MCP tools

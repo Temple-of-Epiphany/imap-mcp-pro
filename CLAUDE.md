@@ -21,7 +21,7 @@ This is an IMAP MCP (Model Context Protocol) server built with TypeScript that p
 
 2. **Services**:
    - `ImapService`: Manages IMAP connections, email operations, and folder management with connection pooling
-   - `AccountManager`: Handles secure account storage with AES-256 encryption
+   - `DatabaseService`: Handles secure account/user storage (SQLite) with AES-256-GCM encryption and multi-tenant support
 
 3. **Tools**: MCP tools are organized into three categories:
    - `account-tools.ts`: Account management (add, remove, list, connect, disconnect)
