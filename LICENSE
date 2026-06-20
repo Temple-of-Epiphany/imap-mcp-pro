@@ -1,5 +1,7 @@
 # IMAP MCP Pro License
 
+SPDX-License-Identifier: LicenseRef-ImapMcpPro-Dual
+
 ## Dual License Model
 
 This software is available under a dual-license model:
@@ -10,7 +12,7 @@ This software is available under a dual-license model:
 
 ## Non-Commercial License
 
-Copyright (c) 2025 Temple of Epiphany / Colin Bitterfield
+Copyright (c) 2025-2026 Temple of Epiphany / Colin Bitterfield
 Copyright (c) 2024 Michael Nikolaus (Original Base Code)
 
 ### Terms
@@ -118,5 +120,5 @@ If you are unsure whether your use case requires a commercial license, please co
 
 ---
 
-**Last Updated:** January 2025
-**Version:** 1.0
+**Last Updated:** June 2026
+**Version:** 1.1

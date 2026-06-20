@@ -1,0 +1,37 @@
+IMAP MCP Pro
+SPDX-License-Identifier: LicenseRef-ImapMcpPro-Dual
+
+Copyright (c) 2025-2026 Temple of Epiphany / Colin Bitterfield.
+All rights reserved.
+
+This product is distributed under a dual license (non-commercial free /
+commercial paid). See the accompanying LICENSE file for the full terms.
+Commercial licensing: colin.bitterfield@templeofepiphany.com
+
+--------------------------------------------------------------------------------
+Third-party / upstream attribution
+--------------------------------------------------------------------------------
+
+This project is a fork and substantial extension of the original IMAP MCP
+Server created by Michael Nikolaus, which was licensed under the MIT License.
+
+    Original Project: https://github.com/nikolausm/imap-mcp-server
+    Original Author:  Michael Nikolaus (https://github.com/nikolausm)
+    Original License: MIT License (applies to the unmodified base code only)
+
+    Copyright (c) 2024 Michael Nikolaus
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the inclusion of the above
+    copyright notice and this permission notice in all copies or substantial
+    portions of the Software.
+
+All enterprise enhancements, modifications, and additions created by
+Temple of Epiphany are governed by the dual license described in LICENSE,
+not by the MIT terms above.
+
+Dependencies retain their own licenses; see node_modules/<pkg>/LICENSE for each.

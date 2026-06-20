@@ -89,6 +89,16 @@ cpr(path.join(repoRoot, 'node_modules'), path.join(serverDir, 'node_modules'));
 cpr(path.join(repoRoot, 'package.json'), path.join(serverDir, 'package.json'));
 cpr(path.join(repoRoot, 'package-lock.json'), path.join(serverDir, 'package-lock.json'));
 
+// Ship the license + copyright notice with the bundle. The manifest declares
+// LicenseRef-ImapMcpPro-Dual; these files carry the actual terms and copyright.
+for (const legal of ['LICENSE', 'NOTICE']) {
+  const srcLegal = path.join(repoRoot, legal);
+  if (fs.existsSync(srcLegal)) {
+    cpr(srcLegal, path.join(buildDir, legal));
+    cpr(srcLegal, path.join(serverDir, legal));
+  }
+}
+
 // Trim node_modules: drop devDependencies-only packages and obvious bloat
 function pruneNodeModules() {
   const nm = path.join(serverDir, 'node_modules');
