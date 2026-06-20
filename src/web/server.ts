@@ -17,6 +17,18 @@ import { dnsProviders } from '../providers/dns-providers.js';
 import { ImapAccount } from '../types/index.js';
 import crypto from 'crypto';
 
+/** Project a decrypted DB account row into the web UI's account shape. */
+function toWebAccount(acc: any) {
+  return {
+    id: acc.account_id,
+    name: acc.name,
+    user: acc.username,
+    host: acc.host,
+    port: acc.port,
+    tls: acc.tls,
+  };
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -165,19 +177,12 @@ export class WebUIServer {
     this.app.get('/api/accounts', (req, res) => {
       try {
         const accounts = this.db.listDecryptedAccountsForUser(this.defaultUserId);
-        // Convert to web UI format (use username instead of user field)
+        // Convert to web UI format (adds SMTP block when configured).
         const webAccounts = accounts.map(acc => ({
-          id: acc.account_id,
-          name: acc.name,
-          user: acc.username,
-          host: acc.host,
-          port: acc.port,
-          tls: acc.tls,
-          smtp: acc.smtp_host ? {
-            host: acc.smtp_host,
-            port: acc.smtp_port,
-            tls: acc.smtp_secure
-          } : undefined
+          ...toWebAccount(acc),
+          smtp: acc.smtp_host
+            ? { host: acc.smtp_host, port: acc.smtp_port, tls: acc.smtp_secure }
+            : undefined,
         }));
         res.json(webAccounts);
       } catch (error) {
@@ -190,18 +195,16 @@ export class WebUIServer {
       try {
         const { name, email, password, host, port, tls, smtp } = req.body;
 
-        // Auto-detect provider if not specified
+        // Auto-detect IMAP settings from the email domain when host is omitted.
         let imapHost = host;
         let imapPort = port;
         let useTls = tls;
 
-        if (!host && email) {
-          const provider = getProviderByEmail(email);
-          if (provider) {
-            imapHost = provider.imapHost;
-            imapPort = provider.imapPort;
-            useTls = provider.imapSecurity !== 'STARTTLS';
-          }
+        const detected = !host && email ? getProviderByEmail(email) : undefined;
+        if (detected) {
+          imapHost = detected.imapHost;
+          imapPort = detected.imapPort;
+          useTls = detected.imapSecurity !== 'STARTTLS';
         }
 
         const account = this.db.createAccount({
@@ -220,14 +223,7 @@ export class WebUIServer {
           is_active: true
         });
 
-        res.json({ success: true, account: {
-          id: account.account_id,
-          name: account.name,
-          user: account.username,
-          host: account.host,
-          port: account.port,
-          tls: account.tls
-        }});
+        res.json({ success: true, account: toWebAccount(account) });
       } catch (error) {
         res.status(400).json({
           success: false,
@@ -360,14 +356,7 @@ export class WebUIServer {
           return;
         }
 
-        res.json({ success: true, account: {
-          id: account.account_id,
-          name: account.name,
-          user: account.username,
-          host: account.host,
-          port: account.port,
-          tls: account.tls
-        }});
+        res.json({ success: true, account: toWebAccount(account) });
       } catch (error) {
         res.status(400).json({
           success: false,
