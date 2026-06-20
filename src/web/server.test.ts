@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-ImapMcpPro-Dual
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 //
 // HTTP route tests for WebUIServer.
 //

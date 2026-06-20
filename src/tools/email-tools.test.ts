@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-ImapMcpPro-Dual
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 //
 // Route tests for the core email MCP tools (search / get / mark / delete).
 //
