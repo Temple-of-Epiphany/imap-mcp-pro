@@ -126,6 +126,30 @@ function parseDateOnly(input: string): Date {
   return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
 }
 
+/** Wrap any payload as a pretty-printed JSON text tool result. */
+function jsonResult(payload: unknown) {
+  return { content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }] };
+}
+
+/** Cap a possibly-undefined body string to keep responses within budget. */
+function clip(text: string | undefined, max = 10000): string | undefined {
+  return text?.substring(0, max);
+}
+
+/** Translate the search tool's flat params into an ImapService SearchCriteria. */
+function buildSearchCriteria(raw: Record<string, any>): Record<string, any> {
+  const criteria: Record<string, any> = {};
+  for (const key of ['from', 'to', 'subject', 'body'] as const) {
+    if (raw[key]) criteria[key] = raw[key];
+  }
+  if (raw.since) criteria.since = parseDateOnly(raw.since);
+  if (raw.before) criteria.before = parseDateOnly(raw.before);
+  if (raw.unreadOnly !== undefined) criteria.unreadOnly = raw.unreadOnly; // Issue #82
+  if (raw.seen !== undefined) criteria.seen = raw.seen;
+  if (raw.flagged !== undefined) criteria.flagged = raw.flagged;
+  return criteria;
+}
+
 export function emailTools(
   server: McpServer,
   imapService: ImapService,
@@ -163,18 +187,8 @@ export function emailTools(
       storageType: StorageTypeSchema,
     }
   }, withErrorHandling(async ({ accountId, folder, limit, responseMode, storageType, ...searchCriteria }) => {
-    const criteria: any = {};
     const effectiveLimit = capLimit(limit, 50, responseMode);
-
-    if (searchCriteria.from) criteria.from = searchCriteria.from;
-    if (searchCriteria.to) criteria.to = searchCriteria.to;
-    if (searchCriteria.subject) criteria.subject = searchCriteria.subject;
-    if (searchCriteria.body) criteria.body = searchCriteria.body;
-    if (searchCriteria.since) criteria.since = parseDateOnly(searchCriteria.since);
-    if (searchCriteria.before) criteria.before = parseDateOnly(searchCriteria.before);
-    if (searchCriteria.unreadOnly !== undefined) criteria.unreadOnly = searchCriteria.unreadOnly;  // Issue #82
-    if (searchCriteria.seen !== undefined) criteria.seen = searchCriteria.seen;
-    if (searchCriteria.flagged !== undefined) criteria.flagged = searchCriteria.flagged;
+    const criteria = buildSearchCriteria(searchCriteria);
 
     const messages = await imapService.searchEmails(accountId, folder, criteria);
     const limitedMessages = messages.slice(0, effectiveLimit);
@@ -225,17 +239,12 @@ export function emailTools(
       warnings.push(`Large folder detected (${messages.length} emails). Consider responseMode='file' for very large sets.`);
     }
 
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          totalFound: messages.length,
-          returned: limitedMessages.length,
-          warnings: warnings.length > 0 ? warnings : undefined,
-          messages: limitedMessages,
-        }, null, 2)
-      }]
-    };
+    return jsonResult({
+      totalFound: messages.length,
+      returned: limitedMessages.length,
+      warnings: warnings.length > 0 ? warnings : undefined,
+      messages: limitedMessages,
+    });
   }));
 
   // Get email content tool
@@ -250,18 +259,13 @@ export function emailTools(
   }, withErrorHandling(async ({ accountId, folder, uid, headersOnly }) => {
     const email = await imapService.getEmailContent(accountId, folder, uid, headersOnly);
 
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          email: {
-            ...email,
-            textContent: email.textContent?.substring(0, 10000), // Limit text content
-            htmlContent: email.htmlContent?.substring(0, 10000), // Limit HTML content
-          },
-        }, null, 2)
-      }]
-    };
+    return jsonResult({
+      email: {
+        ...email,
+        textContent: clip(email.textContent),
+        htmlContent: clip(email.htmlContent),
+      },
+    });
   }));
 
   // Mark email as read tool
@@ -274,16 +278,7 @@ export function emailTools(
     }
   }, withErrorHandling(async ({ accountId, folder, uid }) => {
     await imapService.markAsRead(accountId, folder, uid);
-    
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          success: true,
-          message: `Email ${uid} marked as read`,
-        }, null, 2)
-      }]
-    };
+    return jsonResult({ success: true, message: `Email ${uid} marked as read` });
   }));
 
   // Mark email as unread tool
@@ -296,16 +291,7 @@ export function emailTools(
     }
   }, withErrorHandling(async ({ accountId, folder, uid }) => {
     await imapService.markAsUnread(accountId, folder, uid);
-    
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          success: true,
-          message: `Email ${uid} marked as unread`,
-        }, null, 2)
-      }]
-    };
+    return jsonResult({ success: true, message: `Email ${uid} marked as unread` });
   }));
 
   // Delete email tool
@@ -318,16 +304,7 @@ export function emailTools(
     }
   }, withErrorHandling(async ({ accountId, folder, uid }) => {
     await imapService.deleteEmail(accountId, folder, uid);
-
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          success: true,
-          message: `Email ${uid} deleted`,
-        }, null, 2)
-      }]
-    };
+    return jsonResult({ success: true, message: `Email ${uid} deleted` });
   }));
 
   // Bulk delete emails tool
