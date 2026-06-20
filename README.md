@@ -101,7 +101,7 @@ IMAP MCP Pro supports multi-user configurations for Managed Service Providers (M
 **Contact for Commercial Licensing:**
 - Email: colin.bitterfield@templeofepiphany.com
 - Commercial license required for MSP/multi-tenant deployments
-- Single-user deployments remain under Apache 2.0 license
+- Noncommercial use is free under the PolyForm Noncommercial License 1.0.0
 
 ## Installation
 
@@ -764,11 +764,11 @@ node dist/index.js --print-tools-manifest | jq '.tools | length'
 
 > **Free for personal use. Paid for commercial use.**
 
-This software is distributed under a **Dual License Model**. The license you operate under depends entirely on how you use the software.
+This software is distributed under a **Dual License Model**: the **[PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/)** for noncommercial use, plus a separate **commercial license** for everything else. The license you operate under depends entirely on how you use the software.
 
-### ✅ Non-Commercial License — FREE
+### ✅ Noncommercial use — FREE (PolyForm Noncommercial License 1.0.0)
 
-You may use, copy, modify, and distribute this software at no cost when your use is **non-commercial**, including:
+You may use, copy, modify, and distribute this software at no cost when your use is for a **permitted (noncommercial) purpose** under the PolyForm Noncommercial License, including:
 
 - Personal email management on your own accounts
 - Educational use (students, instructors, classroom)
@@ -777,7 +777,7 @@ You may use, copy, modify, and distribute this software at no cost when your use
 - Open source project development
 - Evaluation, testing, and proof-of-concept work
 
-Modifications you make under this license must be shared under the same non-commercial terms.
+You may make changes and new works for any permitted (noncommercial) purpose. (PolyForm Noncommercial imposes no share-alike/copyleft obligation.)
 
 ### 💼 Commercial License — PAID (required)
 

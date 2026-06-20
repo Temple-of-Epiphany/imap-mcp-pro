@@ -10,7 +10,8 @@ This Contributor License Agreement ("Agreement") clarifies the intellectual
 property rights granted with Contributions from any person or entity. It
 protects both you (the "Contributor") and the maintainer, and — importantly —
 it preserves the maintainer's ability to offer the Project under a **dual
-license** (non-commercial free / commercial paid), as described in `LICENSE`.
+license** — the PolyForm Noncommercial License 1.0.0 for noncommercial use,
+plus a separate commercial license — as described in `LICENSE`.
 
 By submitting a Contribution (a pull request, patch, or any code,
 documentation, or other material) to the Project, you agree to the following

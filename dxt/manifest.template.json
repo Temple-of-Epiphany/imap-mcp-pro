@@ -20,7 +20,7 @@
   "icon": "icon.png",
   "screenshots": [],
   "keywords": ["email", "imap", "smtp", "mailbox", "mcp", "spam", "outlook", "gmail"],
-  "license": "LicenseRef-ImapMcpPro-Dual",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "compatibility": {
     "claude_desktop": ">=0.10.0",
     "platforms": ["darwin", "win32", "linux"]
