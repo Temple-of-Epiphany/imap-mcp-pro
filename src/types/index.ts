@@ -1,7 +1,21 @@
-// Database types
+// SPDX-License-Identifier: LicenseRef-ImapMcpPro-Dual
+//
+// Shared type definitions for IMAP MCP Pro.
+//
+// Author:  Colin Bitterfield <colin.bitterfield@templeofepiphany.com>
+// Part of: IMAP MCP Pro (Temple of Epiphany)
+//
+// Connection/account/message shapes plus the reliability-layer (circuit
+// breaker, operation queue, metrics, degradation) and RFC 9051 capability
+// and status types. Database row types are re-exported from ./database-types.
+
 export * from './database-types.js';
 
-// Connection state tracking
+// ---------------------------------------------------------------------------
+// Connection lifecycle
+// ---------------------------------------------------------------------------
+
+/** Lifecycle phase of a pooled IMAP connection. */
 export enum ConnectionState {
   DISCONNECTED = 'DISCONNECTED',
   CONNECTING = 'CONNECTING',
@@ -10,35 +24,40 @@ export enum ConnectionState {
   ERROR = 'ERROR'
 }
 
-// Keepalive configuration
+/** Tunables for keeping an idle connection alive. */
 export interface KeepAliveConfig {
-  interval?: number;      // TCP keepalive interval in ms (default: 10000)
-  idleInterval?: number;  // IMAP IDLE interval in ms (default: 1740000 = 29 minutes)
-  forceNoop?: boolean;    // Force NOOP instead of IDLE (default: true)
+  interval?: number;      // TCP keepalive probe interval, ms (default 10000)
+  idleInterval?: number;  // Re-issue IMAP IDLE after this many ms (default 1740000 / 29 min)
+  forceNoop?: boolean;    // Prefer periodic NOOP over IDLE (default true)
 }
 
-// Retry configuration
+/** Exponential-backoff retry policy. */
 export interface RetryConfig {
-  maxAttempts?: number;      // Max retry attempts (default: 5)
-  initialDelay?: number;     // Initial delay in ms (default: 1000)
-  maxDelay?: number;         // Max delay in ms (default: 60000)
-  backoffMultiplier?: number; // Backoff multiplier (default: 2)
+  maxAttempts?: number;      // Give up after this many tries (default 5)
+  initialDelay?: number;     // First backoff delay, ms (default 1000)
+  maxDelay?: number;         // Upper bound on backoff, ms (default 60000)
+  backoffMultiplier?: number; // Growth factor between attempts (default 2)
 }
 
-// Connection metadata for tracking
+/** Runtime bookkeeping the pool keeps for each connection. */
 export interface ConnectionMetadata {
   state: ConnectionState;
   lastConnected?: Date;
   lastError?: Error;
   reconnectAttempts: number;
   healthCheckInterval?: NodeJS.Timeout;
-  // Level 3: Enhanced tracking
+  // Reliability layer (see sections below)
   circuitBreaker?: CircuitBreakerState;
   metrics?: ConnectionMetrics;
   degradationStartTime?: Date;
   cacheData?: Map<string, { data: any; timestamp: Date }>;
 }
 
+// ---------------------------------------------------------------------------
+// Accounts and transport
+// ---------------------------------------------------------------------------
+
+/** A configured IMAP account plus optional SMTP and reliability settings. */
 export interface ImapAccount {
   id: string;
   name: string;
@@ -57,6 +76,7 @@ export interface ImapAccount {
   degradation?: DegradationConfig;
 }
 
+/** Outgoing-mail (SMTP) settings for an account. */
 export interface SmtpConfig {
   host: string;
   port: number;
@@ -69,6 +89,11 @@ export interface SmtpConfig {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Messages, folders, search
+// ---------------------------------------------------------------------------
+
+/** Header-level summary of a single message. */
 export interface EmailMessage {
   uid: number;
   date: Date;
@@ -80,12 +105,14 @@ export interface EmailMessage {
   flags: string[];
 }
 
+/** A message with its decoded body and attachments. */
 export interface EmailContent extends EmailMessage {
   textContent?: string;
   htmlContent?: string;
   attachments: Attachment[];
 }
 
+/** Metadata for an attachment found on a fetched message. */
 export interface Attachment {
   filename: string;
   contentType: string;
@@ -93,6 +120,7 @@ export interface Attachment {
   contentId?: string;
 }
 
+/** A mailbox/folder node, optionally with nested children. */
 export interface Folder {
   name: string;
   delimiter: string;
@@ -100,6 +128,7 @@ export interface Folder {
   children?: Folder[];
 }
 
+/** Filters that translate into an IMAP SEARCH. */
 export interface SearchCriteria {
   from?: string;
   to?: string;
@@ -108,16 +137,22 @@ export interface SearchCriteria {
   since?: Date;
   before?: Date;
   seen?: boolean;
-  unreadOnly?: boolean;  // Issue #82: Convenience parameter (maps to seen: false)
+  unreadOnly?: boolean;  // Issue #82: convenience flag, equivalent to seen: false
   flagged?: boolean;
   answered?: boolean;
   draft?: boolean;
 }
 
+/** Map of accountId -> live IMAP connection instance. */
 export interface ConnectionPool {
-  [accountId: string]: any; // IMAP connection instance
+  [accountId: string]: any;
 }
 
+// ---------------------------------------------------------------------------
+// Composing / sending
+// ---------------------------------------------------------------------------
+
+/** Fields used to compose an outgoing message. */
 export interface EmailComposer {
   from: string;
   to: string | string[];
@@ -132,6 +167,7 @@ export interface EmailComposer {
   references?: string | string[];
 }
 
+/** An attachment to include on an outgoing message. */
 export interface EmailAttachment {
   filename: string;
   content?: string | Buffer;
@@ -141,24 +177,30 @@ export interface EmailAttachment {
   cid?: string;
 }
 
-// Bulk operation types
+// ---------------------------------------------------------------------------
+// Bulk operations
+// ---------------------------------------------------------------------------
+
+/** Flag mutations supported by the bulk-mark tools. */
 export type BulkMarkOperation =
-  | 'read' | 'unread'           // \Seen flag
-  | 'flagged' | 'unflagged'     // \Flagged flag
-  | 'answered' | 'unanswered'   // \Answered flag (RFC 9051)
-  | 'draft' | 'not-draft'       // \Draft flag (RFC 9051)
-  | 'deleted' | 'undeleted';    // \Deleted flag
+  | 'read' | 'unread'           // \Seen
+  | 'flagged' | 'unflagged'     // \Flagged
+  | 'answered' | 'unanswered'   // \Answered (RFC 9051)
+  | 'draft' | 'not-draft'       // \Draft (RFC 9051)
+  | 'deleted' | 'undeleted';    // \Deleted
 
-// RFC 9051: Recommended IMAP Keywords (Issue #54)
+/** Recommended IMAP keywords from RFC 9051 (Issue #54). */
 export type ImapKeyword =
-  | '$Forwarded'   // Message has been forwarded
-  | '$MDNSent'     // Message Disposition Notification sent
-  | '$Junk'        // Message is junk/spam
-  | '$NotJunk'     // Message is NOT junk (user correction)
-  | '$Phishing';   // Message is a phishing attempt
+  | '$Forwarded'   // forwarded
+  | '$MDNSent'     // disposition notification sent
+  | '$Junk'        // spam
+  | '$NotJunk'     // user-confirmed not spam
+  | '$Phishing';   // phishing attempt
 
+/** How much of each message a bulk fetch should retrieve. */
 export type BulkFetchFields = 'headers' | 'full' | 'body';
 
+/** Outcome summary returned by bulk operations. */
 export interface BulkOperationResult {
   success: boolean;
   processedCount: number;
@@ -166,20 +208,26 @@ export interface BulkOperationResult {
   errors?: Array<{ uid: number; error: string }>;
 }
 
-// Level 3: Circuit Breaker Pattern
+// ---------------------------------------------------------------------------
+// Reliability: circuit breaker
+// ---------------------------------------------------------------------------
+
+/** Circuit-breaker states. */
 export enum CircuitState {
-  CLOSED = 'CLOSED',      // Normal operation
-  OPEN = 'OPEN',          // Too many failures, reject requests
-  HALF_OPEN = 'HALF_OPEN' // Testing if service recovered
+  CLOSED = 'CLOSED',      // healthy, requests pass through
+  OPEN = 'OPEN',          // tripped, requests rejected fast
+  HALF_OPEN = 'HALF_OPEN' // probing for recovery
 }
 
+/** Circuit-breaker thresholds and timing. */
 export interface CircuitBreakerConfig {
-  failureThreshold?: number;     // Number of failures before opening (default: 5)
-  successThreshold?: number;     // Number of successes to close from half-open (default: 2)
-  timeout?: number;              // Time in ms before trying half-open (default: 60000)
-  monitoringWindow?: number;     // Rolling window for failure tracking in ms (default: 120000)
+  failureThreshold?: number;     // failures that trip the breaker (default 5)
+  successThreshold?: number;     // successes to close from half-open (default 2)
+  timeout?: number;              // wait before probing half-open, ms (default 60000)
+  monitoringWindow?: number;     // rolling failure window, ms (default 120000)
 }
 
+/** Live circuit-breaker state for a connection. */
 export interface CircuitBreakerState {
   state: CircuitState;
   failureCount: number;
@@ -190,7 +238,11 @@ export interface CircuitBreakerState {
   config: Required<CircuitBreakerConfig>;
 }
 
-// Level 3: Operation Queue
+// ---------------------------------------------------------------------------
+// Reliability: operation queue
+// ---------------------------------------------------------------------------
+
+/** A single queued operation awaiting (re)execution. */
 export interface QueuedOperation {
   id: string;
   accountId: string;
@@ -201,14 +253,19 @@ export interface QueuedOperation {
   priority: number;
 }
 
+/** Bounds and cadence for the offline operation queue. */
 export interface OperationQueueConfig {
-  maxSize?: number;           // Max queue size (default: 1000)
-  maxRetries?: number;        // Max retries per operation (default: 3)
-  processingInterval?: number; // Queue processing interval in ms (default: 5000)
-  enablePriority?: boolean;   // Enable priority queue (default: true)
+  maxSize?: number;           // cap on pending operations (default 1000)
+  maxRetries?: number;        // per-operation retry limit (default 3)
+  processingInterval?: number; // drain interval, ms (default 5000)
+  enablePriority?: boolean;   // honor per-operation priority (default true)
 }
 
-// Level 3: Metrics and Monitoring
+// ---------------------------------------------------------------------------
+// Reliability: metrics
+// ---------------------------------------------------------------------------
+
+/** Aggregate counters for a connection. */
 export interface ConnectionMetrics {
   totalOperations: number;
   successfulOperations: number;
@@ -218,6 +275,7 @@ export interface ConnectionMetrics {
   uptime: number;
 }
 
+/** Per-operation latency/throughput counters. */
 export interface OperationMetrics {
   operationName: string;
   count: number;
@@ -230,23 +288,31 @@ export interface OperationMetrics {
   lastExecuted?: Date;
 }
 
-// Level 3: Graceful Degradation
+// ---------------------------------------------------------------------------
+// Reliability: graceful degradation
+// ---------------------------------------------------------------------------
+
+/** Behavior while the server is degraded/unreachable. */
 export interface DegradationConfig {
-  enableReadOnlyMode?: boolean;     // Allow reads when writes fail (default: true)
-  enableCaching?: boolean;          // Cache read results (default: true)
-  cacheTimeout?: number;            // Cache timeout in ms (default: 300000 = 5min)
-  fallbackToLastKnown?: boolean;    // Use last known good data (default: true)
-  maxDegradationTime?: number;      // Max time in degraded mode in ms (default: 3600000 = 1hr)
+  enableReadOnlyMode?: boolean;     // serve reads when writes fail (default true)
+  enableCaching?: boolean;          // cache read results (default true)
+  cacheTimeout?: number;            // cached-data TTL, ms (default 300000 / 5 min)
+  fallbackToLastKnown?: boolean;    // fall back to last good data (default true)
+  maxDegradationTime?: number;      // cap on degraded operation, ms (default 3600000 / 1 hr)
 }
 
-// RFC 9051: Server Capabilities (Issue #55)
+// ---------------------------------------------------------------------------
+// RFC 9051: capabilities and status
+// ---------------------------------------------------------------------------
+
+/** Parsed server CAPABILITY response (Issue #55). */
 export interface ServerCapabilities {
-  raw: string[];              // Raw capability strings from server
-  imap4rev2: boolean;         // IMAP4rev2 support
-  imap4rev1: boolean;         // IMAP4rev1 support (fallback)
-  authMethods: string[];      // AUTH= methods (e.g., "PLAIN", "LOGIN", "XOAUTH2")
+  raw: string[];              // verbatim capability tokens
+  imap4rev2: boolean;         // advertises IMAP4rev2
+  imap4rev1: boolean;         // advertises IMAP4rev1 (fallback)
+  authMethods: string[];      // AUTH= mechanisms, e.g. PLAIN / LOGIN / XOAUTH2
   extensions: {
-    // Core IMAP4rev2 built-ins (should all be true for compliant servers)
+    // IMAP4rev2 built-ins (expected true on compliant servers)
     namespace?: boolean;
     unselect?: boolean;
     uidplus?: boolean;
@@ -264,7 +330,7 @@ export interface ServerCapabilities {
     statusSize?: boolean;
     statusDeleted?: boolean;
 
-    // Common optional extensions
+    // Frequently-seen optional extensions
     quota?: boolean;
     sort?: boolean;
     thread?: boolean;
@@ -274,36 +340,41 @@ export interface ServerCapabilities {
     notify?: boolean;
     metadata?: boolean;
 
-    // Allow for any other extensions
+    // Catch-all for anything else the server advertises
     [key: string]: boolean | undefined;
   };
 }
 
-// RFC 9051: Mailbox STATUS (Issue #56)
+/** Result of a mailbox STATUS query (Issue #56). */
 export interface MailboxStatus {
   mailbox: string;
-  messages: number;          // MESSAGES - total messages
-  recent?: number;           // RECENT - deprecated in IMAP4rev2 but still supported
-  uidNext: number;           // UIDNEXT - predicted next UID
-  uidValidity: bigint;       // UIDVALIDITY - UID validity value
-  unseen: number;            // UNSEEN - number of unseen messages
-  deleted?: number;          // DELETED - number of deleted messages (STATUS=DELETED)
-  size?: number;             // SIZE - mailbox size in bytes (STATUS=SIZE)
+  messages: number;          // MESSAGES — total count
+  recent?: number;           // RECENT — legacy in IMAP4rev2, still reported
+  uidNext: number;           // UIDNEXT — next UID the server will assign
+  uidValidity: bigint;       // UIDVALIDITY — mailbox UID epoch
+  unseen: number;            // UNSEEN — count of unseen messages
+  deleted?: number;          // DELETED — \Deleted count (STATUS=DELETED)
+  size?: number;             // SIZE — mailbox size in bytes (STATUS=SIZE)
 }
 
-// DNS Firewall Provider Configuration (Issue #60)
+// ---------------------------------------------------------------------------
+// DNS firewall (Issue #60)
+// ---------------------------------------------------------------------------
+
+/** Lookup transport a DNS-firewall provider uses. */
 export type DnsFirewallProviderType = 'dns-over-https' | 'dns-lookup';
 
+/** A configured DNS-firewall provider. */
 export interface DnsFirewallProvider {
   providerId: string;
   providerName: string;
   providerType: DnsFirewallProviderType;
-  apiEndpoint?: string;      // For HTTPS providers
-  apiKey?: string;           // Optional API key for future services
+  apiEndpoint?: string;      // endpoint for DoH providers
+  apiKey?: string;           // optional key for future paid services
   isEnabled: boolean;
   isDefault: boolean;
   timeoutMs: number;
   createdAt: number;
   updatedAt: number;
-  metadata?: string;         // JSON metadata for provider-specific config
+  metadata?: string;         // provider-specific config as JSON
 }
