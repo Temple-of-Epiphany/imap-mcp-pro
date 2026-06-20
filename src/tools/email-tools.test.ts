@@ -47,11 +47,23 @@ function makeImap(overrides: Record<string, any> = {}) {
   };
 }
 
-function register(imap: any) {
+function register(imap: any, db: any = {}, smtp: any = {}) {
   const { server, tools } = makeServer();
   // results/workerPool/etc. omitted → search uses the inline path.
-  emailTools(server as any, imap as any, {} as any, {} as any);
+  emailTools(server as any, imap as any, db as any, smtp as any);
   return tools;
+}
+
+function dbWithAccount(overrides: Record<string, any> = {}) {
+  return {
+    getDecryptedAccount: () => ({
+      account_id: 'acc-1', name: 'Me', host: 'imap.x.com', port: 993,
+      username: 'me@x.com', password: 'pw', tls: true,
+      smtp_host: 'smtp.x.com', smtp_port: 465, smtp_secure: true,
+      smtp_username: 'me@x.com', smtp_password: 'pw',
+    }),
+    ...overrides,
+  };
 }
 
 describe('emailTools core routes', () => {
@@ -108,5 +120,57 @@ describe('emailTools core routes', () => {
       .toEqual({ success: true, message: 'Email 7 marked as unread' });
     expect(await invoke(tools, 'imap_delete_email', { accountId: 'a', folder: 'INBOX', uid: 7 }))
       .toEqual({ success: true, message: 'Email 7 deleted' });
+  });
+
+  it('imap_get_latest_emails returns newest-first, capped to count', async () => {
+    const out = await invoke(tools, 'imap_get_latest_emails', { accountId: 'a', folder: 'INBOX', count: 1 });
+    expect(out.messages).toHaveLength(1);
+    expect(out.messages[0].uid).toBe(2); // 2026-01-02 is newer than 2026-01-01
+  });
+});
+
+describe('emailTools send/reply/forward', () => {
+  it('imap_reply_to_email builds Re: subject, threads, and reply-all recipients', async () => {
+    let sent: any;
+    const smtp = { sendEmail: async (_a: string, _acc: any, composer: any) => { sent = composer; return '<msg@x>'; } };
+    const imap = makeImap({
+      getEmailContent: async () => ({ uid: 5, subject: 'Status', from: 'boss@x.com', to: ['me@x.com', 'peer@x.com'], messageId: '<orig@x>' }),
+    });
+    const tools = register(imap, dbWithAccount(), smtp);
+    const out = await invoke(tools, 'imap_reply_to_email', { accountId: 'a', folder: 'INBOX', uid: 5, text: 'ok', replyAll: true });
+    expect(out).toEqual({ success: true, messageId: '<msg@x>', message: 'Reply sent successfully' });
+    expect(sent.subject).toBe('Re: Status');
+    expect(sent.inReplyTo).toBe('<orig@x>');
+    expect(sent.references).toBe('<orig@x>');
+    // reply-all includes original recipients except self
+    expect(sent.to).toEqual(['boss@x.com', 'peer@x.com']);
+  });
+
+  it('imap_reply_to_email keeps an existing Re: prefix and excludes self on reply-all', async () => {
+    let sent: any;
+    const smtp = { sendEmail: async (_a: string, _acc: any, c: any) => { sent = c; return '<m>'; } };
+    const imap = makeImap({
+      getEmailContent: async () => ({ uid: 5, subject: 'Re: Hi', from: 'a@x.com', to: ['me@x.com'], messageId: '<o>' }),
+    });
+    const tools = register(imap, dbWithAccount(), smtp);
+    await invoke(tools, 'imap_reply_to_email', { accountId: 'a', folder: 'INBOX', uid: 5, text: 'y', replyAll: true });
+    expect(sent.subject).toBe('Re: Hi');
+    expect(sent.to).toEqual(['a@x.com']); // 'me@x.com' (self) filtered out
+  });
+
+  it('imap_forward_email builds Fwd: subject and a forwarded-message header', async () => {
+    let sent: any;
+    const smtp = { sendEmail: async (_a: string, _acc: any, c: any) => { sent = c; return '<f>'; } };
+    const imap = makeImap({
+      getEmailContent: async () => ({ uid: 9, subject: 'Doc', from: 'a@x.com', to: ['b@x.com'], date: new Date('2026-01-01T00:00:00Z'), messageId: '<o>', textContent: 'BODY' }),
+    });
+    const tools = register(imap, dbWithAccount(), smtp);
+    const out = await invoke(tools, 'imap_forward_email', { accountId: 'a', folder: 'INBOX', uid: 9, to: 'c@x.com', text: 'FYI' });
+    expect(out).toEqual({ success: true, messageId: '<f>', message: 'Email forwarded successfully' });
+    expect(sent.subject).toBe('Fwd: Doc');
+    expect(sent.to).toBe('c@x.com');
+    expect(sent.text).toContain('FYI');
+    expect(sent.text).toContain('Forwarded message');
+    expect(sent.text).toContain('BODY');
   });
 });

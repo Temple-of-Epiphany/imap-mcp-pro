@@ -6,6 +6,7 @@ import { ResultsService, StoredResultRowSummary } from '../services/results-serv
 import { WorkerPool } from '../utils/worker-pool.js';
 import { z } from 'zod';
 import { withErrorHandling, AccountNotFoundError } from '../utils/error-handler.js';
+import { ImapAccount } from '../types/index.js';
 import {
   maybeStoreAsHandle,
   ResponseModeSchema,
@@ -134,6 +135,26 @@ function jsonResult(payload: unknown) {
 /** Cap a possibly-undefined body string to keep responses within budget. */
 function clip(text: string | undefined, max = 10000): string | undefined {
   return text?.substring(0, max);
+}
+
+/** Convert a decrypted DB account row into the ImapAccount shape the services expect. */
+function toImapAccount(dbAccount: any): ImapAccount {
+  return {
+    id: dbAccount.account_id,
+    name: dbAccount.name,
+    host: dbAccount.host,
+    port: dbAccount.port,
+    user: dbAccount.username,
+    password: dbAccount.password,
+    tls: dbAccount.tls,
+    smtp: dbAccount.smtp_host ? {
+      host: dbAccount.smtp_host,
+      port: dbAccount.smtp_port!,
+      secure: dbAccount.smtp_secure || false,
+      user: dbAccount.smtp_username,
+      password: dbAccount.smtp_password,
+    } : undefined,
+  };
 }
 
 /** Translate the search tool's flat params into an ImapService SearchCriteria. */
@@ -420,14 +441,7 @@ export function emailTools(
       });
     }
 
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          messages: sortedMessages,
-        }, null, 2)
-      }]
-    };
+    return jsonResult({ messages: sortedMessages });
   }));
 
   // Send email tool
@@ -522,22 +536,7 @@ export function emailTools(
       throw new AccountNotFoundError(accountId);
     }
 
-    const account = {
-      id: dbAccount.account_id,
-      name: dbAccount.name,
-      host: dbAccount.host,
-      port: dbAccount.port,
-      user: dbAccount.username,
-      password: dbAccount.password,
-      tls: dbAccount.tls,
-      smtp: dbAccount.smtp_host ? {
-        host: dbAccount.smtp_host,
-        port: dbAccount.smtp_port!,
-        secure: dbAccount.smtp_secure || false,
-        user: dbAccount.smtp_username,
-        password: dbAccount.smtp_password
-      } : undefined
-    };
+    const account = toImapAccount(dbAccount);
 
     // ---- shared attachment policy (applies to inline, path-based, staged) ----
     const {
@@ -1272,23 +1271,7 @@ export function emailTools(
       throw new AccountNotFoundError(accountId);
     }
 
-    // Convert database account to ImapAccount format
-    const account = {
-      id: dbAccount.account_id,
-      name: dbAccount.name,
-      host: dbAccount.host,
-      port: dbAccount.port,
-      user: dbAccount.username,
-      password: dbAccount.password,
-      tls: dbAccount.tls,
-      smtp: dbAccount.smtp_host ? {
-        host: dbAccount.smtp_host,
-        port: dbAccount.smtp_port!,
-        secure: dbAccount.smtp_secure || false,
-        user: dbAccount.smtp_username,
-        password: dbAccount.smtp_password
-      } : undefined
-    };
+    const account = toImapAccount(dbAccount);
 
     // Get original email
     const originalEmail = await imapService.getEmailContent(accountId, folder, uid);
@@ -1317,16 +1300,7 @@ export function emailTools(
 
     const messageId = await smtpService.sendEmail(accountId, account, emailComposer);
     
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          success: true,
-          messageId,
-          message: 'Reply sent successfully',
-        }, null, 2)
-      }]
-    };
+    return jsonResult({ success: true, messageId, message: 'Reply sent successfully' });
   }));
 
   // Forward email tool
@@ -1346,23 +1320,7 @@ export function emailTools(
       throw new AccountNotFoundError(accountId);
     }
 
-    // Convert database account to ImapAccount format
-    const account = {
-      id: dbAccount.account_id,
-      name: dbAccount.name,
-      host: dbAccount.host,
-      port: dbAccount.port,
-      user: dbAccount.username,
-      password: dbAccount.password,
-      tls: dbAccount.tls,
-      smtp: dbAccount.smtp_host ? {
-        host: dbAccount.smtp_host,
-        port: dbAccount.smtp_port!,
-        secure: dbAccount.smtp_secure || false,
-        user: dbAccount.smtp_username,
-        password: dbAccount.smtp_password
-      } : undefined
-    };
+    const account = toImapAccount(dbAccount);
 
     // Get original email
     const originalEmail = await imapService.getEmailContent(accountId, folder, uid);
@@ -1381,16 +1339,7 @@ export function emailTools(
 
     const messageId = await smtpService.sendEmail(accountId, account, emailComposer);
 
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          success: true,
-          messageId,
-          message: 'Email forwarded successfully',
-        }, null, 2)
-      }]
-    };
+    return jsonResult({ success: true, messageId, message: 'Email forwarded successfully' });
   }));
 
   // Level 2: Bulk get emails tool
