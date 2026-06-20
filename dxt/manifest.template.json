@@ -20,7 +20,7 @@
   "icon": "icon.png",
   "screenshots": [],
   "keywords": ["email", "imap", "smtp", "mailbox", "mcp", "spam", "outlook", "gmail"],
-  "license": "MIT",
+  "license": "LicenseRef-ImapMcpPro-Dual",
   "compatibility": {
     "claude_desktop": ">=0.10.0",
     "platforms": ["darwin", "win32", "linux"]
