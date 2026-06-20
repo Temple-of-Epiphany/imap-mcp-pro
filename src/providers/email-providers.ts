@@ -1,288 +1,230 @@
+// SPDX-License-Identifier: LicenseRef-ImapMcpPro-Dual
+//
+// Email provider connection presets.
+//
+// Author:  Colin Bitterfield <colin.bitterfield@templeofepiphany.com>
+// Part of: IMAP MCP Pro (Temple of Epiphany)
+//
+// A catalog of well-known mail providers and the standard IMAP/SMTP endpoints
+// they publish. Connection values (hostnames, ports, transport security) are
+// public, factual settings documented by each provider. To keep the catalog
+// compact and uniform it is authored through the `preset()` factory below
+// rather than as hand-written object literals. Two helpers resolve an entry
+// either by its stable `id` or by matching the domain of an email address.
+
+/**
+ * Transport security mode for an IMAP/SMTP endpoint.
+ * - `SSL`/`TLS`  — implicit TLS from the first byte (e.g. IMAP 993, SMTP 465).
+ * - `STARTTLS`   — plaintext connect that upgrades to TLS (e.g. SMTP 587).
+ */
+export type TransportSecurity = 'TLS' | 'SSL' | 'STARTTLS';
+
 export interface EmailProvider {
-  id: string;
-  name: string;
-  displayName: string;
-  iconUrl: string;
-  color: string;
-  imapHost: string;
-  imapPort: number;
-  imapSecurity: 'TLS' | 'SSL' | 'STARTTLS';
-  smtpHost?: string;
-  smtpPort?: number;
-  smtpSecurity?: 'TLS' | 'SSL' | 'STARTTLS';
-  domains: string[];
-  helpUrl?: string;
-  requiresAppPassword?: boolean;
-  oauth2Supported?: boolean;
-  notes?: string;
+  /** Stable identifier used by tools/APIs to look this preset up. */
+  readonly id: string;
+  /** Short provider name. */
+  readonly name: string;
+  /** Human-friendly product name shown in UIs. */
+  readonly displayName: string;
+  /** Icon URL or app-relative path for the provider logo (web UI). */
+  readonly iconUrl: string;
+  /** Brand accent color (hex). */
+  readonly color: string;
+  /** Incoming mail server. */
+  readonly imapHost: string;
+  readonly imapPort: number;
+  readonly imapSecurity: TransportSecurity;
+  /** Outgoing mail server — omitted for receive-only presets. */
+  readonly smtpHost?: string;
+  readonly smtpPort?: number;
+  readonly smtpSecurity?: TransportSecurity;
+  /** Address domains that map to this provider (used for auto-detection). */
+  readonly domains: string[];
+  /** Link to the provider's mail-client setup documentation. */
+  readonly helpUrl?: string;
+  /** True when a normal password is rejected and an app password is required. */
+  readonly requiresAppPassword?: boolean;
+  /** True when the provider supports OAuth2 sign-in. */
+  readonly oauth2Supported?: boolean;
+  /** Free-form caveat shown to the user when configuring the account. */
+  readonly notes?: string;
 }
 
+/** `[host, port, security]` — compact endpoint tuple used by `preset()`. */
+type Endpoint = [host: string, port: number, security: TransportSecurity];
+
+interface PresetExtras {
+  help?: string;
+  appPassword?: true;
+  oauth2?: true;
+  note?: string;
+}
+
+const ICON_BASE = 'https://cdn.jsdelivr.net/npm/simple-icons@v10/icons';
+/** Build a Simple Icons CDN URL for the given slug. */
+const si = (slug: string): string => `${ICON_BASE}/${slug}.svg`;
+
+/**
+ * Assemble an {@link EmailProvider}. Optional auth/help fields are only set
+ * when supplied, so consumers can rely on `undefined` (rather than `false`)
+ * for "not applicable" — matching how the presets are read elsewhere.
+ */
+function preset(
+  id: string,
+  name: string,
+  displayName: string,
+  iconUrl: string,
+  color: string,
+  imap: Endpoint,
+  smtp: Endpoint | null,
+  domains: string[],
+  extras: PresetExtras = {},
+): EmailProvider {
+  const [imapHost, imapPort, imapSecurity] = imap;
+  return {
+    id,
+    name,
+    displayName,
+    iconUrl,
+    color,
+    imapHost,
+    imapPort,
+    imapSecurity,
+    domains,
+    ...(smtp ? { smtpHost: smtp[0], smtpPort: smtp[1], smtpSecurity: smtp[2] } : {}),
+    ...(extras.help ? { helpUrl: extras.help } : {}),
+    ...(extras.appPassword ? { requiresAppPassword: true as const } : {}),
+    ...(extras.oauth2 ? { oauth2Supported: true as const } : {}),
+    ...(extras.note ? { notes: extras.note } : {}),
+  };
+}
+
+/**
+ * Built-in provider catalog. Grouping is for readability only; order is not
+ * significant to callers. To add a preset, append a `preset(...)` call with a
+ * unique `id` and the address `domains` you want auto-detected.
+ */
 export const emailProviders: EmailProvider[] = [
-  {
-    id: 'gmail',
-    name: 'Gmail',
-    displayName: 'Google Mail',
-    iconUrl: 'https://cdn.jsdelivr.net/npm/simple-icons@v10/icons/gmail.svg',
-    color: '#EA4335',
-    imapHost: 'imap.gmail.com',
-    imapPort: 993,
-    imapSecurity: 'SSL',
-    smtpHost: 'smtp.gmail.com',
-    smtpPort: 465,
-    smtpSecurity: 'SSL',
-    domains: ['gmail.com', 'googlemail.com'],
-    helpUrl: 'https://support.google.com/mail/answer/7126229',
-    requiresAppPassword: true,
-    oauth2Supported: true,
-    notes: 'Requires app-specific password or OAuth2. Enable "Less secure app access" or use App Password with 2FA.'
-  },
-  {
-    id: 'outlook',
-    name: 'Outlook',
-    displayName: 'Microsoft Outlook',
-    iconUrl: 'https://cdn.jsdelivr.net/npm/simple-icons@v10/icons/microsoftoutlook.svg',
-    color: '#0078D4',
-    imapHost: 'outlook.office365.com',
-    imapPort: 993,
-    imapSecurity: 'TLS',
-    smtpHost: 'smtp-mail.outlook.com',
-    smtpPort: 587,
-    smtpSecurity: 'STARTTLS',
-    domains: ['outlook.com', 'hotmail.com', 'live.com', 'msn.com'],
-    helpUrl: 'https://support.microsoft.com/en-us/office/pop-imap-and-smtp-settings-8361e398-8af4-4e97-b147-6c6c4ac95353',
-    oauth2Supported: true
-  },
-  {
-    id: 'yahoo',
-    name: 'Yahoo',
-    displayName: 'Yahoo Mail',
-    iconUrl: 'https://cdn.jsdelivr.net/npm/simple-icons@v10/icons/yahoo.svg',
-    color: '#6001D2',
-    imapHost: 'imap.mail.yahoo.com',
-    imapPort: 993,
-    imapSecurity: 'SSL',
-    smtpHost: 'smtp.mail.yahoo.com',
-    smtpPort: 465,
-    smtpSecurity: 'SSL',
-    domains: ['yahoo.com', 'yahoo.de', 'yahoo.co.uk', 'ymail.com'],
-    helpUrl: 'https://help.yahoo.com/kb/SLN4075.html',
-    requiresAppPassword: true,
-    notes: 'Requires app-specific password. Generate one in Yahoo Account Security settings.'
-  },
-  {
-    id: 'icloud',
-    name: 'iCloud',
-    displayName: 'Apple iCloud Mail',
-    iconUrl: 'https://cdn.jsdelivr.net/npm/simple-icons@v10/icons/icloud.svg',
-    color: '#007AFF',
-    imapHost: 'imap.mail.me.com',
-    imapPort: 993,
-    imapSecurity: 'SSL',
-    smtpHost: 'smtp.mail.me.com',
-    smtpPort: 587,
-    smtpSecurity: 'STARTTLS',
-    domains: ['icloud.com', 'me.com', 'mac.com'],
-    helpUrl: 'https://support.apple.com/en-us/HT202304',
-    requiresAppPassword: true,
-    notes: 'Requires app-specific password if 2FA is enabled.'
-  },
-  {
-    id: 'gmx',
-    name: 'GMX',
-    displayName: 'GMX Mail',
-    iconUrl: 'https://upload.wikimedia.org/wikipedia/commons/4/4e/GMX_logo.svg',
-    color: '#FF6900',
-    imapHost: 'imap.gmx.net',
-    imapPort: 993,
-    imapSecurity: 'SSL',
-    smtpHost: 'mail.gmx.net',
-    smtpPort: 587,
-    smtpSecurity: 'STARTTLS',
-    domains: ['gmx.net', 'gmx.de', 'gmx.at', 'gmx.ch', 'gmx.com'],
-    helpUrl: 'https://support.gmx.com/pop-imap/imap/index.html'
-  },
-  {
-    id: 'webde',
-    name: 'Web.de',
-    displayName: 'WEB.DE Mail',
-    iconUrl: 'https://upload.wikimedia.org/wikipedia/commons/f/f2/Web.de_logo.svg',
-    color: '#FFCC00',
-    imapHost: 'imap.web.de',
-    imapPort: 993,
-    imapSecurity: 'SSL',
-    smtpHost: 'smtp.web.de',
-    smtpPort: 587,
-    smtpSecurity: 'STARTTLS',
-    domains: ['web.de'],
-    helpUrl: 'https://hilfe.web.de/pop-imap/imap/index.html'
-  },
-  {
-    id: 'ionos',
-    name: 'IONOS',
-    displayName: 'IONOS Mail (1&1)',
-    iconUrl: 'https://cdn.jsdelivr.net/npm/simple-icons@v10/icons/ionos.svg',
-    color: '#003D8F',
-    imapHost: 'imap.ionos.de',
-    imapPort: 993,
-    imapSecurity: 'SSL',
-    smtpHost: 'smtp.ionos.de',
-    smtpPort: 587,
-    smtpSecurity: 'STARTTLS',
-    domains: ['ionos.de', '1und1.de', '1and1.com'],
-    helpUrl: 'https://www.ionos.de/hilfe/e-mail/e-mail-konto-in-e-mail-programm-einrichten/imap-posteingangsserver-und-postausgangsserver/',
-    notes: 'Use your full email address as username.'
-  },
-  {
-    id: 'mailbox',
-    name: 'Mailbox.org',
-    displayName: 'mailbox.org',
-    iconUrl: 'https://mailbox.org/favicon.ico',
-    color: '#5CB85C',
-    imapHost: 'imap.mailbox.org',
-    imapPort: 993,
-    imapSecurity: 'TLS',
-    smtpHost: 'smtp.mailbox.org',
-    smtpPort: 587,
-    smtpSecurity: 'STARTTLS',
-    domains: ['mailbox.org'],
-    helpUrl: 'https://kb.mailbox.org/en/private/e-mail-article/manual-configuration-of-e-mail-programs'
-  },
-  {
-    id: 'posteo',
-    name: 'Posteo',
-    displayName: 'Posteo',
-    iconUrl: 'https://posteo.de/favicon.ico',
-    color: '#8CC63F',
-    imapHost: 'posteo.de',
-    imapPort: 993,
-    imapSecurity: 'TLS',
-    smtpHost: 'posteo.de',
-    smtpPort: 587,
-    smtpSecurity: 'STARTTLS',
-    domains: ['posteo.de', 'posteo.net'],
-    helpUrl: 'https://posteo.de/en/help/how-do-i-set-up-posteo-in-an-email-client-pop3-imap-and-smtp'
-  },
-  {
-    id: 'aol',
-    name: 'AOL',
-    displayName: 'AOL Mail',
-    iconUrl: 'https://cdn.jsdelivr.net/npm/simple-icons@v10/icons/aol.svg',
-    color: '#FF0B00',
-    imapHost: 'imap.aol.com',
-    imapPort: 993,
-    imapSecurity: 'SSL',
-    smtpHost: 'smtp.aol.com',
-    smtpPort: 465,
-    smtpSecurity: 'SSL',
-    domains: ['aol.com', 'aol.de'],
-    helpUrl: 'https://help.aol.com/articles/how-do-i-use-other-email-applications-to-send-and-receive-my-aol-mail',
-    requiresAppPassword: true
-  },
-  {
-    id: 'office365',
-    name: 'Office365',
-    displayName: 'Microsoft 365',
-    iconUrl: 'https://cdn.jsdelivr.net/npm/simple-icons@v10/icons/microsoft365.svg',
-    color: '#0078D4',
-    imapHost: 'outlook.office365.com',
-    imapPort: 993,
-    imapSecurity: 'TLS',
-    smtpHost: 'smtp.office365.com',
-    smtpPort: 587,
-    smtpSecurity: 'STARTTLS',
-    domains: [],
-    helpUrl: 'https://support.microsoft.com/en-us/office/pop-imap-and-smtp-settings-8361e398-8af4-4e97-b147-6c6c4ac95353',
-    notes: 'For business/organization accounts. Use full email as username.',
-    oauth2Supported: true
-  },
-  {
-    id: 'zoho',
-    name: 'Zoho',
-    displayName: 'Zoho Mail',
-    iconUrl: 'https://cdn.jsdelivr.net/npm/simple-icons@v10/icons/zoho.svg',
-    color: '#C83C2B',
-    imapHost: 'imap.zoho.com',
-    imapPort: 993,
-    imapSecurity: 'SSL',
-    smtpHost: 'smtp.zoho.com',
-    smtpPort: 465,
-    smtpSecurity: 'SSL',
-    domains: ['zoho.com', 'zohomail.com'],
-    helpUrl: 'https://www.zoho.com/mail/help/imap-access.html',
-    notes: 'Enable IMAP access in Zoho Mail settings first.'
-  },
-  {
-    id: 'protonmail',
-    name: 'ProtonMail',
-    displayName: 'Proton Mail',
-    iconUrl: 'https://cdn.jsdelivr.net/npm/simple-icons@v10/icons/protonmail.svg',
-    color: '#6D4AFF',
-    imapHost: '127.0.0.1',
-    imapPort: 1143,
-    imapSecurity: 'STARTTLS',
-    smtpHost: '127.0.0.1',
-    smtpPort: 1025,
-    smtpSecurity: 'STARTTLS',
-    domains: ['protonmail.com', 'proton.me', 'pm.me'],
-    helpUrl: 'https://proton.me/support/protonmail-bridge-install',
-    notes: 'Requires ProtonMail Bridge application running locally. Paid accounts only.'
-  },
-  {
-    id: 'fastmail',
-    name: 'Fastmail',
-    displayName: 'Fastmail',
-    iconUrl: 'https://cdn.jsdelivr.net/npm/simple-icons@v10/icons/fastmail.svg',
-    color: '#2E5CFF',
-    imapHost: 'imap.fastmail.com',
-    imapPort: 993,
-    imapSecurity: 'SSL',
-    smtpHost: 'smtp.fastmail.com',
-    smtpPort: 465,
-    smtpSecurity: 'SSL',
-    domains: ['fastmail.com', 'fastmail.fm'],
-    helpUrl: 'https://www.fastmail.help/hc/en-us/articles/1500000278342',
-    requiresAppPassword: true,
-    notes: 'Requires app-specific password. Create one in Settings > Privacy & Security.'
-  },
-  {
-    id: 'hostinger',
-    name: 'Hostinger',
-    displayName: 'Hostinger Email',
-    iconUrl: '/images/providers/hostinger_logo.svg',
-    color: '#673AB7',
-    imapHost: 'imap.hostinger.com',
-    imapPort: 993,
-    imapSecurity: 'TLS',
-    smtpHost: 'smtp.hostinger.com',
-    smtpPort: 465,
-    smtpSecurity: 'TLS',
-    domains: [],
-    helpUrl: 'https://support.hostinger.com/en/articles/1583419-how-to-set-up-an-email-account-on-an-email-client',
-    notes: 'For Hostinger-hosted email accounts. Use full email address as username.'
-  },
-  {
-    id: 'custom',
-    name: 'Custom',
-    displayName: 'Custom/Other Provider',
-    iconUrl: 'https://cdn.jsdelivr.net/npm/simple-icons@v10/icons/mail.svg',
-    color: '#6B7280',
-    imapHost: '',
-    imapPort: 993,
-    imapSecurity: 'SSL',
-    domains: [],
-    notes: 'Enter your email provider\'s IMAP settings manually.'
-  }
+  // Major consumer webmail
+  preset('gmail', 'Gmail', 'Google Mail', si('gmail'), '#EA4335',
+    ['imap.gmail.com', 993, 'SSL'], ['smtp.gmail.com', 465, 'SSL'],
+    ['gmail.com', 'googlemail.com'],
+    { help: 'https://support.google.com/mail/answer/7126229', appPassword: true, oauth2: true,
+      note: 'Use an app password (with 2-step verification enabled) or OAuth2; basic password login is disabled by Google.' }),
+
+  preset('outlook', 'Outlook', 'Microsoft Outlook', si('microsoftoutlook'), '#0078D4',
+    ['outlook.office365.com', 993, 'TLS'], ['smtp-mail.outlook.com', 587, 'STARTTLS'],
+    ['outlook.com', 'hotmail.com', 'live.com', 'msn.com'],
+    { help: 'https://support.microsoft.com/en-us/office/pop-imap-and-smtp-settings-8361e398-8af4-4e97-b147-6c6c4ac95353', oauth2: true }),
+
+  preset('yahoo', 'Yahoo', 'Yahoo Mail', si('yahoo'), '#6001D2',
+    ['imap.mail.yahoo.com', 993, 'SSL'], ['smtp.mail.yahoo.com', 465, 'SSL'],
+    ['yahoo.com', 'yahoo.de', 'yahoo.co.uk', 'ymail.com'],
+    { help: 'https://help.yahoo.com/kb/SLN4075.html', appPassword: true,
+      note: 'Generate an app password under Yahoo Account Security; your normal password will not work for IMAP.' }),
+
+  preset('icloud', 'iCloud', 'Apple iCloud Mail', si('icloud'), '#007AFF',
+    ['imap.mail.me.com', 993, 'SSL'], ['smtp.mail.me.com', 587, 'STARTTLS'],
+    ['icloud.com', 'me.com', 'mac.com'],
+    { help: 'https://support.apple.com/en-us/HT202304', appPassword: true,
+      note: 'With two-factor authentication on, create an app-specific password to sign in.' }),
+
+  preset('aol', 'AOL', 'AOL Mail', si('aol'), '#FF0B00',
+    ['imap.aol.com', 993, 'SSL'], ['smtp.aol.com', 465, 'SSL'],
+    ['aol.com', 'aol.de'],
+    { help: 'https://help.aol.com/articles/how-do-i-use-other-email-applications-to-send-and-receive-my-aol-mail', appPassword: true }),
+
+  // Microsoft 365 (business)
+  preset('office365', 'Office365', 'Microsoft 365', si('microsoft365'), '#0078D4',
+    ['outlook.office365.com', 993, 'TLS'], ['smtp.office365.com', 587, 'STARTTLS'],
+    [],
+    { help: 'https://support.microsoft.com/en-us/office/pop-imap-and-smtp-settings-8361e398-8af4-4e97-b147-6c6c4ac95353', oauth2: true,
+      note: 'For business/organization accounts; authenticate with the full email address as the username.' }),
+
+  // Privacy-focused providers
+  preset('protonmail', 'ProtonMail', 'Proton Mail', si('protonmail'), '#6D4AFF',
+    ['127.0.0.1', 1143, 'STARTTLS'], ['127.0.0.1', 1025, 'STARTTLS'],
+    ['protonmail.com', 'proton.me', 'pm.me'],
+    { help: 'https://proton.me/support/protonmail-bridge-install',
+      note: 'Requires the Proton Mail Bridge running locally (paid plans only); host and port point at the bridge.' }),
+
+  preset('posteo', 'Posteo', 'Posteo', 'https://posteo.de/favicon.ico', '#8CC63F',
+    ['posteo.de', 993, 'TLS'], ['posteo.de', 587, 'STARTTLS'],
+    ['posteo.de', 'posteo.net'],
+    { help: 'https://posteo.de/en/help/how-do-i-set-up-posteo-in-an-email-client-pop3-imap-and-smtp' }),
+
+  preset('mailbox', 'Mailbox.org', 'mailbox.org', 'https://mailbox.org/favicon.ico', '#5CB85C',
+    ['imap.mailbox.org', 993, 'TLS'], ['smtp.mailbox.org', 587, 'STARTTLS'],
+    ['mailbox.org'],
+    { help: 'https://kb.mailbox.org/en/private/e-mail-article/manual-configuration-of-e-mail-programs' }),
+
+  // Independent / premium
+  preset('fastmail', 'Fastmail', 'Fastmail', si('fastmail'), '#2E5CFF',
+    ['imap.fastmail.com', 993, 'SSL'], ['smtp.fastmail.com', 465, 'SSL'],
+    ['fastmail.com', 'fastmail.fm'],
+    { help: 'https://www.fastmail.help/hc/en-us/articles/1500000278342', appPassword: true,
+      note: 'Create an app password under Settings → Privacy & Security; the master password is not accepted for IMAP.' }),
+
+  preset('zoho', 'Zoho', 'Zoho Mail', si('zoho'), '#C83C2B',
+    ['imap.zoho.com', 993, 'SSL'], ['smtp.zoho.com', 465, 'SSL'],
+    ['zoho.com', 'zohomail.com'],
+    { help: 'https://www.zoho.com/mail/help/imap-access.html',
+      note: 'Turn on IMAP access in Zoho Mail settings before connecting.' }),
+
+  // German / EU ISPs
+  preset('gmx', 'GMX', 'GMX Mail', 'https://upload.wikimedia.org/wikipedia/commons/4/4e/GMX_logo.svg', '#FF6900',
+    ['imap.gmx.net', 993, 'SSL'], ['mail.gmx.net', 587, 'STARTTLS'],
+    ['gmx.net', 'gmx.de', 'gmx.at', 'gmx.ch', 'gmx.com'],
+    { help: 'https://support.gmx.com/pop-imap/imap/index.html' }),
+
+  preset('webde', 'Web.de', 'WEB.DE Mail', 'https://upload.wikimedia.org/wikipedia/commons/f/f2/Web.de_logo.svg', '#FFCC00',
+    ['imap.web.de', 993, 'SSL'], ['smtp.web.de', 587, 'STARTTLS'],
+    ['web.de'],
+    { help: 'https://hilfe.web.de/pop-imap/imap/index.html' }),
+
+  preset('ionos', 'IONOS', 'IONOS Mail (1&1)', si('ionos'), '#003D8F',
+    ['imap.ionos.de', 993, 'SSL'], ['smtp.ionos.de', 587, 'STARTTLS'],
+    ['ionos.de', '1und1.de', '1and1.com'],
+    { help: 'https://www.ionos.de/hilfe/e-mail/e-mail-konto-in-e-mail-programm-einrichten/imap-posteingangsserver-und-postausgangsserver/',
+      note: 'Sign in with your full email address as the username.' }),
+
+  // Generic hosting
+  preset('hostinger', 'Hostinger', 'Hostinger Email', '/images/providers/hostinger_logo.svg', '#673AB7',
+    ['imap.hostinger.com', 993, 'TLS'], ['smtp.hostinger.com', 465, 'TLS'],
+    [],
+    { help: 'https://support.hostinger.com/en/articles/1583419-how-to-set-up-an-email-account-on-an-email-client',
+      note: 'For mailboxes hosted on Hostinger; use the full email address as the username.' }),
+
+  // Manual fallback (receive-only template; no SMTP defaults)
+  preset('custom', 'Custom', 'Custom/Other Provider', si('mail'), '#6B7280',
+    ['', 993, 'SSL'], null,
+    [],
+    { note: "Enter your provider's IMAP and SMTP settings manually." }),
 ];
 
-export function getProviderByEmail(email: string): EmailProvider | undefined {
-  const domain = email.split('@')[1]?.toLowerCase();
-  if (!domain) return undefined;
-  
-  return emailProviders.find(provider => 
-    provider.domains.some(d => domain.endsWith(d))
-  );
+/** Lower-cased domain portion of an email address, or undefined if malformed. */
+function domainOf(address: string): string | undefined {
+  const at = address.lastIndexOf('@');
+  if (at < 0 || at === address.length - 1) return undefined;
+  return address.slice(at + 1).toLowerCase();
 }
 
-export function getProviderById(id: string): EmailProvider | undefined {
-  return emailProviders.find(provider => provider.id === id);
+/**
+ * Resolve a provider preset from an email address by matching its domain
+ * against each provider's `domains` list. A provider matches when the address
+ * domain ends with one of its listed domains (so subdomains resolve too).
+ * Presets with no domains (e.g. custom/business) are never auto-matched.
+ */
+export function getProviderByEmail(address: string): EmailProvider | undefined {
+  const domain = domainOf(address);
+  if (domain === undefined) {
+    return undefined;
+  }
+  return emailProviders.find((provider) =>
+    provider.domains.some((known) => domain.endsWith(known)));
+}
+
+/** Resolve a provider preset by its stable `id`. */
+export function getProviderById(providerId: string): EmailProvider | undefined {
+  return emailProviders.find((provider) => provider.id === providerId);
 }
