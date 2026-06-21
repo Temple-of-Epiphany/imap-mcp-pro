@@ -32,6 +32,31 @@ export interface EmailUnsubscribeData {
   unsubscribe_info: ExtractedUnsubscribeInfo;
 }
 
+/**
+ * Read a raw header value. mailparser groups `List-*` headers under a single
+ * `list` object, so `headers.get('list-unsubscribe')` is always undefined — the
+ * verbatim value (with the `<...>` link brackets we need) only survives in
+ * `headerLines`. Fall back to the headers Map for ordinary headers.
+ */
+function rawHeaderValue(parsed: ParsedMail, key: string): string | undefined {
+  const lower = key.toLowerCase();
+  const line = parsed.headerLines?.find((h) => h.key === lower);
+  if (line?.line) {
+    const idx = line.line.indexOf(':');
+    return (idx >= 0 ? line.line.slice(idx + 1) : line.line).trim();
+  }
+  const v = parsed.headers.get(lower);
+  return v != null ? String(v) : undefined;
+}
+
+/** Comma-joined address list from a mailparser AddressObject (or undefined). */
+function addressText(a?: AddressObject | AddressObject[]): string | undefined {
+  if (!a) return undefined;
+  const objs = Array.isArray(a) ? a : [a];
+  const addrs = objs.flatMap((o) => (o.value || []).map((v) => v.address).filter(Boolean));
+  return addrs.length ? addrs.join(', ') : undefined;
+}
+
 export class UnsubscribeService {
   private db: DatabaseService;
 
@@ -53,13 +78,33 @@ export class UnsubscribeService {
   }
 
   /**
+   * Read-only one-pass extraction: parse the raw source and return the
+   * unsubscribe info (header + body links) together with sender, recipient,
+   * and subject. Used by the bulk read-only tool — no DB write.
+   */
+  async extractWithMeta(source: string | Buffer): Promise<{
+    from?: string;
+    to?: string;
+    subject?: string;
+    info: ExtractedUnsubscribeInfo;
+  }> {
+    const parsed = await simpleParser(source);
+    return {
+      from: addressText(parsed.from),
+      to: addressText(parsed.to),
+      subject: parsed.subject,
+      info: this.extractFromParsedEmail(parsed),
+    };
+  }
+
+  /**
    * Extract unsubscribe information from parsed email
    */
   extractFromParsedEmail(parsed: ParsedMail): ExtractedUnsubscribeInfo {
     const result: ExtractedUnsubscribeInfo = {};
 
     // 1. Check List-Unsubscribe header (RFC 2369)
-    const listUnsubHeader = parsed.headers.get('list-unsubscribe');
+    const listUnsubHeader = rawHeaderValue(parsed, 'list-unsubscribe');
     if (listUnsubHeader) {
       result.list_unsubscribe_header = String(listUnsubHeader);
 
@@ -81,7 +126,7 @@ export class UnsubscribeService {
     }
 
     // 2. Check List-Unsubscribe-Post header (RFC 8058 - One-Click Unsubscribe)
-    const listUnsubPost = parsed.headers.get('list-unsubscribe-post');
+    const listUnsubPost = rawHeaderValue(parsed, 'list-unsubscribe-post');
     if (listUnsubPost && !result.unsubscribe_link) {
       // This header indicates one-click unsubscribe support
       // The List-Unsubscribe header contains the URL
