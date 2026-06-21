@@ -5,6 +5,19 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.21.0] - 2026-06-21
+
+Message priority management, a large-folder reliability fix, and a drift-proof tool catalog. Tools 107 → 109; test suite 172 → 181.
+
+### Added
+- **Message priority** (#48) — `imap_set_email_priority` / `imap_get_email_priority` (high / normal / low). IMAP messages are immutable, so priority is *set* via a custom IMAP keyword (`$Priority-High` / `$Priority-Low`; "normal" clears it) and *read* by preferring that keyword, then the compose-time `X-Priority` / `Importance` / `X-MSMail-Priority` header, then normal. The set result reports whether the server accepted the custom keyword; the get result reports its `source`.
+
+### Fixed
+- **`imap_extract_unsubscribe_links` no longer times out on large folders** (#131). It now reads each message's `List-Unsubscribe` header cheaply (one streaming fetch, no body download) and only falls back to a full-body fetch on a header miss when `scanBodies` is on. An internal time budget (`maxDurationMs`, default 50s) guarantees a response: on timeout it returns a partial result with `truncated: true` and `nextUid`, resumable via the new `afterUid` cursor. This also fixes a latent bug where the old body-only parse never saw the real `List-Unsubscribe` header.
+
+### Documentation
+- **Generated, drift-proof tool catalog** (#201) — `docs/TOOL_CATALOG.md` is now generated from the live manifest on every build (`scripts/gen-tool-catalog.mjs`, wired into postbuild), so the documented catalog can't drift from the registered tools. Prose tool counts switched to "100+"; the exact count lives in the catalog and `imap_list_tools`. Historical working docs got staleness banners. Wiki reconciliation tracked in #218. (#201 closed.)
+
 ## [2.20.0] - 2026-06-21
 
 Multi-folder size cleanup, capability-aware SMTP, and a documentation accuracy pass. Tools 106 → 107; test suite 164 → 172.
