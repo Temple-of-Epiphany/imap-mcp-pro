@@ -128,4 +128,16 @@ describe('MessageExportService.writeAttachments', () => {
     expect(res.files[0].savedAs).not.toMatch(/[\\/]/);
     expect(res.files[0].savedAs.startsWith('uid1_')).toBe(true);
   });
+
+  it('keeps every written file inside the output dir for adversarial names (path-traversal guard, #203)', async () => {
+    const out = path.join(dir, 'att4');
+    const res = await svc.writeAttachments(out, [
+      { uid: 1, filename: '../../../../etc/passwd', content: Buffer.from('a'), contentType: 'text/plain' },
+      { uid: 2, filename: '..\\..\\windows\\system32\\evil', content: Buffer.from('b'), contentType: 'text/plain' },
+    ]);
+    const base = path.resolve(out);
+    for (const f of res.files) {
+      expect(path.resolve(f.path).startsWith(base + path.sep)).toBe(true); // never escapes
+    }
+  });
 });
