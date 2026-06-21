@@ -176,6 +176,60 @@ function buildSearchCriteria(raw: Record<string, any>): Record<string, any> {
   return criteria;
 }
 
+/** Summary returned by the folder/account export helpers (no per-file list — could be huge). */
+interface FolderExportSummary {
+  folder: string;
+  outputDir: string;
+  totalInFolder: number;
+  exported: number;
+  truncated: boolean;
+  totalBytes: number;
+  totalSize: string;
+}
+
+/**
+ * Export up to `limit` messages of one folder to .eml on disk, mirroring the
+ * folder hierarchy under `{outbox}/exports/[subfolder]/{folder path}/`. Raw
+ * sources are fetched in chunks of 100 to keep memory and the IMAP fetch bounded.
+ */
+async function exportFolderToDisk(
+  imapService: ImapService,
+  exporter: MessageExportService,
+  userId: string,
+  accountId: string,
+  folder: string,
+  limit: number,
+  subfolder?: string,
+  // Return type is inferred (FolderExportSummary) — an explicit Promise<…>
+  // annotation here trips the angle-bracket description lint's approximate scanner.
+) {
+  const all = await imapService.searchEmails(accountId, folder, {});
+  const uids = all.map((m) => m.uid);
+  const selected = uids.slice(0, limit);
+
+  const seg = subfolder ? sanitizeFilename(subfolder).replace(/[\\/]/g, '') : '';
+  const outputDir = path.join(getOutboxDir(userId), 'exports', seg, exporter.folderToDiskPath(folder));
+
+  let exported = 0;
+  let totalBytes = 0;
+  for (let i = 0; i < selected.length; i += 100) {
+    const items = await imapService.getRawMessages(accountId, folder, selected.slice(i, i + 100));
+    const res = await exporter.exportEml(outputDir, items);
+    exported += res.count;
+    totalBytes += res.totalBytes;
+  }
+
+  return {
+    folder,
+    outputDir,
+    totalInFolder: uids.length,
+    exported,
+    truncated: uids.length > selected.length,
+    totalBytes,
+    totalSize: humanBytes(totalBytes),
+  };
+}
+
 export function emailTools(
   server: McpServer,
   imapService: ImapService,
@@ -414,6 +468,68 @@ export function emailTools(
       files: result.files.map(f => ({ uid: f.uid, filename: f.filename, path: f.path, size: humanBytes(f.bytes) })),
       requestedUids: uids,
       missingUids: uids.filter(u => !messages.some(m => m.uid === u)),
+    });
+  }));
+
+  // Export a whole folder to .eml files, mirroring the folder name on disk (#170)
+  server.registerTool('imap_export_folder', {
+    description:
+      'Export all messages in a folder to standard .eml files on the server host, mirroring the folder ' +
+      'hierarchy under the per-user outbox (exports/[subfolder]/{folder path}/). Capped by `limit` ' +
+      '(default 1000; `truncated` flags when the folder held more). Lossless raw-source write. Local only.',
+    inputSchema: {
+      accountId: z.string().describe('Account ID'),
+      folder: z.string().default('INBOX').describe('Folder to export (default: INBOX)'),
+      limit: z.number().optional().default(1000).describe('Maximum messages to export (default 1000)'),
+      subfolder: z.string().optional().describe('Optional top-level subfolder under exports/ to group this export'),
+    }
+  }, withErrorHandling(async ({ accountId, folder, limit, subfolder }) => {
+    const userId = resolveUserId(db) ?? 'default';
+    const summary = await exportFolderToDisk(
+      imapService, new MessageExportService(), userId, accountId, folder, limit ?? 1000, subfolder,
+    );
+    return jsonResult({ success: true, format: 'eml', ...summary });
+  }));
+
+  // Export every folder of the account, mirroring the full mailbox structure (#170)
+  server.registerTool('imap_export_account', {
+    description:
+      'Export the entire account to .eml files, mirroring the full mailbox folder structure under ' +
+      'exports/[subfolder]/. Skips non-selectable folders (\\Noselect). Each folder is capped by ' +
+      '`perFolderLimit` (default 1000). Fetched in chunks. Local only — can be large.',
+    inputSchema: {
+      accountId: z.string().describe('Account ID'),
+      perFolderLimit: z.number().optional().default(1000).describe('Max messages to export per folder (default 1000)'),
+      subfolder: z.string().optional().describe('Optional top-level subfolder under exports/ to group this export'),
+    }
+  }, withErrorHandling(async ({ accountId, perFolderLimit, subfolder }) => {
+    const userId = resolveUserId(db) ?? 'default';
+    const exporter = new MessageExportService();
+    const folders = await imapService.listFolders(accountId);
+    const selectable = folders.filter(
+      (f) => !f.attributes?.some((a: unknown) => /^\\(Noselect|NonExistent)$/i.test(String(a))),
+    );
+
+    const perFolder: FolderExportSummary[] = [];
+    for (const f of selectable) {
+      try {
+        perFolder.push(await exportFolderToDisk(imapService, exporter, userId, accountId, f.name, perFolderLimit ?? 1000, subfolder));
+      } catch (e: any) {
+        perFolder.push({ folder: f.name, outputDir: '', totalInFolder: 0, exported: 0, truncated: false, totalBytes: 0, totalSize: e?.message ?? 'export failed' });
+      }
+    }
+
+    const totalExported = perFolder.reduce((s, p) => s + p.exported, 0);
+    const totalBytes = perFolder.reduce((s, p) => s + p.totalBytes, 0);
+    return jsonResult({
+      success: true,
+      format: 'eml',
+      foldersExported: perFolder.length,
+      totalExported,
+      totalBytes,
+      totalSize: humanBytes(totalBytes),
+      baseDir: path.join(getOutboxDir(userId), 'exports', subfolder ? sanitizeFilename(subfolder).replace(/[\\/]/g, '') : ''),
+      folders: perFolder.map((p) => ({ folder: p.folder, exported: p.exported, truncated: p.truncated, size: p.totalSize })),
     });
   }));
 
