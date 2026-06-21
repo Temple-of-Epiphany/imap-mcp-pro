@@ -5,6 +5,20 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.20.0] - 2026-06-21
+
+Multi-folder size cleanup, capability-aware SMTP, and a documentation accuracy pass. Tools 106 → 107; test suite 164 → 172.
+
+### Added
+- **`imap_get_largest_emails`** (#200) — find the top-N largest messages across several folders at once (default `["INBOX"]`). Multi-folder extension of `imap_get_email_sizes`: scans each folder via RFC822.SIZE (no body download), merges and ranks globally, tags each row with its folder, and returns per-folder `uids` arrays ready for `imap_bulk_delete_emails` / `imap_bulk_move_emails`. Unreadable/`\Noselect` folders are skipped and reported.
+
+### Changed
+- **Capability-aware SMTP SIZE limits** (#191) — outgoing mail now respects the SMTP server's advertised EHLO `SIZE` (RFC 1870). `imap_test_smtp` reports the limit (`sizeLimit` / `sizeLimitHuman`); sends exceeding `min(configured cap, server limit)` fail fast with a clear, human-readable message instead of a doomed 552 round-trip. The compiled message is measured exactly (base64 overhead included — no estimate). New optional env override `IMAP_MCP_MAX_SEND_SIZE_BYTES` (0/unset = no cap). No behavior change when no limit is known.
+
+### Documentation
+- **Tool counts corrected and single-sourced** (#201) — README/manifest/SPECIFICATION/ARCHITECTURE now report the real count and point to `imap_list_tools` as the authoritative runtime catalog.
+- **Removed the inaccurate "OS keyring" credential-storage claim** from the `.mcpb` manifest, README, MIGRATION, and the `ENCRYPTION_KEY` hint — `keytar`/SQLCipher were removed in #181; storage is file-based AES-256-GCM (`~/.imap-mcp/.encryption-key`, mode 600). Marked the v2.5.0 `SECURITY_SCAN_REPORT.md` historical (its AccountManager/SQLCipher findings are resolved). Documented the v2.17–v2.19 tool additions in SPECIFICATION.
+
 ## [2.19.0] - 2026-06-21
 
 Mailbox-cleanup tooling, local export, and a security-hardening pass. Tools 99 → 106; test suite 87 → 164.
