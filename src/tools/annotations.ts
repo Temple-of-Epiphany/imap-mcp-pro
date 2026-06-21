@@ -69,6 +69,7 @@ export const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
   'imap_export_email':                 READ_REMOTE,
   'imap_export_folder':                READ_REMOTE,
   'imap_export_account':               READ_REMOTE,
+  'imap_extract_attachments':          READ_REMOTE,
   'imap_get_unsubscribe_links_for':    READ_REMOTE,
   'imap_get_unread_count':             READ_REMOTE,
   'imap_bulk_get_emails':              READ_REMOTE,

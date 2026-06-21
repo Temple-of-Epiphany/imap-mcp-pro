@@ -94,3 +94,38 @@ describe('MessageExportService.exportEml', () => {
     expect(res).toMatchObject({ count: 0, totalBytes: 0, files: [] });
   });
 });
+
+describe('MessageExportService.writeAttachments', () => {
+  let dir: string;
+  const svc = new MessageExportService();
+  beforeEach(async () => { dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mexport-att-')); });
+  afterEach(async () => { await fs.rm(dir, { recursive: true, force: true }); });
+
+  it('writes attachments UID-prefixed with verbatim bytes', async () => {
+    const out = path.join(dir, 'att');
+    const res = await svc.writeAttachments(out, [
+      { uid: 5, filename: 'report.pdf', content: Buffer.from('PDFBYTES'), contentType: 'application/pdf' },
+    ]);
+    expect(res.count).toBe(1);
+    expect(res.files[0].savedAs).toBe('uid5_report.pdf');
+    expect((await fs.readFile(res.files[0].path)).toString()).toBe('PDFBYTES');
+  });
+
+  it('disambiguates duplicate filenames within the same UID', async () => {
+    const res = await svc.writeAttachments(path.join(dir, 'att2'), [
+      { uid: 9, filename: 'a.txt', content: Buffer.from('one'), contentType: 'text/plain' },
+      { uid: 9, filename: 'a.txt', content: Buffer.from('two'), contentType: 'text/plain' },
+    ]);
+    const names = res.files.map((f) => f.savedAs);
+    expect(new Set(names).size).toBe(2);          // no collision
+    expect(names).toContain('uid9_a.txt');
+  });
+
+  it('sanitizes unsafe attachment names and falls back when empty', async () => {
+    const res = await svc.writeAttachments(path.join(dir, 'att3'), [
+      { uid: 1, filename: '../../etc/passwd', content: Buffer.from('x'), contentType: 'text/plain' },
+    ]);
+    expect(res.files[0].savedAs).not.toMatch(/[\\/]/);
+    expect(res.files[0].savedAs.startsWith('uid1_')).toBe(true);
+  });
+});
