@@ -12,7 +12,8 @@
 
 import fs from 'fs';
 import path from 'path';
-import yaml from 'js-yaml';
+// js-yaml 5.x is ESM with named exports only — no default export (#209).
+import { load as yamlLoad } from 'js-yaml';
 import toml from '@iarna/toml';
 import { z } from 'zod';
 import {
@@ -126,7 +127,7 @@ function readConfigFile(filePath: string): Record<string, any> {
   const ext = path.extname(filePath).toLowerCase();
   const text = fs.readFileSync(filePath, 'utf8');
   if (ext === '.yaml' || ext === '.yml') {
-    const parsed = yaml.load(text);
+    const parsed = yamlLoad(text);
     if (parsed && typeof parsed === 'object') return parsed as Record<string, any>;
     throw new ConfigError(`Config file at ${filePath} did not parse to an object`, []);
   }
