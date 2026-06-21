@@ -37,6 +37,15 @@ export interface ExportResult {
   files: ExportedFile[];
 }
 
+export interface AttachmentFile {
+  uid: number;
+  filename: string;   // original attachment name
+  savedAs: string;    // collision-safe on-disk name
+  path: string;
+  contentType: string;
+  bytes: number;
+}
+
 /** Collapse a string to a filesystem-safe slug (letters/digits/_/-). */
 function slug(input: string, max = 40): string {
   const s = (input || '')
@@ -98,6 +107,35 @@ export class MessageExportService {
       await fs.writeFile(fullPath, item.source);
       files.push({ uid: item.uid, filename, path: fullPath, bytes: item.source.length });
       totalBytes += item.source.length;
+    }
+
+    return { outputDir, count: files.length, totalBytes, files };
+  }
+
+  /**
+   * Write decoded attachment buffers to `outputDir`. Filenames are sanitized
+   * and made collision-safe by prefixing the source UID (and a counter on
+   * duplicates within the same UID).
+   */
+  async writeAttachments(
+    outputDir: string,
+    items: Array<{ uid: number; filename: string; content: Buffer; contentType: string }>,
+  ): Promise<{ outputDir: string; count: number; totalBytes: number; files: AttachmentFile[] }> {
+    await fs.mkdir(outputDir, { recursive: true, mode: 0o700 });
+
+    const files: AttachmentFile[] = [];
+    const used = new Set<string>();
+    let totalBytes = 0;
+    for (const a of items) {
+      const base = sanitizeFilename(a.filename || 'attachment').replace(/[\\/]/g, '') || 'attachment';
+      let savedAs = `uid${a.uid}_${base}`;
+      for (let n = 1; used.has(savedAs); n++) savedAs = `uid${a.uid}_${n}_${base}`;
+      used.add(savedAs);
+
+      const fullPath = path.join(outputDir, savedAs);
+      await fs.writeFile(fullPath, a.content);
+      files.push({ uid: a.uid, filename: a.filename, savedAs, path: fullPath, contentType: a.contentType, bytes: a.content.length });
+      totalBytes += a.content.length;
     }
 
     return { outputDir, count: files.length, totalBytes, files };

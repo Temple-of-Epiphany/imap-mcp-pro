@@ -1011,6 +1011,38 @@ export class ImapService {
     }, `getRawMessages(${folderName}, ${uids.length} uids)`);
   }
 
+  /**
+   * Fetch and decode the file attachments of a set of UIDs. Parses each raw
+   * source with mailparser and returns the decoded content buffers + metadata.
+   * Used by imap_extract_attachments to save attachments to disk.
+   */
+  async getAttachments(
+    accountId: string,
+    folderName: string,
+    uids: number[]
+  ): Promise<Array<{ uid: number; filename: string; content: Buffer; contentType: string; size: number; inline: boolean; cid?: string }>> {
+    const raws = await this.getRawMessages(accountId, folderName, uids);
+    const out: Array<{ uid: number; filename: string; content: Buffer; contentType: string; size: number; inline: boolean; cid?: string }> = [];
+    for (const r of raws) {
+      const parsed = await simpleParser(r.source);
+      let idx = 0;
+      for (const att of parsed.attachments ?? []) {
+        const content = att.content as Buffer;
+        out.push({
+          uid: r.uid,
+          filename: att.filename || `attachment-${r.uid}-${idx}`,
+          content,
+          contentType: att.contentType || 'application/octet-stream',
+          size: content?.length ?? att.size ?? 0,
+          inline: att.contentDisposition === 'inline' || !!att.related,
+          cid: att.cid,
+        });
+        idx++;
+      }
+    }
+    return out;
+  }
+
   private buildImapFlowSearchQuery(criteria: SearchCriteria): any {
     const query: any = {};
 

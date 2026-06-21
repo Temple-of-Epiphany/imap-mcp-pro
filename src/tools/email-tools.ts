@@ -533,6 +533,49 @@ export function emailTools(
     });
   }));
 
+  // Extract file attachments from a block of messages to disk (#170)
+  server.registerTool('imap_extract_attachments', {
+    description:
+      'Extract file attachments from a block of messages and save them to disk under the per-user outbox ' +
+      '(exports/attachments/[subfolder]/). Skips inline images by default; optionally filter by minSizeBytes ' +
+      'and by file extension. Filenames are sanitized and UID-prefixed to avoid collisions. Local only.',
+    inputSchema: {
+      accountId: z.string().describe('Account ID'),
+      folder: z.string().default('INBOX').describe('Folder containing the messages (default: INBOX)'),
+      uids: z.array(z.number()).min(1).describe('UIDs of the messages to extract attachments from'),
+      includeInline: z.boolean().optional().default(false).describe('Include inline images/related parts (default false)'),
+      minSizeBytes: z.number().optional().describe('Only extract attachments at least this many bytes'),
+      extensions: z.array(z.string()).optional().describe('Only extract these file extensions (e.g. ["pdf","docx"]); omit for all'),
+      subfolder: z.string().optional().describe('Optional subfolder under exports/attachments/ to group the files'),
+    }
+  }, withErrorHandling(async ({ accountId, folder, uids, includeInline, minSizeBytes, extensions, subfolder }) => {
+    const userId = resolveUserId(db) ?? 'default';
+    let attachments = await imapService.getAttachments(accountId, folder, uids);
+
+    if (!includeInline) attachments = attachments.filter((a) => !a.inline);
+    if (minSizeBytes != null) attachments = attachments.filter((a) => a.size >= minSizeBytes);
+    if (extensions && extensions.length > 0) {
+      const exts = new Set(extensions.map((e) => e.toLowerCase().replace(/^\./, '')));
+      attachments = attachments.filter((a) => exts.has(path.extname(a.filename).slice(1).toLowerCase()));
+    }
+
+    const seg = subfolder ? sanitizeFilename(subfolder).replace(/[\\/]/g, '') : '';
+    const outputDir = path.join(getOutboxDir(userId), 'exports', 'attachments', seg);
+    const result = await new MessageExportService().writeAttachments(outputDir, attachments);
+
+    return jsonResult({
+      success: true,
+      folder,
+      outputDir: result.outputDir,
+      count: result.count,
+      totalBytes: result.totalBytes,
+      totalSize: humanBytes(result.totalBytes),
+      files: result.files.map((f) => ({
+        uid: f.uid, filename: f.filename, savedAs: f.savedAs, contentType: f.contentType, size: humanBytes(f.bytes),
+      })),
+    });
+  }));
+
   // Bulk delete emails tool
   // AUTO-CHUNKING: Automatically uses chunked processing for >50 UIDs
   server.registerTool('imap_bulk_delete_emails', {
