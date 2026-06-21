@@ -60,6 +60,7 @@ function makeImapMock(overrides: Record<string, any> = {}) {
     getMultipleMailboxStatus: async () => [
       { mailbox: 'INBOX', messages: 10, unseen: 3, uidNext: 11, uidValidity: 5n, deleted: 0, size: 2 * 1024 * 1024 },
     ],
+    getQuota: async () => ({ path: 'INBOX', storage: { used: 512 * 1024 * 1024, limit: 1024 * 1024 * 1024 } }),
     ...overrides,
   };
 }
@@ -73,6 +74,7 @@ describe('folderTools registration', () => {
       'imap_delete_folder',
       'imap_folder_status',
       'imap_get_mailbox_status',
+      'imap_get_quota',
       'imap_get_unread_count',
       'imap_list_folders',
       'imap_list_subscribed_mailboxes',
@@ -157,5 +159,24 @@ describe('folderTools route outputs', () => {
     const single = await invoke(tools, 'imap_get_mailbox_status', { accountId: 'a', mailboxName: 'INBOX' });
     const array = await invoke(tools, 'imap_get_mailbox_status', { accountId: 'a', mailboxName: ['INBOX'] });
     expect(single).toEqual(array);
+  });
+
+  it('imap_get_quota reports human-readable storage usage + percent', async () => {
+    const out = await invoke(tools, 'imap_get_quota', { accountId: 'a', mailbox: 'INBOX' });
+    expect(out.supported).toBe(true);
+    expect(out.storage).toEqual({
+      used: 512 * 1024 * 1024,
+      limit: 1024 * 1024 * 1024,
+      usedHuman: '512.00 MB',
+      limitHuman: '1.00 GB',
+      percentUsed: 50,
+    });
+  });
+
+  it('imap_get_quota returns supported:false when the server lacks QUOTA', async () => {
+    const made = makeServer();
+    folderTools(made.server as any, makeImapMock({ getQuota: async () => null }) as any, {} as any);
+    const out = await invoke(made.tools, 'imap_get_quota', { accountId: 'a' });
+    expect(out).toMatchObject({ supported: false });
   });
 });
