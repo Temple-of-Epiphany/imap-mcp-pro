@@ -59,12 +59,21 @@ const CLI_FLAG_MAP: Record<string, string> = {
   '--mcp-user-id': 'user.mcpUserId',
 };
 
+/** Path segments that could pollute Object.prototype if used as keys. */
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 /**
  * Set a value at a dotted path in a nested object, creating intermediate
  * objects as needed.
+ *
+ * Prototype-pollution guard: refuse any segment named `__proto__`,
+ * `constructor`, or `prototype`. Dotted paths today come from a fixed internal
+ * ENV_VAR_MAPPING (not user input), so this is defense-in-depth — it keeps the
+ * setter safe if it's ever driven by external data.
  */
 function setPath(obj: any, dotted: string, value: unknown): void {
   const parts = dotted.split('.');
+  if (parts.some((k) => UNSAFE_KEYS.has(k))) return;
   let cur = obj;
   for (let i = 0; i < parts.length - 1; i++) {
     const k = parts[i];

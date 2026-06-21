@@ -131,9 +131,18 @@ jobs:
           ' server.json > server.tmp && mv server.tmp server.json
           cat server.json
 
-      - name: Install mcp-publisher
+      - name: Install mcp-publisher (pinned + checksum-verified)
+        # Pinned to a specific release and SHA-256-verified before extraction —
+        # no `latest`, no pipe-to-tar (closes the Aikido "remote pull without
+        # integrity verification" finding). Job runs on ubuntu-latest → linux_amd64.
         run: |
-          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          set -euo pipefail
+          VERSION=v1.7.9
+          ASSET=mcp-publisher_linux_amd64.tar.gz
+          SHA256=ab128162b0616090b47cf245afe0a23f3ef08936fdce19074f5ba0a4469281ac
+          curl -fsSL -o "$ASSET" "https://github.com/modelcontextprotocol/registry/releases/download/${VERSION}/${ASSET}"
+          echo "${SHA256}  ${ASSET}" | sha256sum -c -
+          tar xzf "$ASSET" mcp-publisher
 
       - name: Authenticate (GitHub OIDC)
         run: ./mcp-publisher login github-oidc
