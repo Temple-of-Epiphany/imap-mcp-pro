@@ -14,6 +14,20 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { sanitizeFilename } from './attachment-validator.js';
 
+/**
+ * Defense-in-depth: refuse to write outside `baseDir`. Callers already sanitize
+ * filenames (basename-stripping) and confine `baseDir` to the per-user outbox,
+ * but this guard makes path traversal impossible at the write site regardless
+ * of caller behavior (closes the Aikido AIK_ts_generic_path_traversal finding).
+ */
+function assertInside(baseDir: string, targetPath: string): void {
+  const base = path.resolve(baseDir);
+  const resolved = path.resolve(targetPath);
+  if (resolved !== base && !resolved.startsWith(base + path.sep)) {
+    throw new Error(`Refusing to write outside the export directory: ${targetPath}`);
+  }
+}
+
 /** One message to write: raw RFC822 source + envelope bits for the filename. */
 export interface ExportItem {
   uid: number;
@@ -104,6 +118,7 @@ export class MessageExportService {
     for (const item of items) {
       const filename = this.buildFilename(item);
       const fullPath = path.join(outputDir, filename);
+      assertInside(outputDir, fullPath);
       await fs.writeFile(fullPath, item.source);
       files.push({ uid: item.uid, filename, path: fullPath, bytes: item.source.length });
       totalBytes += item.source.length;
@@ -133,6 +148,7 @@ export class MessageExportService {
       used.add(savedAs);
 
       const fullPath = path.join(outputDir, savedAs);
+      assertInside(outputDir, fullPath);
       await fs.writeFile(fullPath, a.content);
       files.push({ uid: a.uid, filename: a.filename, savedAs, path: fullPath, contentType: a.contentType, bytes: a.content.length });
       totalBytes += a.content.length;
