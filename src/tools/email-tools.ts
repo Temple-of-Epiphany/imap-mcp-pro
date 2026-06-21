@@ -429,6 +429,72 @@ export function emailTools(
     });
   }));
 
+  // Top-N largest emails across multiple folders (#200) — multi-folder extension
+  // of imap_get_email_sizes. Scans each folder cheaply (RFC822.SIZE, no body),
+  // merges, ranks globally, and returns per-folder UID arrays for bulk cleanup.
+  server.registerTool('imap_get_largest_emails', {
+    description:
+      'Find the largest emails across several folders at once (default: just INBOX) and return the global top-N. ' +
+      'Uses RFC822.SIZE — no body download — so it stays cheap even across big folders. Each row is tagged with the ' +
+      'folder it came from; results are merged and ranked by size across all folders. Unreadable/\\Noselect folders are ' +
+      'skipped and reported. Returns per-folder `uids` arrays (UIDs are only unique within a folder) ready to pass to ' +
+      'imap_bulk_delete_emails / imap_bulk_move_emails to reclaim space.',
+    inputSchema: {
+      accountId: z.string().describe('Account ID'),
+      folders: z.array(z.string()).optional().default(['INBOX']).describe('Folders to scan (default: ["INBOX"])'),
+      topN: z.number().optional().default(20).describe('How many of the largest messages to return overall (default 20)'),
+      minSizeBytes: z.number().optional().describe('Only consider messages at least this many bytes (e.g. 10485760 = 10 MiB)'),
+    }
+  }, withErrorHandling(async ({ accountId, folders, topN, minSizeBytes }) => {
+    const folderList = (folders && folders.length > 0) ? folders : ['INBOX'];
+    const cap = topN ?? 20;
+
+    type Row = { folder: string; uid: number; size: number; subject: string; from: string; date: Date; hasAttachments: boolean };
+    const merged: Row[] = [];
+    const skippedFolders: Array<{ folder: string; reason: string }> = [];
+
+    for (const folder of folderList) {
+      try {
+        const sizes = await imapService.getEmailSizes(accountId, folder);
+        for (const m of sizes) {
+          if (minSizeBytes != null && m.size < minSizeBytes) continue;
+          merged.push({ folder, ...m });
+        }
+      } catch (err) {
+        skippedFolders.push({ folder, reason: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
+    merged.sort((a, b) => b.size - a.size);
+    const top = merged.slice(0, cap);
+    const totalBytes = top.reduce((sum, m) => sum + m.size, 0);
+
+    // Per-folder UID arrays — UIDs are only unique within a folder, and bulk
+    // delete/move operate on (accountId, folder, uids).
+    const uidsByFolder: Record<string, number[]> = {};
+    for (const m of top) (uidsByFolder[m.folder] ??= []).push(m.uid);
+
+    return jsonResult({
+      foldersScanned: folderList.filter(f => !skippedFolders.some(s => s.folder === f)),
+      skippedFolders,
+      matched: merged.length,
+      returned: top.length,
+      totalBytes,
+      totalHuman: humanBytes(totalBytes),
+      messages: top.map(m => ({
+        folder: m.folder,
+        uid: m.uid,
+        size: m.size,
+        sizeHuman: humanBytes(m.size),
+        subject: m.subject,
+        from: m.from,
+        date: toIsoDate(m.date),
+        hasAttachments: m.hasAttachments,
+      })),
+      uidsByFolder,
+    });
+  }));
+
   // Export messages to standard .eml files on disk — download & save (#170)
   server.registerTool('imap_export_email', {
     description:

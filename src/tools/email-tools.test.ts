@@ -154,6 +154,58 @@ describe('emailTools core routes', () => {
   });
 });
 
+describe('imap_get_largest_emails (multi-folder, #200)', () => {
+  // Folder-aware mock: INBOX and Sent return distinct sizes; "Junk" throws (e.g. \Noselect).
+  function multiFolderImap() {
+    return makeImap({
+      getEmailSizes: async (_a: string, folder: string) => {
+        if (folder === 'INBOX') return [
+          { uid: 10, size: 3 * 1024 * 1024, subject: 'inbox-mid', from: 'a@x.com', date: new Date('2026-01-01'), hasAttachments: false },
+          { uid: 11, size: 1 * 1024 * 1024, subject: 'inbox-small', from: 'b@x.com', date: new Date('2026-01-02'), hasAttachments: false },
+        ];
+        if (folder === 'Sent') return [
+          { uid: 20, size: 9 * 1024 * 1024, subject: 'sent-big', from: 'me@x.com', date: new Date('2026-02-01'), hasAttachments: true },
+          { uid: 21, size: 2 * 1024 * 1024, subject: 'sent-small', from: 'me@x.com', date: new Date('2026-02-02'), hasAttachments: false },
+        ];
+        throw new Error(`Mailbox does not exist: ${folder}`);
+      },
+    });
+  }
+
+  it('defaults to INBOX only and ranks largest-first', async () => {
+    const tools = register(multiFolderImap());
+    const out = await invoke(tools, 'imap_get_largest_emails', { accountId: 'a' });
+    expect(out.foldersScanned).toEqual(['INBOX']);
+    expect(out.messages.map((m: any) => m.uid)).toEqual([10, 11]);
+    expect(out.messages[0].folder).toBe('INBOX');
+  });
+
+  it('merges and ranks across folders with per-folder uid arrays', async () => {
+    const tools = register(multiFolderImap());
+    const out = await invoke(tools, 'imap_get_largest_emails', { accountId: 'a', folders: ['INBOX', 'Sent'], topN: 3 });
+    expect(out.returned).toBe(3);
+    // global size-desc: Sent#20 (9M), INBOX#10 (3M), Sent#21 (2M) — INBOX#11 (1M) drops off at topN=3
+    expect(out.messages.map((m: any) => `${m.folder}:${m.uid}`)).toEqual(['Sent:20', 'INBOX:10', 'Sent:21']);
+    expect(out.uidsByFolder).toEqual({ Sent: [20, 21], INBOX: [10] });
+    expect(out.totalHuman).toBe('14.00 MB');
+  });
+
+  it('skips unreadable folders and reports them', async () => {
+    const tools = register(multiFolderImap());
+    const out = await invoke(tools, 'imap_get_largest_emails', { accountId: 'a', folders: ['INBOX', 'Junk'] });
+    expect(out.foldersScanned).toEqual(['INBOX']);
+    expect(out.skippedFolders).toHaveLength(1);
+    expect(out.skippedFolders[0].folder).toBe('Junk');
+    expect(out.skippedFolders[0].reason).toMatch(/does not exist/);
+  });
+
+  it('applies minSizeBytes across all folders', async () => {
+    const tools = register(multiFolderImap());
+    const out = await invoke(tools, 'imap_get_largest_emails', { accountId: 'a', folders: ['INBOX', 'Sent'], minSizeBytes: 3 * 1024 * 1024 });
+    expect(out.messages.map((m: any) => `${m.folder}:${m.uid}`)).toEqual(['Sent:20', 'INBOX:10']);
+  });
+});
+
 describe('emailTools send/reply/forward', () => {
   it('imap_reply_to_email builds Re: subject, threads, and reply-all recipients', async () => {
     let sent: any;
