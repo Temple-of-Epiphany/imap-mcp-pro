@@ -167,6 +167,104 @@ export class DnsFirewallService {
   }
 
   /**
+   * Low-level Quad9 DoH lookup returning the raw DNS rcode + answer count
+   * (rather than queryProvider's safe/unsafe boolean). Returns null when the
+   * provider is unreachable (network error / timeout). Used by testQuad9.
+   *
+   * `protected` so tests can stub it without opening a real socket.
+   */
+  protected async quad9Lookup(
+    domain: string,
+    timeout = this.DEFAULT_TIMEOUT_MS
+  ): Promise<{ status: number; answers: number } | null> {
+    const endpoint = this.getProvider().endpoint;
+    return new Promise((resolve) => {
+      const req = https.request({
+        hostname: endpoint,
+        path: `/dns-query?name=${encodeURIComponent(domain)}&type=A`,
+        method: 'GET',
+        headers: { 'Accept': 'application/dns-json' },
+        timeout,
+      }, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            const response = JSON.parse(data);
+            resolve({
+              status: typeof response.Status === 'number' ? response.Status : -1,
+              answers: Array.isArray(response.Answer) ? response.Answer.length : 0,
+            });
+          } catch {
+            resolve(null);
+          }
+        });
+      });
+      req.on('error', () => resolve(null));
+      req.on('timeout', () => { req.destroy(); resolve(null); });
+      req.end();
+    });
+  }
+
+  /**
+   * Verify Quad9 threat-blocking is active (#65). Resolves a clean control
+   * domain (expected to resolve) and a blocked-test domain (expected to be
+   * NXDOMAIN/empty when filtering is on) via Quad9 DoH, and reports a derived
+   * pass/fail. Since there is no standardized public Quad9 "blocked" test host,
+   * `blockedTestDomain` is configurable — pass a domain you know Quad9 blocks
+   * for a definitive result.
+   */
+  async testQuad9(opts?: {
+    controlDomain?: string;
+    blockedTestDomain?: string;
+    timeoutMs?: number;
+  }): Promise<{
+    quad9Active: boolean;
+    reachable: boolean;
+    control: { domain: string; resolved: boolean; status: number | null };
+    blocked: { domain: string; resolved: boolean; status: number | null };
+    endpoint: string;
+    message: string;
+  }> {
+    const controlDomain = opts?.controlDomain || 'www.google.com';
+    const blockedTestDomain = opts?.blockedTestDomain || 'malware.wicar.org';
+    const timeout = opts?.timeoutMs ?? this.DEFAULT_TIMEOUT_MS;
+    const endpoint = this.getProvider().endpoint;
+
+    const [c, b] = await Promise.all([
+      this.quad9Lookup(controlDomain, timeout),
+      this.quad9Lookup(blockedTestDomain, timeout),
+    ]);
+
+    const reachable = c !== null || b !== null;
+    const controlResolved = !!c && c.status === 0 && c.answers > 0;
+    // "Blocked" = did NOT resolve (NXDOMAIN/empty). A null (unreachable) is not
+    // treated as blocked — we can't conclude blocking from a transport failure.
+    const blockedResolved = !!b && b.status === 0 && b.answers > 0;
+    const quad9Active = reachable && controlResolved && !blockedResolved;
+
+    let message: string;
+    if (!reachable) {
+      message = `Could not reach the Quad9 DoH endpoint (${endpoint}). Check network/DNS configuration.`;
+    } else if (!controlResolved) {
+      message = `Quad9 reached but the control domain "${controlDomain}" did not resolve — the endpoint may be misconfigured.`;
+    } else if (quad9Active) {
+      message = `Quad9 filtering appears ACTIVE: "${controlDomain}" resolved and the blocked-test domain "${blockedTestDomain}" did not. For a definitive result, pass a blockedTestDomain you know Quad9 blocks.`;
+    } else {
+      message = `Quad9 is reachable and resolving, but the blocked-test domain "${blockedTestDomain}" also resolved, so threat blocking could not be confirmed. Override blockedTestDomain with a domain you know Quad9 blocks.`;
+    }
+
+    return {
+      quad9Active,
+      reachable,
+      control: { domain: controlDomain, resolved: controlResolved, status: c ? c.status : null },
+      blocked: { domain: blockedTestDomain, resolved: blockedResolved, status: b ? b.status : null },
+      endpoint,
+      message,
+    };
+  }
+
+  /**
    * Query DNS-over-HTTPS provider
    * Returns true if domain is safe, false if blocked
    */

@@ -191,12 +191,13 @@ export const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
   'imap_check_folder_spam':            READ_REMOTE,
   'imap_scan_account_spam':            READ_REMOTE,
 
-  // ---- dns-firewall-tools (5) ----
+  // ---- dns-firewall-tools (6) ----
   'imap_check_domain':                 READ_REMOTE,
   'imap_bulk_check_domains':           READ_REMOTE,
   'imap_check_domain_dns_firewall':    READ_REMOTE,
   'imap_scan_message_domains':         READ_REMOTE,
   'imap_bulk_scan_messages':           READ_REMOTE,
+  'imap_test_quad9_dns':               READ_REMOTE,
 };
 
 /**

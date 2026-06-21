@@ -39,6 +39,25 @@ export function dnsFirewallTools(
     };
   }));
 
+  // Verify Quad9 threat-blocking is active (#65)
+  server.registerTool('imap_test_quad9_dns', {
+    description:
+      'Verify Quad9 DNS threat-blocking is active. Resolves a clean control domain (should resolve) and a ' +
+      'blocked-test domain (should be NXDOMAIN/empty when filtering is on) via Quad9 DNS-over-HTTPS, then reports ' +
+      'a derived pass/fail. There is no standardized public Quad9 "blocked" test host, so pass a blockedTestDomain ' +
+      'you know Quad9 blocks for a definitive result.',
+    inputSchema: {
+      controlDomain: z.string().optional().describe('Clean domain expected to resolve (default: www.google.com)'),
+      blockedTestDomain: z.string().optional().describe('Domain expected to be blocked when filtering is active (default: malware.wicar.org)'),
+      timeoutMs: z.number().optional().describe('Per-query timeout in ms (default: 5000)'),
+    }
+  }, withErrorHandling(async ({ controlDomain, blockedTestDomain, timeoutMs }) => {
+    const result = await dnsFirewall.testQuad9({ controlDomain, blockedTestDomain, timeoutMs });
+    return {
+      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
+    };
+  }));
+
   // Check multiple domains
   server.registerTool('imap_bulk_check_domains', {
     description: 'Check multiple domains against DNS firewall in bulk',
