@@ -25,6 +25,7 @@ import MailComposer from 'nodemailer/lib/mail-composer/index.js';
 // and TLS info that the high-level Transport hides.
 import SMTPConnection from 'nodemailer/lib/smtp-connection/index.js';
 import { ImapAccount, EmailComposer, SmtpConfig } from '../types/index.js';
+import { humanBytes } from '../utils/human-bytes.js';
 import {
   classifySmtpError,
   providerGuidanceFor,
@@ -100,6 +101,8 @@ export interface TestSmtpResult {
   serverGreeting: string | null;
   authMethods: string[];
   capabilities: string[];
+  /** EHLO SIZE limit in bytes (RFC 1870), or null if the server doesn't advertise one. */
+  sizeLimit: number | null;
   rttMs: number | null;
   authResult: 'ok' | 'failed' | 'skipped';
   authError: string | null;
@@ -124,6 +127,9 @@ const DEFAULT_RETRY: Required<RetryOptions> = {
 export class SmtpService {
   private transporters: Map<string, nodemailer.Transporter> = new Map();
   private metrics: Map<string, SmtpAccountMetrics> = new Map();
+  // Per-account EHLO SIZE limit (bytes, RFC 1870), captured by testSmtp. Used by
+  // the SIZE-aware pre-send guard (#191) to fail fast on oversized messages.
+  private sizeLimitByAccount: Map<string, number> = new Map();
   private poolOptions: Required<PoolOptions>;
   private retryOptions: Required<RetryOptions>;
 
@@ -229,6 +235,32 @@ export class SmtpService {
     return { configured: this.transporters.size };
   }
 
+  // ---------- SIZE-aware send limits (#191) ----------
+
+  /** The server's advertised EHLO SIZE limit for an account (bytes), or null if unknown. */
+  getServerSizeLimit(accountId: string): number | null {
+    return this.sizeLimitByAccount.get(accountId) ?? null;
+  }
+
+  /** Record a known server SIZE limit (bytes) for an account. testSmtp calls this from EHLO. */
+  setServerSizeLimit(accountId: string, bytes: number): void {
+    if (Number.isFinite(bytes) && bytes > 0) this.sizeLimitByAccount.set(accountId, bytes);
+  }
+
+  /**
+   * Effective pre-send size ceiling (bytes) for an account, or null if unknown.
+   * The smaller of the configured cap (IMAP_MCP_MAX_SEND_SIZE_BYTES; 0/unset =
+   * no config cap) and the server's advertised EHLO SIZE limit (RFC 1870).
+   */
+  private sendSizeCeiling(accountId: string): { ceiling: number | null; configCap: number | null; serverLimit: number | null } {
+    const rawCfg = Number(process.env.IMAP_MCP_MAX_SEND_SIZE_BYTES);
+    const configCap = Number.isFinite(rawCfg) && rawCfg > 0 ? rawCfg : null;
+    const serverLimit = this.sizeLimitByAccount.get(accountId) ?? null;
+    const candidates = [configCap, serverLimit].filter((n): n is number => n != null);
+    const ceiling = candidates.length ? Math.min(...candidates) : null;
+    return { ceiling, configCap, serverLimit };
+  }
+
   // ---------- send ----------
 
   /** Backward-compatible helper that returns only the Message-ID. */
@@ -305,6 +337,27 @@ export class SmtpService {
       throw new Error(
         `Failed to compile MIME for Sent folder copy: ${e instanceof Error ? e.message : 'Unknown error'}`
       );
+    }
+
+    // SIZE-aware pre-send guard (#191). rawMessage is the exact encoded MIME,
+    // so its byte length IS the true SMTP message size (base64 attachment
+    // overhead already included) — compare against the smaller of the
+    // configured cap and the server's advertised EHLO SIZE limit, and fail fast
+    // with a clear message rather than attempting a doomed send (552 from the
+    // server). When neither limit is known, behavior is unchanged.
+    const { ceiling, serverLimit } = this.sendSizeCeiling(accountId);
+    if (ceiling != null && rawMessage.length > ceiling) {
+      const source = serverLimit != null && ceiling === serverLimit
+        ? "the SMTP server's advertised SIZE limit"
+        : 'the configured send cap (IMAP_MCP_MAX_SEND_SIZE_BYTES)';
+      const msg = `Message is ${humanBytes(rawMessage.length)}, which exceeds ${source} of ${humanBytes(ceiling)}. Reduce attachment size or split the message.`;
+      const c: ClassifiedError = { category: 'configuration', retryable: false, smtpCode: 552, smtpMessage: msg, providerGuidance: null, rawMessage: msg };
+      m.sendFailureTotal += 1;
+      m.lastError = { category: c.category, smtpCode: c.smtpCode, message: c.smtpMessage };
+      const e = new Error(msg) as Error & { classified: ClassifiedError; retriesAttempted: number };
+      e.classified = c;
+      e.retriesAttempted = 0;
+      throw e;
     }
 
     // Send with retry.
@@ -405,6 +458,7 @@ export class SmtpService {
       serverGreeting: null,
       authMethods: [],
       capabilities: [],
+      sizeLimit: null,
       rttMs: null,
       authResult: 'skipped',
       authError: null,
@@ -428,6 +482,21 @@ export class SmtpService {
       out.capabilities = Array.isArray(exts) ? exts.map(String) : [];
       const supportedAuth = conn._supportedAuth ?? conn.supportedAuth ?? [];
       out.authMethods = Array.isArray(supportedAuth) ? supportedAuth.map(String) : [];
+
+      // EHLO SIZE limit (RFC 1870). nodemailer stores the numeric maximum in
+      // _maxAllowedSize after EHLO; fall back to parsing a "SIZE <n>" capability
+      // string in case a future version surfaces it there instead.
+      let sizeLimit: number | null = null;
+      const maxAllowed = Number(conn._maxAllowedSize ?? conn.maxAllowedSize);
+      if (Number.isFinite(maxAllowed) && maxAllowed > 0) sizeLimit = maxAllowed;
+      if (sizeLimit == null) {
+        for (const cap of out.capabilities) {
+          const mch = /^SIZE\s+(\d+)/i.exec(cap);
+          if (mch) { sizeLimit = Number(mch[1]); break; }
+        }
+      }
+      out.sizeLimit = sizeLimit;
+      if (sizeLimit != null) this.setServerSizeLimit(account.id, sizeLimit);
 
       // Pull TLS info from the socket if available
       const sock: any = (conn._socket ?? conn.socket ?? null);

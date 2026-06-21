@@ -1528,8 +1528,12 @@ export function emailTools(
       } : undefined,
     };
     const result = await smtpService.testSmtp(account, { verbose, testAuth });
+    const withHuman = {
+      ...result,
+      sizeLimitHuman: result.sizeLimit != null ? humanBytes(result.sizeLimit) : null,
+    };
     return {
-      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
+      content: [{ type: 'text', text: JSON.stringify(withHuman, null, 2) }]
     };
   }));
 

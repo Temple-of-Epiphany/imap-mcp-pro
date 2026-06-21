@@ -104,3 +104,51 @@ describe('SmtpService lifecycle', () => {
     expect(await svc.verifySmtpConnection(account())).toBe(true);
   });
 });
+
+describe('SmtpService SIZE-aware send guard (#191)', () => {
+  const email = { to: 'rcpt@example.com', subject: 'Hello', text: 'hello world body' } as any;
+
+  beforeEach(() => { created.length = 0; delete process.env.IMAP_MCP_MAX_SEND_SIZE_BYTES; });
+
+  it('records and reads a server SIZE limit', () => {
+    const svc = new SmtpService({ pool: { healthCheck: false } });
+    expect(svc.getServerSizeLimit('acc-1')).toBeNull();
+    svc.setServerSizeLimit('acc-1', 51200000);
+    expect(svc.getServerSizeLimit('acc-1')).toBe(51200000);
+    // Non-positive limits are ignored.
+    svc.setServerSizeLimit('acc-1', 0);
+    expect(svc.getServerSizeLimit('acc-1')).toBe(51200000);
+  });
+
+  it('rejects a message larger than the server SIZE limit before sending', async () => {
+    const svc = new SmtpService({ pool: { healthCheck: false } });
+    svc.setServerSizeLimit('acc-1', 50); // smaller than any real compiled message
+    await expect(svc.sendEmailWithCopy('acc-1', account(), email)).rejects.toMatchObject({
+      classified: { category: 'configuration', retryable: false, smtpCode: 552 },
+    });
+    // Guard fires before the transporter ever sends.
+    expect(created).toHaveLength(1); // createTransporter ran, but...
+    const err = await svc.sendEmailWithCopy('acc-1', account(), email).catch((e) => e);
+    expect(String(err.message)).toMatch(/exceeds the SMTP server's advertised SIZE limit/);
+  });
+
+  it('rejects against the configured cap when smaller than the server limit', async () => {
+    process.env.IMAP_MCP_MAX_SEND_SIZE_BYTES = '40';
+    const svc = new SmtpService({ pool: { healthCheck: false } });
+    svc.setServerSizeLimit('acc-1', 51200000);
+    const err = await svc.sendEmailWithCopy('acc-1', account(), email).catch((e) => e);
+    expect(err.classified.category).toBe('configuration');
+    expect(String(err.message)).toMatch(/configured send cap/);
+  });
+
+  it('sends normally when under the limit (and when no limit is known)', async () => {
+    const svc = new SmtpService({ pool: { healthCheck: false } });
+    // No limit known → unchanged behavior.
+    const a = await svc.sendEmailWithCopy('acc-1', account(), email);
+    expect(a.messageId).toBe('<id@test>');
+    // Generous limit → still sends.
+    svc.setServerSizeLimit('acc-1', 10 * 1024 * 1024);
+    const b = await svc.sendEmailWithCopy('acc-1', account(), email);
+    expect(b.messageId).toBe('<id@test>');
+  });
+});
