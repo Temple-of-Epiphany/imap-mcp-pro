@@ -156,7 +156,7 @@ imap-mcp-pro/
 
 ## MCP Tools
 
-> **Authoritative catalog:** the live, complete tool list (currently **107 tools**) is always available at runtime via `imap_list_tools`. The detailed catalog below documents the core set; the "Recent additions" section tracks tools added since, and the remaining catalog is reconciled incrementally.
+> **Authoritative catalog:** the complete categorized tool list is generated from the manifest on every build at **[TOOL_CATALOG.md](./TOOL_CATALOG.md)** (currently **107 tools**), and is also available at runtime via `imap_list_tools`. The detailed catalog below documents the core set with full input/output notes; the "Recent additions" section tracks the newest tools.
 
 ### Recent additions (v2.17–v2.19)
 

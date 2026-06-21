@@ -22,8 +22,12 @@
  * Author: Colin Bitterfield
  * Email: colin.bitterfield@templeofepiphany.com
  * Date Created: 2026-04-30
- * Date Updated: 2026-05-01
- * Version: 1.1.0
+ * Date Updated: 2026-06-21
+ * Version: 1.2.0
+ *
+ * Changelog:
+ *   1.2.0 (2026-06-21) — regenerate docs/TOOL_CATALOG.md from the built server (#201).
+ *   1.1.0 (2026-05-01) — bundle skills + web UI assets into dist/.
  */
 
 import { mkdir, copyFile, readdir, cp, stat } from 'node:fs/promises';
@@ -98,6 +102,23 @@ try {
 }
 
 // ---------------------------------------------------------------------------
+// Tool catalog: regenerate docs/TOOL_CATALOG.md from the just-built server (#201)
+// ---------------------------------------------------------------------------
+//
+// Keeps the documented tool catalog in lockstep with the registered tools.
+// gen-tool-catalog.mjs spawns the built server (pointed at a throwaway DB) to
+// read the live manifest. Non-fatal: a docs hiccup must never fail the build.
+
+let catalogGenerated = false;
+try {
+  const { execFileSync } = await import('node:child_process');
+  execFileSync('node', ['scripts/gen-tool-catalog.mjs'], { stdio: 'ignore' });
+  catalogGenerated = true;
+} catch (e) {
+  console.warn(`[postbuild] tool catalog generation skipped: ${e.message}`);
+}
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 
@@ -107,5 +128,6 @@ const parts = [
 if (manifestCopied) parts.push('migrations-manifest.json');
 if (skillsCopied > 0) parts.push(`${skillsCopied} bundled skill${skillsCopied === 1 ? '' : 's'}`);
 if (publicAssetCount > 0) parts.push(`${publicAssetCount} web UI asset${publicAssetCount === 1 ? '' : 's'}`);
+if (catalogGenerated) parts.push('docs/TOOL_CATALOG.md');
 
 console.log(`[postbuild] copied ${parts.join(' + ')}`);
