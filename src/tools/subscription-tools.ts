@@ -31,6 +31,62 @@ export function registerSubscriptionTools(
   const executorService = new UnsubscribeExecutorService(smtpService);
 
   /**
+   * Read-only bulk extractor: for a block of messages, return links + sender +
+   * recipient + subject without writing to the subscriptions DB (#194).
+   */
+  server.registerTool('imap_get_unsubscribe_links_for', {
+    description:
+      'Read-only: for a block of messages (explicit UIDs, or a folder scan up to `limit`), return per ' +
+      'message the unsubscribe links found in BOTH the List-Unsubscribe header and the body, along with ' +
+      'sender, recipient, and subject. Does NOT write to the subscriptions database or send anything — ' +
+      'use imap_extract_unsubscribe_links for the stored/managed flow, or imap_execute_unsubscribe to act.',
+    inputSchema: {
+      accountId: z.string().describe('Account ID'),
+      folder: z.string().default('INBOX').describe('Folder name (default: INBOX)'),
+      uids: z.array(z.number()).optional().describe('Specific UIDs to inspect; omit to scan the folder'),
+      limit: z.number().optional().default(100).describe('When scanning a folder, max messages to inspect (default 100)'),
+    }
+  }, withErrorHandling(async ({ accountId, folder, uids, limit }: {
+    accountId: string; folder: string; uids?: number[]; limit?: number;
+  }) => {
+    let targetUids = uids;
+    if (!targetUids || targetUids.length === 0) {
+      const msgs = await imapService.searchEmails(accountId, folder, {});
+      targetUids = msgs.map((m) => m.uid).slice(0, limit ?? 100);
+    }
+
+    const raws = await imapService.getRawMessages(accountId, folder, targetUids);
+    const messages = [];
+    for (const r of raws) {
+      const meta = await unsubscribeService.extractWithMeta(r.source);
+      const hasUnsubscribe = !!meta.info.unsubscribe_link || !!meta.info.list_unsubscribe_header;
+      messages.push({
+        uid: r.uid,
+        from: sanitizeText(meta.from || r.from || ''),
+        to: sanitizeText(meta.to || ''),
+        subject: sanitizeText(meta.subject || r.subject || ''),
+        hasUnsubscribe,
+        unsubscribeLink: meta.info.unsubscribe_link ? sanitizeUrl(meta.info.unsubscribe_link) : undefined,
+        method: meta.info.unsubscribe_method,
+        listUnsubscribeHeader: meta.info.list_unsubscribe_header
+          ? sanitizeText(meta.info.list_unsubscribe_header) : undefined,
+      });
+    }
+
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          folder,
+          scanned: messages.length,
+          withUnsubscribe: messages.filter((m) => m.hasUnsubscribe).length,
+          messages,
+        }, null, 2)
+      }]
+    };
+  }));
+
+  /**
    * Extract unsubscribe links from emails in a folder
    */
   server.registerTool('imap_extract_unsubscribe_links', {
