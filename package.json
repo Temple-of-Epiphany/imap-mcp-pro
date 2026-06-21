@@ -72,7 +72,6 @@
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
-    "@journeyapps/sqlcipher": "^5.3.1",
     "@modelcontextprotocol/sdk": "~1.22.0",
     "@types/nodemailer": "^6.4.17",
     "body-parser": "^2.2.0",
@@ -85,7 +84,6 @@
     "express-slow-down": "^3.0.1",
     "imapflow": "^1.1.1",
     "js-yaml": "^4.1.1",
-    "keytar": "^7.9.0",
     "mailparser": "^3.7.4",
     "mime-types": "^3.0.2",
     "nodemailer": "^7.0.5",
