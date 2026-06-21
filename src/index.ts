@@ -103,7 +103,12 @@ const {
     // 3. Database (auto-migrations run here; ledger v1.7.0 in usual case)
     let db: DatabaseService;
     try {
-      db = new DatabaseService();
+      // Honor the configured database path (IMAP_MCP_DATABASE_PATH →
+      // config.database.path), e.g. Claude Desktop's "Data Directory"
+      // user_config. Previously this was constructed with no args, so the
+      // configured path was silently ignored and every install used the
+      // default ~/.imap-mcp/data.db.
+      db = new DatabaseService({ dbPath: config.database.path });
     } catch (e: any) {
       logEvent('[startup]', { stage: 'pre-handshake', outcome: 'error', component: 'DatabaseService', error: e?.message });
       process.exit(EXIT_CODES.DATABASE_ERROR);
