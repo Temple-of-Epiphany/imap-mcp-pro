@@ -5,6 +5,11 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.18.1] - 2026-06-21
+
+### Fixed
+- **Configured database path was ignored** (#187). `index.ts` constructed `DatabaseService` with no arguments, so the resolved `IMAP_MCP_DATABASE_PATH` (`config.database.path`) — including Claude Desktop's **"Data Directory"** user_config — was silently discarded and every install read/wrote the default `~/.imap-mcp/data.db`. The server now passes the configured path through (`new DatabaseService({ dbPath: config.database.path })`). Verified: pointing `IMAP_MCP_DATABASE_PATH` at a sandbox initializes there (own `data.db` + `.encryption-key`) and leaves the default directory untouched. Affected v2.18.0 and earlier. Found while sandbox-testing the v2.18.0 release artifact.
+
 ## [2.18.0] - 2026-06-21
 
 ### Licensing, dependency, and distribution release
