@@ -794,6 +794,23 @@ export class ImapService {
   }
 
   /**
+   * Account storage quota via the IMAP QUOTA extension (RFC 9208 / RFC 2087).
+   * Returns null when the server does not advertise QUOTA (or the path has no
+   * quota root). `storage` figures are in bytes.
+   */
+  async getQuota(
+    accountId: string,
+    path: string = 'INBOX'
+  ): Promise<{ path: string; storage?: { used: number; limit: number }; messages?: { used: number; limit: number } } | null> {
+    return this.withRetry(accountId, async () => {
+      const client = this.getConnection(accountId);
+      if (!client.capabilities.has('QUOTA')) return null;
+      const quota = await client.getQuota(path);
+      return quota && typeof quota === 'object' ? (quota as any) : null;
+    }, `getQuota(${path})`);
+  }
+
+  /**
    * Query IMAP server capabilities (Issue #55)
    * Implements capability detection as required by RFC 9051
    * Includes caching to avoid repeated queries

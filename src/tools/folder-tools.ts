@@ -171,6 +171,39 @@ export function folderTools(
     });
   }));
 
+  // IMAP QUOTA — account storage used/limit (RFC 9208) (#192)
+  server.registerTool('imap_get_quota', {
+    description:
+      'Report account storage quota — used / limit / percent — via the IMAP QUOTA extension (RFC 9208). ' +
+      'Returns supported:false when the server does not advertise QUOTA. (For a single mailbox size, ' +
+      'use imap_get_mailbox_status, which reports SIZE via STATUS=SIZE.)',
+    inputSchema: {
+      accountId,
+      mailbox: z.string().optional().default('INBOX').describe('Mailbox whose quota root to query (default: INBOX)'),
+    },
+  }, withErrorHandling(async ({ accountId, mailbox }) => {
+    const quota = await imapService.getQuota(accountId, mailbox);
+    if (!quota) {
+      return jsonResult({ supported: false, mailbox, message: 'Server does not advertise the QUOTA extension.' });
+    }
+
+    const pct = (used: number, limit: number) => (limit > 0 ? Math.round((used / limit) * 1000) / 10 : null);
+    const storage = quota.storage && quota.storage.limit
+      ? {
+          used: quota.storage.used,
+          limit: quota.storage.limit,
+          usedHuman: humanBytes(quota.storage.used),
+          limitHuman: humanBytes(quota.storage.limit),
+          percentUsed: pct(quota.storage.used, quota.storage.limit),
+        }
+      : undefined;
+    const messages = quota.messages && quota.messages.limit
+      ? { used: quota.messages.used, limit: quota.messages.limit, percentUsed: pct(quota.messages.used, quota.messages.limit) }
+      : undefined;
+
+    return jsonResult({ supported: true, path: quota.path ?? mailbox, storage, messages });
+  }));
+
   // RFC 9051: Get mailbox status (Issue #56)
   server.registerTool('imap_get_mailbox_status', {
     description: 'Get mailbox statistics without selecting it (RFC 9051 STATUS command) - more efficient than SELECT',
