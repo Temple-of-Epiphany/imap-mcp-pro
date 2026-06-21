@@ -34,7 +34,7 @@ src/
 │   ├── results-service.ts        # Tool-result cache (handle/file modes), LRU eviction
 │   ├── file-export-service.ts    # Encrypted JSON/JSONL writer for file-mode results
 │   └── message-export-service.ts # Local .eml/attachment export, path-traversal-guarded (#170)
-├── tools/                        # 107 MCP tools across 12 files (run imap_list_tools for the live catalog)
+├── tools/                        # 100+ MCP tools across 12 files (see docs/TOOL_CATALOG.md for the exact list)
 │   ├── account-tools.ts          # 8  add/remove/list/share accounts
 │   ├── email-tools.ts            # 32 search/get/mark/delete/move/copy/send/bulk + WP1/2/3/4
 │   ├── folder-tools.ts           # 6  list/status/create/delete/rename

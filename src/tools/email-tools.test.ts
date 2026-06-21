@@ -48,6 +48,15 @@ function makeImap(overrides: Record<string, any> = {}) {
       { uid: 2, size: 15 * 1024 * 1024, subject: 'big', from: 'b@x.com', date: new Date('2026-01-02'), hasAttachments: true },
       { uid: 3, size: 5 * 1024 * 1024, subject: 'medium', from: 'c@x.com', date: new Date('2026-01-03'), hasAttachments: true },
     ],
+    lastPriorityArgs: undefined as any,
+    setEmailPriority: async function (this: any, _a: string, _f: string, uids: number[], priority: string) {
+      this.lastPriorityArgs = { uids, priority };
+      const keyword = priority === 'high' ? '$Priority-High' : priority === 'low' ? '$Priority-Low' : null;
+      return { priority, keyword, accepted: true, uids };
+    },
+    getEmailPriority: async (_a: string, _f: string, uid: number) => ({
+      uid, priority: 'high', source: 'header', flags: ['\\Seen'],
+    }),
     ...overrides,
   };
 }
@@ -151,6 +160,35 @@ describe('emailTools core routes', () => {
     const asc = await invoke(tools, 'imap_get_email_sizes', { accountId: 'a', folder: 'INBOX', order: 'asc', limit: 2 });
     expect(asc.returned).toBe(2);
     expect(asc.messages.map((m: any) => m.uid)).toEqual([1, 3]); // smallest first, capped
+  });
+});
+
+describe('imap_set/get_email_priority (#48)', () => {
+  let imap: any, tools: Map<string, Registered>;
+  beforeEach(() => { imap = makeImap(); tools = register(imap); });
+
+  it('sets high priority via the $Priority-High keyword', async () => {
+    const out = await invoke(tools, 'imap_set_email_priority', { accountId: 'a', folder: 'INBOX', uids: [1, 2], priority: 'high' });
+    expect(imap.lastPriorityArgs).toEqual({ uids: [1, 2], priority: 'high' });
+    expect(out).toMatchObject({ priority: 'high', keyword: '$Priority-High', accepted: true, updated: 2, uids: [1, 2] });
+    expect(out.note).toBeUndefined();
+  });
+
+  it('clears the keyword for normal priority', async () => {
+    const out = await invoke(tools, 'imap_set_email_priority', { accountId: 'a', folder: 'INBOX', uids: [5], priority: 'normal' });
+    expect(out.keyword).toBeNull();
+  });
+
+  it('surfaces a note when the server rejects the keyword', async () => {
+    const rejecting = makeImap({ setEmailPriority: async (_a: string, _f: string, uids: number[], priority: string) => ({ priority, keyword: '$Priority-High', accepted: false, uids }) });
+    const out = await invoke(register(rejecting), 'imap_set_email_priority', { accountId: 'a', folder: 'INBOX', uids: [1], priority: 'high' });
+    expect(out.accepted).toBe(false);
+    expect(out.note).toMatch(/did not accept/);
+  });
+
+  it('reads the resolved priority with its source', async () => {
+    const out = await invoke(tools, 'imap_get_email_priority', { accountId: 'a', folder: 'INBOX', uid: 7 });
+    expect(out).toMatchObject({ uid: 7, priority: 'high', source: 'header' });
   });
 });
 

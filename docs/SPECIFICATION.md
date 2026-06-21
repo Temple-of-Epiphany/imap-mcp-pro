@@ -34,7 +34,7 @@
 IMAP MCP Pro is a Model Context Protocol (MCP) server that provides comprehensive IMAP email integration for Claude AI, enabling intelligent email management, automation, and analysis.
 
 ### Key Features
-- ✅ **107 MCP Tools** for complete email management (run `imap_list_tools` for the authoritative live catalog)
+- ✅ **100+ MCP Tools** for complete email management (see [TOOL_CATALOG.md](./TOOL_CATALOG.md) for the exact list, or run `imap_list_tools` at runtime)
 - ✅ **15 Email Provider Presets** (Gmail, Outlook, Yahoo, etc.)
 - ✅ **Auto-Chunking** for operations >50 UIDs
 - ✅ **Circuit Breaker Pattern** with automatic recovery
@@ -156,7 +156,7 @@ imap-mcp-pro/
 
 ## MCP Tools
 
-> **Authoritative catalog:** the complete categorized tool list is generated from the manifest on every build at **[TOOL_CATALOG.md](./TOOL_CATALOG.md)** (currently **107 tools**), and is also available at runtime via `imap_list_tools`. The detailed catalog below documents the core set with full input/output notes; the "Recent additions" section tracks the newest tools.
+> **Authoritative catalog:** the complete categorized tool list (with the exact current count) is generated from the manifest on every build at **[TOOL_CATALOG.md](./TOOL_CATALOG.md)**, and is also available at runtime via `imap_list_tools`. The detailed catalog below documents the core set with full input/output notes; the "Recent additions" section tracks the newest tools.
 
 ### Recent additions (v2.17–v2.19)
 
@@ -175,6 +175,9 @@ imap-mcp-pro/
 
 **SMTP**
 - Capability-aware **SIZE** send limits (#191) — `imap_test_smtp` reports the server's EHLO `SIZE`; oversized sends fail fast with a clear message instead of a 552 round-trip.
+
+**Message priority (#48)**
+- **imap_set_email_priority** / **imap_get_email_priority** — set/read high/normal/low priority. Because IMAP messages are immutable, priority is *set* via a custom keyword (`$Priority-High` / `$Priority-Low`) and *read* by preferring that keyword, then the compose-time `X-Priority` / `Importance` / `X-MSMail-Priority` header, then normal.
 
 All byte sizes in tool output are human-readable (B/KB/MB/GB). Credential storage is file-based AES-256-GCM (`node:sqlite`; no native `keytar`/SQLCipher dependency).
 
@@ -910,7 +913,7 @@ POST /api/usercheck         - UserCheck email validation
 
 **Expected Output**:
 ```
-✅ 107 tools registered
+✅ all tools registered
 ✅ All tools categorized correctly
 ✅ No missing or extra tools
 ✅ PASS

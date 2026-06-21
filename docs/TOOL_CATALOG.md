@@ -4,7 +4,7 @@
 > manifest by `scripts/gen-tool-catalog.mjs` (runs on `npm run build`).
 > The authoritative runtime list is always available via the `imap_list_tools` tool.
 
-**107 MCP tools** total.
+**109 MCP tools** total.
 
 ## Categories
 
@@ -22,6 +22,7 @@
 - [Local cache](#local-cache) — 2
 - [Capabilities, diagnostics & metrics](#capabilities-diagnostics-metrics) — 11
 - [Meta & discovery](#meta-discovery) — 5
+- [Other](#other) — 2
 
 ## Users (MSP multi-tenant)
 
@@ -199,4 +200,11 @@
 | `imap_list_tools` | List all available MCP tools with descriptions and parameters |
 | `imap_results` | Manage cached MCP tool results (resource-handle pattern). |
 | `imap_update_skills` | Apply skill updates from public GitHub for explicitly named skills. |
+
+## Other
+
+| Tool | Description |
+| --- | --- |
+| `imap_get_email_priority` | Get the resolved priority of a message: our $Priority-* keyword if set (the explicit user setting), otherwise the compose-time X-Priority / Importance / X-MSMail-Priority header, otherwise normal. |
+| `imap_set_email_priority` | Set the priority (high / normal / low) of one or more messages. |
 
