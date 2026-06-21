@@ -14,6 +14,7 @@ import { ImapService } from '../services/imap-service.js';
 import { DatabaseService } from '../services/database-service.js';
 import { Folder } from '../types/index.js';
 import { withErrorHandling } from '../utils/error-handler.js';
+import { humanBytes } from '../utils/human-bytes.js';
 
 /** Wrap any payload as a pretty-printed JSON text tool result. */
 function jsonResult(payload: unknown) {
@@ -33,11 +34,6 @@ function summarizeFolder(folder: Folder) {
     attributes: folder.attributes,
     hasChildren: Array.isArray(folder.children) && folder.children.length > 0,
   };
-}
-
-/** Format a byte count as "N.NN MB". */
-function megabytes(bytes: number): string {
-  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
 const accountId = z.string().describe('Account ID');
@@ -195,7 +191,7 @@ export function folderTools(
         totalMailboxes: statuses.length,
         totalMessages,
         totalUnseen,
-        totalSize: totalSize > 0 ? megabytes(totalSize) : 'N/A',
+        totalSize: totalSize > 0 ? humanBytes(totalSize) : 'N/A',
       },
       mailboxes: statuses.map((status) => ({
         mailbox: status.mailbox,
@@ -204,7 +200,7 @@ export function folderTools(
         uidNext: status.uidNext,
         uidValidity: status.uidValidity.toString(),
         deleted: status.deleted,
-        size: status.size ? megabytes(status.size) : undefined,
+        size: status.size ? humanBytes(status.size) : undefined,
       })),
     });
   }));

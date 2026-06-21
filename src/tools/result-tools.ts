@@ -17,6 +17,7 @@ import { DatabaseService } from '../services/database-service.js';
 import { ResultsService } from '../services/results-service.js';
 import { withErrorHandling } from '../utils/error-handler.js';
 import { withUserAuthorization } from './tool-context.js';
+import { humanBytes } from '../utils/human-bytes.js';
 
 export function resultTools(
   server: McpServer,
@@ -141,6 +142,7 @@ export function resultTools(
                       filename: a.filename,
                       contentType: a.content_type,
                       sizeBytes: a.size_bytes,
+                      sizeHuman: humanBytes(a.size_bytes),
                       checksumSha256: a.checksum_sha256,
                       skipped: !!a.skipped,
                     });
