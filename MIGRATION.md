@@ -22,7 +22,7 @@ This guide covers upgrades from earlier IMAP MCP Pro versions. Read the section 
 
 ### Breaking changes
 
-**None.** All existing env vars continue to work, all 81 tools have stable schemas, the database stays at `1.7.0` (no schema changes in this release), and the wire protocol is unchanged.
+**None.** All existing env vars continue to work, every tool keeps a stable schema (run `imap_list_tools` for the current catalog), the database stays at `1.7.0` (no schema changes in this release), and the wire protocol is unchanged.
 
 ### Recommended migration paths
 
@@ -34,7 +34,7 @@ This guide covers upgrades from earlier IMAP MCP Pro versions. Read the section 
    - **Data Directory**: point to your existing `~/.imap-mcp` (preserves accounts, results cache, encryption key)
    - **Log Level**: `INFO`
    - **User ID**: whatever you had set as `MCP_USER_ID` (default: `default`)
-   - **Encryption Key**: leave blank if you previously used the on-disk key (the extension activates `CLAUDE_DESKTOP_EXTENSION=true` which prefers the system keyring; on first run it'll bootstrap from the existing on-disk key file)
+   - **Encryption Key**: leave blank to keep using your existing on-disk key file (`~/.imap-mcp/.encryption-key`, mode 600). Credentials are encrypted with AES-256-GCM. (The previous OS-keyring path was removed in v2.x when the native `keytar`/SQLCipher dependencies were dropped — storage is now purely file-based.)
 4. **Disable the old MCP server entry** in `claude_desktop_config.json` so Claude Desktop doesn't run two copies.
 5. Restart Claude Desktop.
 6. Verify with `imap_list_accounts` — your accounts should be there.

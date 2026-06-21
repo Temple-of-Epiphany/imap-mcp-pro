@@ -34,7 +34,7 @@
 IMAP MCP Pro is a Model Context Protocol (MCP) server that provides comprehensive IMAP email integration for Claude AI, enabling intelligent email management, automation, and analysis.
 
 ### Key Features
-- ✅ **45 MCP Tools** for complete email management
+- ✅ **107 MCP Tools** for complete email management (run `imap_list_tools` for the authoritative live catalog)
 - ✅ **15 Email Provider Presets** (Gmail, Outlook, Yahoo, etc.)
 - ✅ **Auto-Chunking** for operations >50 UIDs
 - ✅ **Circuit Breaker Pattern** with automatic recovery
@@ -156,7 +156,29 @@ imap-mcp-pro/
 
 ## MCP Tools
 
-### Complete Tool Catalog (45 Tools)
+> **Authoritative catalog:** the live, complete tool list (currently **107 tools**) is always available at runtime via `imap_list_tools`. The detailed catalog below documents the core set; the "Recent additions" section tracks tools added since, and the remaining catalog is reconciled incrementally.
+
+### Recent additions (v2.17–v2.19)
+
+**Mailbox size & cleanup**
+- **imap_get_email_sizes** (#169) — list messages by RFC822.SIZE (no body download) to find large emails in a folder; `minSizeBytes` filter, largest-first, returns a `uids` array ready for bulk delete/move.
+- **imap_get_largest_emails** (#200) — top-N largest messages merged and ranked across multiple folders (default `["INBOX"]`); per-folder `uids` arrays; skips unreadable folders.
+
+**Local export ("download & save", #170)**
+- **imap_export_email** — export specific UIDs to `.eml` (raw RFC822, lossless) under the per-user outbox.
+- **imap_export_folder** / **imap_export_account** — mirror the IMAP folder hierarchy to disk as `.eml`.
+- **imap_extract_attachments** — save attachments to disk with inline-skip / size / extension filters.
+
+**Quota & unsubscribe**
+- **imap_get_quota** (#192) — account storage used/limit/percent via the IMAP QUOTA extension (RFC 9208).
+- **imap_get_unsubscribe_links_for** (#194) — read-only bulk extractor: per-message unsubscribe links (header + body) plus sender, recipient, and subject.
+
+**SMTP**
+- Capability-aware **SIZE** send limits (#191) — `imap_test_smtp` reports the server's EHLO `SIZE`; oversized sends fail fast with a clear message instead of a 552 round-trip.
+
+All byte sizes in tool output are human-readable (B/KB/MB/GB). Credential storage is file-based AES-256-GCM (`node:sqlite`; no native `keytar`/SQLCipher dependency).
+
+### Complete Tool Catalog (core set)
 
 #### 1. Account Management (5 tools)
 
@@ -888,7 +910,7 @@ POST /api/usercheck         - UserCheck email validation
 
 **Expected Output**:
 ```
-✅ 45 tools registered
+✅ 107 tools registered
 ✅ All tools categorized correctly
 ✅ No missing or extra tools
 ✅ PASS

@@ -17,7 +17,7 @@ An enterprise-grade Model Context Protocol (MCP) server that provides production
 
 ## Features
 
-**95 MCP tools** across email/folder/account/category/scoring/subscription/dns-firewall/usercheck/staging/cache/diagnostics — every IMAP4rev2 (RFC 9051) operation we use is exposed.
+**107 MCP tools** across email/folder/account/category/scoring/subscription/dns-firewall/usercheck/staging/cache/diagnostics — every IMAP4rev2 (RFC 9051) operation we use is exposed. (Run `imap_list_tools` for the live, authoritative catalog.)
 
 ### Core Features
 - 🔐 **Secure Account Management**: Encrypted credential storage with AES-256 encryption
@@ -116,7 +116,7 @@ The fastest path to a working setup is to install IMAP MCP Pro as a **Claude Des
    - **Log Level** — `INFO` is fine for day-to-day; `DEBUG` for troubleshooting
    - **Maximum Attachment Size** — default 25 MiB
    - **Allowed Attachment Directories** — *optional*, only needed for path-based attachment sends
-   - **Encryption Key** — leave blank to use the system keyring (recommended)
+   - **Encryption Key** — leave blank to auto-generate a file-based key (stored at `~/.imap-mcp/.encryption-key`, mode 600); credentials are encrypted with AES-256-GCM (recommended)
    - **User ID** — `default` for single-user installs
 4. Click **Enable**. Run a quick test by asking Claude `What IMAP accounts do I have?`.
 
