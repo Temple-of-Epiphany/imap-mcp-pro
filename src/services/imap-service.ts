@@ -1148,6 +1148,44 @@ export class ImapService {
     }, `getEmailContent(${folderName}, ${uid})`);
   }
 
+  /**
+   * Cheaply fetch only the List-Unsubscribe header lines (envelope + the two
+   * unsubscribe headers, NO message body) for a set of UIDs in a single
+   * streaming FETCH. Used by imap_extract_unsubscribe_links to avoid a
+   * full-body download per message — the common case (promotional mail almost
+   * always carries List-Unsubscribe) resolves from headers alone (#131).
+   *
+   * `headerBytes` is the raw header block ImapFlow returns for the requested
+   * fields; pass it (with a trailing blank line) to the unsubscribe parser.
+   */
+  async getUnsubscribeHeaders(
+    accountId: string,
+    folderName: string,
+    uids: number[]
+  ): Promise<Array<{ uid: number; from: string; subject: string; date: Date; headerBytes: Buffer | null }>> {
+    if (!uids || uids.length === 0) return [];
+    return this.withRetry(accountId, async () => {
+      const client = this.getConnection(accountId);
+      await client.mailboxOpen(folderName);
+
+      const out: Array<{ uid: number; from: string; subject: string; date: Date; headerBytes: Buffer | null }> = [];
+      for await (const msg of client.fetch(uids.join(','), {
+        uid: true,
+        envelope: true,
+        headers: ['list-unsubscribe', 'list-unsubscribe-post'],
+      }, { uid: true })) {
+        out.push({
+          uid: msg.uid,
+          from: msg.envelope?.from?.[0]?.address || '',
+          subject: msg.envelope?.subject || '',
+          date: msg.envelope?.date || new Date(),
+          headerBytes: (msg.headers as Buffer) ?? null,
+        });
+      }
+      return out;
+    }, `getUnsubscribeHeaders(${folderName})`);
+  }
+
   // ==================
   // Bulk Operations
   // ==================
