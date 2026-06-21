@@ -41,6 +41,26 @@ import { LRUCache } from '../utils/memory-manager.js';
 import { WorkerPool } from '../utils/worker-pool.js';
 import { ContextReductionConfig as Cfg } from '../config/context-reduction.js';
 
+/** Per-message size + light envelope info from a RFC822.SIZE fetch (no body). */
+export interface EmailSizeInfo {
+  uid: number;
+  size: number;           // RFC822.SIZE in bytes (headers + body + encoded attachments)
+  subject: string;
+  from: string;
+  date: Date;
+  hasAttachments: boolean;
+}
+
+/** Best-effort: does a fetched bodyStructure contain an attachment disposition? */
+function bodyStructureHasAttachment(node: any): boolean {
+  if (!node) return false;
+  const disp = (node.disposition || '').toString().toLowerCase();
+  if (disp === 'attachment') return true;
+  const children = node.childNodes || node.children;
+  if (Array.isArray(children)) return children.some(bodyStructureHasAttachment);
+  return false;
+}
+
 export class ImapService {
   private activeConnections: Map<string, ImapFlow> = new Map();
   private connectionMetadata: Map<string, ConnectionMetadata> = new Map();
@@ -907,6 +927,52 @@ export class ImapService {
 
       return messages;
     }, `searchEmails(${folderName})`);
+  }
+
+  /**
+   * Fetch per-message sizes (RFC822.SIZE) plus light envelope info for a folder
+   * or an explicit UID set. No message bodies are downloaded — size, envelope,
+   * and bodyStructure are all metadata-only FETCH items, so this is cheap even
+   * across large folders. Used by imap_get_email_sizes to find large messages.
+   */
+  async getEmailSizes(
+    accountId: string,
+    folderName: string,
+    options?: { uids?: number[] }
+  ): Promise<EmailSizeInfo[]> {
+    return this.withRetry(accountId, async () => {
+      const client = this.getConnection(accountId);
+      await client.mailboxOpen(folderName);
+
+      // Range: explicit UIDs, or every message in the folder.
+      let range: any;
+      if (options?.uids && options.uids.length > 0) {
+        range = options.uids.join(',');
+      } else {
+        const all = await client.search({ all: true }, { uid: true });
+        if (!all || all.length === 0) return [];
+        range = all;
+      }
+
+      const sizes: EmailSizeInfo[] = [];
+      for await (const msg of client.fetch(range, {
+        uid: true,
+        size: true,
+        envelope: true,
+        bodyStructure: true
+      }, { uid: true })) {
+        sizes.push({
+          uid: msg.uid,
+          size: msg.size ?? 0,
+          subject: msg.envelope?.subject || '',
+          from: msg.envelope?.from?.[0]?.address || '',
+          date: msg.envelope?.date || new Date(),
+          hasAttachments: bodyStructureHasAttachment(msg.bodyStructure)
+        });
+      }
+
+      return sizes;
+    }, `getEmailSizes(${folderName})`);
   }
 
   private buildImapFlowSearchQuery(criteria: SearchCriteria): any {

@@ -43,6 +43,11 @@ function makeImap(overrides: Record<string, any> = {}) {
     markAsRead: async () => {},
     markAsUnread: async () => {},
     deleteEmail: async () => {},
+    getEmailSizes: async () => [
+      { uid: 1, size: 2048, subject: 'small', from: 'a@x.com', date: new Date('2026-01-01'), hasAttachments: false },
+      { uid: 2, size: 15 * 1024 * 1024, subject: 'big', from: 'b@x.com', date: new Date('2026-01-02'), hasAttachments: true },
+      { uid: 3, size: 5 * 1024 * 1024, subject: 'medium', from: 'c@x.com', date: new Date('2026-01-03'), hasAttachments: true },
+    ],
     ...overrides,
   };
 }
@@ -126,6 +131,26 @@ describe('emailTools core routes', () => {
     const out = await invoke(tools, 'imap_get_latest_emails', { accountId: 'a', folder: 'INBOX', count: 1 });
     expect(out.messages).toHaveLength(1);
     expect(out.messages[0].uid).toBe(2); // 2026-01-02 is newer than 2026-01-01
+  });
+
+  it('imap_get_email_sizes returns largest-first with human-readable sizes + uids', async () => {
+    const out = await invoke(tools, 'imap_get_email_sizes', { accountId: 'a', folder: 'INBOX' });
+    expect(out.scanned).toBe(3);
+    expect(out.messages.map((m: any) => m.uid)).toEqual([2, 3, 1]); // size desc
+    expect(out.messages[0]).toMatchObject({ uid: 2, size: 15 * 1024 * 1024, sizeHuman: '15.00 MB', hasAttachments: true });
+    expect(out.messages[2].sizeHuman).toBe('2.00 KB');
+    expect(out.uids).toEqual([2, 3, 1]); // ready for bulk delete/move
+    expect(out.totalMatchedHuman).toBe('20.00 MB');
+  });
+
+  it('imap_get_email_sizes filters by minSizeBytes and respects limit + asc order', async () => {
+    const big = await invoke(tools, 'imap_get_email_sizes', { accountId: 'a', folder: 'INBOX', minSizeBytes: 10 * 1024 * 1024 });
+    expect(big.matched).toBe(1);
+    expect(big.messages.map((m: any) => m.uid)).toEqual([2]);
+
+    const asc = await invoke(tools, 'imap_get_email_sizes', { accountId: 'a', folder: 'INBOX', order: 'asc', limit: 2 });
+    expect(asc.returned).toBe(2);
+    expect(asc.messages.map((m: any) => m.uid)).toEqual([1, 3]); // smallest first, capped
   });
 });
 

@@ -65,6 +65,7 @@ export const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
   'imap_search_emails':                READ_REMOTE,
   'imap_get_email':                    READ_REMOTE,
   'imap_get_latest_emails':            READ_REMOTE,
+  'imap_get_email_sizes':              READ_REMOTE,
   'imap_get_unread_count':             READ_REMOTE,
   'imap_bulk_get_emails':              READ_REMOTE,
   'imap_bulk_get_emails_chunked':      READ_REMOTE,

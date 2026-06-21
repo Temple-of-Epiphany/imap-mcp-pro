@@ -7,6 +7,7 @@ import { WorkerPool } from '../utils/worker-pool.js';
 import { z } from 'zod';
 import { withErrorHandling, AccountNotFoundError } from '../utils/error-handler.js';
 import { ImapAccount } from '../types/index.js';
+import { humanBytes } from '../utils/human-bytes.js';
 import {
   maybeStoreAsHandle,
   ResponseModeSchema,
@@ -136,6 +137,7 @@ function jsonResult(payload: unknown) {
 function clip(text: string | undefined, max = 10000): string | undefined {
   return text?.substring(0, max);
 }
+
 
 /** Convert a decrypted DB account row into the ImapAccount shape the services expect. */
 function toImapAccount(dbAccount: any): ImapAccount {
@@ -326,6 +328,48 @@ export function emailTools(
   }, withErrorHandling(async ({ accountId, folder, uid }) => {
     await imapService.deleteEmail(accountId, folder, uid);
     return jsonResult({ success: true, message: `Email ${uid} deleted` });
+  }));
+
+  // Get email sizes — find large messages via RFC822.SIZE, no body download (#169)
+  server.registerTool('imap_get_email_sizes', {
+    description:
+      'List messages by size to find large emails — uses RFC822.SIZE (no body download, cheap even on big folders). ' +
+      'Scan a whole folder or a specific UID set, optionally filter with minSizeBytes, sorted largest-first. ' +
+      'The returned `uids` array can be passed straight to imap_bulk_delete_emails or imap_bulk_move_emails to clear space.',
+    inputSchema: {
+      accountId: z.string().describe('Account ID'),
+      folder: z.string().default('INBOX').describe('Folder to scan (default: INBOX)'),
+      uids: z.array(z.number()).optional().describe('Specific UIDs to size; omit to scan the whole folder'),
+      minSizeBytes: z.number().optional().describe('Only return messages at least this many bytes (e.g. 10485760 = 10 MiB)'),
+      limit: z.number().optional().default(100).describe('Max messages to return, largest first (default 100)'),
+      order: z.enum(['desc', 'asc']).optional().default('desc').describe("Sort by size: 'desc' = largest first (default), 'asc' = smallest first"),
+    }
+  }, withErrorHandling(async ({ accountId, folder, uids, minSizeBytes, limit, order }) => {
+    const all = await imapService.getEmailSizes(accountId, folder, { uids });
+    const matched = minSizeBytes != null ? all.filter(m => m.size >= minSizeBytes) : all.slice();
+    matched.sort((a, b) => (order === 'asc' ? a.size - b.size : b.size - a.size));
+    const limited = matched.slice(0, limit ?? 100);
+    const matchedBytes = matched.reduce((sum, m) => sum + m.size, 0);
+
+    return jsonResult({
+      folder,
+      scanned: all.length,
+      matched: matched.length,
+      returned: limited.length,
+      totalMatchedBytes: matchedBytes,
+      totalMatchedHuman: humanBytes(matchedBytes),
+      messages: limited.map(m => ({
+        uid: m.uid,
+        size: m.size,
+        sizeHuman: humanBytes(m.size),
+        subject: m.subject,
+        from: m.from,
+        date: toIsoDate(m.date),
+        hasAttachments: m.hasAttachments,
+      })),
+      // Convenience: ready to pass to imap_bulk_delete_emails / imap_bulk_move_emails.
+      uids: limited.map(m => m.uid),
+    });
   }));
 
   // Bulk delete emails tool
@@ -645,11 +689,11 @@ export function emailTools(
             continue;
           }
           if (contentBuf.length > maxBytes) {
-            inlineErrors.push({ kind: 'size-exceeds-per-attachment', detail: `Inline attachment '${cleanName}' is ${contentBuf.length} bytes, exceeds per-attachment cap of ${maxBytes} bytes (override IMAP_MCP_MAX_ATTACHMENT_SIZE_BYTES).` });
+            inlineErrors.push({ kind: 'size-exceeds-per-attachment', detail: `Inline attachment '${cleanName}' is ${humanBytes(contentBuf.length)}, exceeds per-attachment cap of ${humanBytes(maxBytes)} (override IMAP_MCP_MAX_ATTACHMENT_SIZE_BYTES).` });
             continue;
           }
           if (runningTotalBytes + contentBuf.length > maxTotalBytes) {
-            inlineErrors.push({ kind: 'aggregate-size-exceeds', detail: `Inline attachment '${cleanName}' would push aggregate size to ${runningTotalBytes + contentBuf.length} bytes, exceeds total cap of ${maxTotalBytes} bytes (override IMAP_MCP_MAX_TOTAL_ATTACHMENT_SIZE_BYTES, or move large files to imap_attachment_stage_*).` });
+            inlineErrors.push({ kind: 'aggregate-size-exceeds', detail: `Inline attachment '${cleanName}' would push aggregate size to ${humanBytes(runningTotalBytes + contentBuf.length)}, exceeds total cap of ${humanBytes(maxTotalBytes)} (override IMAP_MCP_MAX_TOTAL_ATTACHMENT_SIZE_BYTES, or move large files to imap_attachment_stage_*).` });
             continue;
           }
           runningTotalBytes += contentBuf.length;
@@ -681,7 +725,7 @@ export function emailTools(
           }
           for (const a of result.attachments) {
             if (runningTotalBytes + a.sizeBytes > maxTotalBytes) {
-              inlineErrors.push({ kind: 'aggregate-size-exceeds', detail: `Inline path attachment '${a.filename}' would push aggregate size to ${runningTotalBytes + a.sizeBytes} bytes, exceeds total cap of ${maxTotalBytes} bytes (override IMAP_MCP_MAX_TOTAL_ATTACHMENT_SIZE_BYTES).` });
+              inlineErrors.push({ kind: 'aggregate-size-exceeds', detail: `Inline path attachment '${a.filename}' would push aggregate size to ${humanBytes(runningTotalBytes + a.sizeBytes)}, exceeds total cap of ${humanBytes(maxTotalBytes)} (override IMAP_MCP_MAX_TOTAL_ATTACHMENT_SIZE_BYTES).` });
               continue;
             }
             runningTotalBytes += a.sizeBytes;
@@ -767,11 +811,11 @@ export function emailTools(
         }
         const stagedSize = f.size;
         if (stagedSize > maxBytes) {
-          stagedErrors.push({ kind: 'size-exceeds-per-attachment', detail: `Staged attachment '${cleanName}' is ${stagedSize} bytes, exceeds per-attachment cap of ${maxBytes} (override IMAP_MCP_MAX_ATTACHMENT_SIZE_BYTES).` });
+          stagedErrors.push({ kind: 'size-exceeds-per-attachment', detail: `Staged attachment '${cleanName}' is ${humanBytes(stagedSize)}, exceeds per-attachment cap of ${humanBytes(maxBytes)} (override IMAP_MCP_MAX_ATTACHMENT_SIZE_BYTES).` });
           continue;
         }
         if (runningTotalBytes + stagedSize > maxTotalBytes) {
-          stagedErrors.push({ kind: 'aggregate-size-exceeds', detail: `Staged attachment '${cleanName}' would push aggregate size to ${runningTotalBytes + stagedSize} bytes, exceeds total cap of ${maxTotalBytes} (override IMAP_MCP_MAX_TOTAL_ATTACHMENT_SIZE_BYTES).` });
+          stagedErrors.push({ kind: 'aggregate-size-exceeds', detail: `Staged attachment '${cleanName}' would push aggregate size to ${humanBytes(runningTotalBytes + stagedSize)}, exceeds total cap of ${humanBytes(maxTotalBytes)} (override IMAP_MCP_MAX_TOTAL_ATTACHMENT_SIZE_BYTES).` });
           continue;
         }
         runningTotalBytes += stagedSize;

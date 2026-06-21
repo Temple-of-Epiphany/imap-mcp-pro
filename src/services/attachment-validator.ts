@@ -24,6 +24,7 @@ import os from 'os';
 import path from 'path';
 import { lookup as mimeLookup } from 'mime-types';
 import { DatabaseService } from './database-service.js';
+import { humanBytes } from '../utils/human-bytes.js';
 
 /**
  * Per-user attachment outbox directory (#148). Server-managed sanctioned
@@ -368,9 +369,9 @@ export function formatValidationErrors(errors: ValidationFailure[]): string[] {
           'allow-list and completes in one round-trip.'
         );
       case 'size-exceeds-per-attachment':
-        return `Attachment exceeds per-file limit: ${e.path} (${e.sizeBytes} bytes > ${e.limitBytes})`;
+        return `Attachment exceeds per-file limit: ${e.path} (${humanBytes(e.sizeBytes)} > ${humanBytes(e.limitBytes)})`;
       case 'aggregate-size-exceeds':
-        return `Aggregate attachments exceed limit at ${e.pendingPath}: ${e.totalBytes} bytes > ${e.limitBytes}`;
+        return `Aggregate attachments exceed limit at ${e.pendingPath}: ${humanBytes(e.totalBytes)} > ${humanBytes(e.limitBytes)}`;
       case 'no-allowed-dirs-configured':
         return (
           'No allowed attachment directories configured for path-based attachments — including ' +
