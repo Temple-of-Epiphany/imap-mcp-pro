@@ -51,6 +51,33 @@ export interface EmailSizeInfo {
   hasAttachments: boolean;
 }
 
+/** Message priority level (Issue #48). */
+export type EmailPriority = 'high' | 'normal' | 'low';
+
+/** Custom IMAP keywords used to persist a settable priority (headers are immutable). */
+const PRIORITY_KEYWORDS = { high: '$Priority-High', low: '$Priority-Low' } as const;
+
+/**
+ * Resolve a priority from raw message headers (compose-time): X-Priority
+ * (1-2 high, 3 normal, 4-5 low), then Importance, then X-MSMail-Priority.
+ * Returns null when no recognized priority header is present.
+ */
+function parsePriorityHeaders(raw: string): EmailPriority | null {
+  if (!raw) return null;
+  const xp = raw.match(/^x-priority:\s*(\d)/im);
+  if (xp) {
+    const n = Number(xp[1]);
+    if (n <= 2) return 'high';
+    if (n >= 4) return 'low';
+    return 'normal';
+  }
+  const imp = raw.match(/^importance:\s*(high|normal|low)/im);
+  if (imp) return imp[1].toLowerCase() as EmailPriority;
+  const ms = raw.match(/^x-msmail-priority:\s*(high|normal|low)/im);
+  if (ms) return ms[1].toLowerCase() as EmailPriority;
+  return null;
+}
+
 /** Best-effort: does a fetched bodyStructure contain an attachment disposition? */
 function bodyStructureHasAttachment(node: any): boolean {
   if (!node) return false;
@@ -1373,6 +1400,70 @@ export class ImapService {
       await client.mailboxOpen(folderName);
       await client.messageFlagsRemove(uids.join(','), [keyword], { uid: true });
     }, `bulkRemoveKeyword(${folderName}, ${keyword}, ${uids.length} messages)`);
+  }
+
+  // RFC 9051: message priority (Issue #48).
+  //
+  // IMAP messages are immutable, so compose-time priority headers
+  // (X-Priority/Importance) can't be changed after delivery. We therefore SET
+  // priority with custom IMAP keywords ($Priority-High / $Priority-Low; "normal"
+  // clears both) via STORE, and RESOLVE priority on read by preferring our
+  // keyword (the user's explicit setting) and otherwise parsing the headers.
+
+  async setEmailPriority(
+    accountId: string,
+    folderName: string,
+    uids: number[],
+    priority: EmailPriority
+  ): Promise<{ priority: EmailPriority; keyword: string | null; accepted: boolean; uids: number[] }> {
+    return this.withRetry(accountId, async () => {
+      const client = this.getConnection(accountId);
+      await client.mailboxOpen(folderName);
+      const range = uids.join(',');
+
+      // Clear any prior priority keyword first so levels never stack.
+      await client.messageFlagsRemove(range, [PRIORITY_KEYWORDS.high, PRIORITY_KEYWORDS.low], { uid: true });
+
+      let keyword: string | null = null;
+      let accepted = true;
+      if (priority === 'high') keyword = PRIORITY_KEYWORDS.high;
+      else if (priority === 'low') keyword = PRIORITY_KEYWORDS.low;
+
+      if (keyword) {
+        // messageFlagsAdd returns false when the server rejects the keyword
+        // (e.g. a mailbox that doesn't allow custom keywords).
+        accepted = await client.messageFlagsAdd(range, [keyword], { uid: true });
+      }
+
+      return { priority, keyword, accepted, uids };
+    }, `setEmailPriority(${folderName}, ${priority}, ${uids.length} messages)`);
+  }
+
+  async getEmailPriority(
+    accountId: string,
+    folderName: string,
+    uid: number
+  ): Promise<{ uid: number; priority: EmailPriority; source: 'keyword' | 'header' | 'default'; flags: string[] }> {
+    return this.withRetry(accountId, async () => {
+      const client = this.getConnection(accountId);
+      await client.mailboxOpen(folderName);
+
+      const msg = await client.fetchOne(uid.toString(), {
+        uid: true,
+        flags: true,
+        headers: ['x-priority', 'importance', 'x-msmail-priority'],
+      }, { uid: true });
+
+      if (!msg) throw new Error(`Email with UID ${uid} not found`);
+      const flags = msg.flags ? Array.from(msg.flags) : [];
+
+      if (flags.includes(PRIORITY_KEYWORDS.high)) return { uid, priority: 'high', source: 'keyword', flags };
+      if (flags.includes(PRIORITY_KEYWORDS.low)) return { uid, priority: 'low', source: 'keyword', flags };
+
+      const headerPriority = parsePriorityHeaders(msg.headers ? msg.headers.toString() : '');
+      if (headerPriority) return { uid, priority: headerPriority, source: 'header', flags };
+      return { uid, priority: 'normal', source: 'default', flags };
+    }, `getEmailPriority(${folderName}, ${uid})`);
   }
 
   // ============================================================================

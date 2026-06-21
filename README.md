@@ -17,7 +17,7 @@ An enterprise-grade Model Context Protocol (MCP) server that provides production
 
 ## Features
 
-**107 MCP tools** across email/folder/account/category/scoring/subscription/dns-firewall/usercheck/staging/cache/diagnostics — every IMAP4rev2 (RFC 9051) operation we use is exposed. See the full categorized list in [docs/TOOL_CATALOG.md](docs/TOOL_CATALOG.md) (generated from the manifest on every build), or run `imap_list_tools` for the live catalog at runtime.
+**100+ MCP tools** across email/folder/account/category/scoring/subscription/dns-firewall/usercheck/staging/cache/diagnostics — every IMAP4rev2 (RFC 9051) operation we use is exposed. See the full categorized list with exact count in [docs/TOOL_CATALOG.md](docs/TOOL_CATALOG.md) (generated from the manifest on every build), or run `imap_list_tools` for the live catalog at runtime.
 
 ### Core Features
 - 🔐 **Secure Account Management**: Encrypted credential storage with AES-256 encryption

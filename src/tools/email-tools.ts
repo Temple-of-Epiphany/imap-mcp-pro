@@ -495,6 +495,51 @@ export function emailTools(
     });
   }));
 
+  // Set message priority (#48). IMAP messages are immutable, so this stores a
+  // custom keyword ($Priority-High / $Priority-Low) rather than rewriting the
+  // X-Priority header. "normal" clears the keyword.
+  server.registerTool('imap_set_email_priority', {
+    description:
+      'Set the priority (high / normal / low) of one or more messages. Because IMAP messages are immutable, ' +
+      'this is stored as a custom IMAP keyword ($Priority-High / $Priority-Low) via STORE, not by rewriting the ' +
+      'X-Priority header; "normal" clears the keyword. Some servers may not allow custom keywords — the result ' +
+      'reports whether the server accepted it. To set real priority headers on outgoing mail, use imap_send_email.',
+    inputSchema: {
+      accountId: z.string().describe('Account ID'),
+      folder: z.string().default('INBOX').describe('Folder containing the messages (default: INBOX)'),
+      uids: z.array(z.number()).min(1).describe('UIDs to update'),
+      priority: z.enum(['high', 'normal', 'low']).describe("Priority level: 'high', 'normal' (clears the keyword), or 'low'"),
+    }
+  }, withErrorHandling(async ({ accountId, folder, uids, priority }) => {
+    const result = await imapService.setEmailPriority(accountId, folder, uids, priority);
+    return jsonResult({
+      folder,
+      priority: result.priority,
+      keyword: result.keyword,
+      accepted: result.accepted,
+      updated: result.uids.length,
+      uids: result.uids,
+      ...(result.accepted ? {} : { note: 'The server did not accept the priority keyword; this mailbox may not support custom keywords.' }),
+    });
+  }));
+
+  // Read the resolved priority of a message (#48): our keyword wins, else the
+  // compose-time X-Priority / Importance / X-MSMail-Priority header, else normal.
+  server.registerTool('imap_get_email_priority', {
+    description:
+      'Get the resolved priority of a message: our $Priority-* keyword if set (the explicit user setting), ' +
+      'otherwise the compose-time X-Priority / Importance / X-MSMail-Priority header, otherwise normal. ' +
+      'The `source` field says which of keyword / header / default the answer came from.',
+    inputSchema: {
+      accountId: z.string().describe('Account ID'),
+      folder: z.string().default('INBOX').describe('Folder containing the message (default: INBOX)'),
+      uid: z.number().describe('UID of the message'),
+    }
+  }, withErrorHandling(async ({ accountId, folder, uid }) => {
+    const result = await imapService.getEmailPriority(accountId, folder, uid);
+    return jsonResult({ folder, uid: result.uid, priority: result.priority, source: result.source, flags: result.flags });
+  }));
+
   // Export messages to standard .eml files on disk — download & save (#170)
   server.registerTool('imap_export_email', {
     description:
