@@ -90,19 +90,30 @@ export function registerSubscriptionTools(
    * Extract unsubscribe links from emails in a folder
    */
   server.registerTool('imap_extract_unsubscribe_links', {
-    description: 'Scan folder for unsubscribe links in emails. Extracts List-Unsubscribe headers and body links. Stores to database for subscription management. Processes 100+ emails efficiently.',
+    description:
+      'Scan a folder for unsubscribe links and store them for subscription management. ' +
+      'Header-first: reads each message\'s List-Unsubscribe header cheaply (no body download) and only ' +
+      'falls back to a full-body fetch when a message has no header and scanBodies is on. Bounded by an ' +
+      'internal time budget (maxDurationMs) so it always returns — on timeout it returns a partial result ' +
+      'with truncated:true and nextUid for resuming via afterUid. For large folders, paginate with afterUid.',
     inputSchema: {
       userId: z.string().describe('User ID (either canonical user_id UUID or username from the users table). Call imap_list_users for valid values.'),
       accountId: z.string().describe('Account ID'),
       folder: z.string().default('INBOX').describe('Folder name'),
       limit: z.number().optional().default(100).describe('Max emails to process (default: 100)'),
-      olderThan: z.number().optional().describe('Optional: Only process emails older than N days')
+      olderThan: z.number().optional().describe('Optional: Only process emails older than N days'),
+      afterUid: z.number().optional().describe('Resume: only process messages with UID greater than this (pass the previous run\'s nextUid).'),
+      scanBodies: z.boolean().optional().default(true).describe('On a header miss, fetch the full body to find in-body unsubscribe links (slower). Default true.'),
+      maxDurationMs: z.number().optional().default(50000).describe('Internal time budget in ms; on exceed, return a partial result with truncated:true (default 50000).'),
     }
-  }, withErrorHandling(async ({ userId: userIdRaw, accountId, folder, limit, olderThan }: {
-    userId: string; accountId: string; folder: string; limit?: number; olderThan?: number
+  }, withErrorHandling(async ({ userId: userIdRaw, accountId, folder, limit, olderThan, afterUid, scanBodies, maxDurationMs }: {
+    userId: string; accountId: string; folder: string; limit?: number; olderThan?: number;
+    afterUid?: number; scanBodies?: boolean; maxDurationMs?: number;
   }) => {
     const userId = resolveUserOrThrow(db, userIdRaw);
     const startTime = Date.now();
+    const budgetMs = maxDurationMs ?? 50000;
+    const wantBodyScan = scanBodies !== false;
 
     // Build search criteria
     const searchCriteria: any = {};
@@ -112,16 +123,25 @@ export function registerSubscriptionTools(
       searchCriteria.before = date;
     }
 
-    // Search for emails
-    const emails = await imapService.searchEmails(accountId, folder, searchCriteria);
-
-    // Limit results if specified
+    // Search for emails, apply resume cursor + limit. Process in ascending UID
+    // order so nextUid/afterUid paging is monotonic.
+    const emails = (await imapService.searchEmails(accountId, folder, searchCriteria))
+      .filter((e) => afterUid == null || e.uid > afterUid)
+      .sort((a, b) => a.uid - b.uid);
     const limitedEmails = limit ? emails.slice(0, limit) : emails;
+
+    // One cheap streaming fetch of just the List-Unsubscribe header lines for
+    // the whole set — avoids a full-body download per message (#131).
+    const headerRows = await imapService.getUnsubscribeHeaders(
+      accountId, folder, limitedEmails.map((e) => e.uid)
+    );
+    const headerByUid = new Map(headerRows.map((r) => [r.uid, r]));
 
     const results = {
       processed: 0,
       linksFound: 0,
       linksStored: 0,
+      bodyScans: 0,
       errors: 0,
       emails: [] as any[],
       // Per-message error reasons so the tool surface is debuggable on its
@@ -129,44 +149,57 @@ export function registerSubscriptionTools(
       failedLinks: [] as Array<{ uid: number; from: string; reason: string }>
     };
 
-    // Process each email
+    let truncated = false;
+    let nextUid: number | null = null;
+
     for (const email of limitedEmails) {
+      // Time budget (#131): stop before starting more work and hand back a
+      // partial result the caller can resume from.
+      if (Date.now() - startTime > budgetMs) {
+        truncated = true;
+        nextUid = email.uid - 1; // resume with afterUid = nextUid → reprocesses from here
+        break;
+      }
+
       try {
         results.processed++;
+        const row = headerByUid.get(email.uid);
+        const from = row?.from || email.from;
+        const subject = row?.subject || email.subject;
+        const date = row?.date ?? (email.date ? new Date(email.date) : undefined);
 
-        // Get full email content (includes body for parsing)
-        const emailContent = await imapService.getEmailContent(accountId, folder, email.uid, false);
+        // Header-first: parse the cheap header block (trailing blank line makes
+        // it a valid header-only RFC822 fragment for the parser).
+        let unsubscribeInfo = row?.headerBytes
+          ? await unsubscribeService.extractFromEmail(Buffer.concat([row.headerBytes, Buffer.from('\r\n')]))
+          : {};
 
-        // Build email source from parts for parsing
-        const emailSource = [
-          emailContent.textContent || '',
-          emailContent.htmlContent || ''
-        ].join('\n\n');
-
-        // Extract unsubscribe info from the email body/headers
-        const unsubscribeInfo = await unsubscribeService.extractFromEmail(emailSource);
+        // Fallback: only when the header yielded nothing and body scan is on.
+        if (!unsubscribeInfo.unsubscribe_link && !unsubscribeInfo.list_unsubscribe_header && wantBodyScan) {
+          results.bodyScans++;
+          const emailContent = await imapService.getEmailContent(accountId, folder, email.uid, false);
+          const emailSource = [emailContent.textContent || '', emailContent.htmlContent || ''].join('\n\n');
+          unsubscribeInfo = await unsubscribeService.extractFromEmail(emailSource);
+        }
 
         // v2.17.6 (#143): sanitize before storing so future-stored URLs
-        // are free of parsing residue (`>™`, `]`, control chars). Existing
-        // stored data is sanitized on the read path; new writes get the
-        // benefit at the source.
+        // are free of parsing residue (`>™`, `]`, control chars).
         const cleanLink = sanitizeUrl(unsubscribeInfo.unsubscribe_link);
         const cleanHeader = sanitizeText(unsubscribeInfo.list_unsubscribe_header, 500);
-        const cleanSubject = sanitizeText(email.subject, 200);
+        const cleanSubject = sanitizeText(subject, 200);
 
         if (cleanLink || cleanHeader) {
           results.linksFound++;
 
-          // Store to database with sanitized fields.
           unsubscribeService.storeUnsubscribeLink({
             user_id: userId,
             account_id: accountId,
             folder,
             uid: email.uid,
-            sender_email: email.from,
-            sender_name: email.from.split('<')[0].trim(),
+            sender_email: from,
+            sender_name: from.split('<')[0].trim(),
             subject: cleanSubject ?? undefined,
-            message_date: email.date ? new Date(email.date) : undefined,
+            message_date: date,
             unsubscribe_info: {
               ...unsubscribeInfo,
               unsubscribe_link: cleanLink ?? undefined,
@@ -178,9 +211,9 @@ export function registerSubscriptionTools(
 
           results.emails.push({
             uid: email.uid,
-            from: email.from,
+            from,
             subject: cleanSubject,
-            date: email.date,
+            date,
             unsubscribe_link: cleanLink,
             unsubscribe_method: unsubscribeInfo.unsubscribe_method,
             has_list_unsubscribe_header: !!cleanHeader,
@@ -206,10 +239,14 @@ export function registerSubscriptionTools(
         text: JSON.stringify({
           summary: {
             processed: results.processed,
+            candidates: limitedEmails.length,
             linksFound: results.linksFound,
             linksStored: results.linksStored,
+            bodyScans: results.bodyScans,
             errors: results.errors,
-            elapsed_ms: elapsed
+            elapsed_ms: elapsed,
+            truncated,
+            ...(truncated ? { nextUid, hint: `Re-run with afterUid: ${nextUid} to continue.` } : {}),
           },
           emails: results.emails,
           // Only include when non-empty to avoid noise on healthy runs.
