@@ -975,6 +975,42 @@ export class ImapService {
     }, `getEmailSizes(${folderName})`);
   }
 
+  /**
+   * Fetch the raw RFC822 source (plus light envelope info for filename
+   * construction) for a set of UIDs in one pass. Used by the .eml export
+   * tools — the source buffer IS the on-disk .eml (lossless; attachments and
+   * inline images preserved exactly as received).
+   */
+  async getRawMessages(
+    accountId: string,
+    folderName: string,
+    uids: number[]
+  ): Promise<Array<{ uid: number; source: Buffer; subject: string; from: string; date: Date }>> {
+    return this.withRetry(accountId, async () => {
+      const out: Array<{ uid: number; source: Buffer; subject: string; from: string; date: Date }> = [];
+      if (uids.length === 0) return out;
+
+      const client = this.getConnection(accountId);
+      await client.mailboxOpen(folderName);
+
+      for await (const msg of client.fetch(uids.join(','), {
+        uid: true,
+        source: true,
+        envelope: true
+      }, { uid: true })) {
+        if (!msg.source) continue;
+        out.push({
+          uid: msg.uid,
+          source: msg.source as Buffer,
+          subject: msg.envelope?.subject || '',
+          from: msg.envelope?.from?.[0]?.address || '',
+          date: msg.envelope?.date || new Date()
+        });
+      }
+      return out;
+    }, `getRawMessages(${folderName}, ${uids.length} uids)`);
+  }
+
   private buildImapFlowSearchQuery(criteria: SearchCriteria): any {
     const query: any = {};
 
