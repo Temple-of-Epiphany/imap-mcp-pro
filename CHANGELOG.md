@@ -5,6 +5,30 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.18.0] - 2026-06-21
+
+### Licensing, dependency, and distribution release
+
+No MCP tool API or behavior changes — every refactor below preserved tool names, input schemas, and output payloads (locked by new route tests). This release re-licenses the project, removes native dependencies, and adds MCP Registry publishing.
+
+**Licensing**
+- Adopted the standard **PolyForm Noncommercial License 1.0.0** for noncommercial use, replacing the prior custom dual-license text, while keeping the separate commercial-license pathway (sell-exceptions model). The preexisting MIT base (Michael Nikolaus's `imap-mcp-server`) attribution and notice are retained; the project is "based on" that work under MIT. Added `NOTICE` and a `CLA.md` contributor agreement. SPDX identifier `PolyForm-Noncommercial-1.0.0` applied across the tree. Corrected README license inaccuracies (removed an incorrect share-alike claim and a stray "Apache 2.0" line).
+
+**Dependencies / runtime**
+- Removed the unused experimental SQLCipher encryption subsystem (`src/services/encryption/`), which eliminated the project's only two **native** dependencies — `keytar` (archived/deprecated) and `@journeyapps/sqlcipher`. The runtime is now **pure JavaScript** (`node:sqlite` + file-based AES-256-GCM field encryption), so a single universal `.mcpb` runs on every platform.
+- Removed dead legacy `AccountManager` and an obsolete `test-tools.js` script.
+
+**Distribution / MCP Registry**
+- Added `server.json` and automated publishing to the official **MCP Registry** (`registryType: mcpb`, namespace `io.github.Temple-of-Epiphany/imap-mcp-pro`) via GitHub OIDC.
+- The release workflow now builds one **universal** `imap-mcp-pro-<version>.mcpb` (no per-platform matrix) and ships `LICENSE`/`NOTICE` inside the bundle.
+
+**Internal quality**
+- Clean-room re-expression of provider presets, the setup wizard, and several tool/service modules, plus comment/header refreshes — all behavior-preserving.
+- Test suite grew from 87 → 132 tests, adding route tests for the folder, account, email, and SMTP tools and the web UI HTTP routes.
+
+### Fixed
+- `/api/usercheck/check-email` web route was missing, causing the UserCheck API-key "Test" button to fail with `Unexpected token '<'` (HTML 404 parsed as JSON) for valid keys (#165).
+
 ## [2.17.16] - 2026-05-08
 
 ### Patch — replicate the v2.17.13 `usage` hint pattern across discovery tools (closes #161)
