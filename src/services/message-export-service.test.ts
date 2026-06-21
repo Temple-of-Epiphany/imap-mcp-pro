@@ -1,0 +1,76 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
+import { MessageExportService, ExportItem } from './message-export-service.js';
+
+function item(overrides: Partial<ExportItem> = {}): ExportItem {
+  return {
+    uid: 7,
+    source: Buffer.from('From: a@x.com\r\nSubject: Hi\r\n\r\nbody\r\n'),
+    subject: 'Quarterly Report',
+    from: 'sender@example.com',
+    date: new Date('2026-03-04T12:00:00'),
+    ...overrides,
+  };
+}
+
+describe('MessageExportService.buildFilename', () => {
+  const svc = new MessageExportService();
+
+  it('builds a date_from_subject_uid .eml name', () => {
+    expect(svc.buildFilename(item())).toBe('2026-03-04_sender_Quarterly-Report_uid7.eml');
+  });
+
+  it('sanitizes unsafe characters and slashes', () => {
+    const name = svc.buildFilename(item({ subject: 'Re: invoice / 2026 *final*', from: 'a/b@x.com', uid: 12 }));
+    expect(name.endsWith('_uid12.eml')).toBe(true);
+    expect(name).not.toMatch(/[\\/*]/);
+  });
+
+  it('falls back to "untitled" for empty subject/from', () => {
+    const name = svc.buildFilename(item({ subject: '', from: '', uid: 3 }));
+    expect(name).toBe('2026-03-04_untitled_untitled_uid3.eml');
+  });
+});
+
+describe('MessageExportService.exportEml', () => {
+  let dir: string;
+  const svc = new MessageExportService();
+  beforeEach(async () => { dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mexport-')); });
+  afterEach(async () => { await fs.rm(dir, { recursive: true, force: true }); });
+
+  it('writes each message as a .eml file with verbatim source and returns a manifest', async () => {
+    const out = path.join(dir, 'exports');
+    const items = [
+      item({ uid: 1, source: Buffer.from('RAW-ONE') }),
+      item({ uid: 2, source: Buffer.from('RAW-TWO-LONGER') }),
+    ];
+    const res = await svc.exportEml(out, items);
+
+    expect(res.count).toBe(2);
+    expect(res.totalBytes).toBe(Buffer.from('RAW-ONE').length + Buffer.from('RAW-TWO-LONGER').length);
+    expect(res.files).toHaveLength(2);
+
+    for (const f of res.files) {
+      const onDisk = await fs.readFile(f.path);
+      const original = items.find(i => i.uid === f.uid)!.source;
+      expect(onDisk.equals(original)).toBe(true); // lossless, verbatim
+      expect(f.path.startsWith(out)).toBe(true);
+      expect(f.filename.endsWith('.eml')).toBe(true);
+    }
+  });
+
+  it('creates the output directory if missing', async () => {
+    const nested = path.join(dir, 'a', 'b', 'exports');
+    const res = await svc.exportEml(nested, [item()]);
+    expect(res.count).toBe(1);
+    await expect(fs.stat(nested)).resolves.toBeTruthy();
+  });
+
+  it('returns an empty manifest for no items', async () => {
+    const res = await svc.exportEml(path.join(dir, 'empty'), []);
+    expect(res).toMatchObject({ count: 0, totalBytes: 0, files: [] });
+  });
+});

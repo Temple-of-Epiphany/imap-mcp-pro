@@ -15,6 +15,9 @@ import {
 } from './result-envelope.js';
 import { getToolContext } from './tool-context.js';
 import { ContextReductionConfig as Cfg } from '../config/context-reduction.js';
+import { getOutboxDir, sanitizeFilename } from '../services/attachment-validator.js';
+import { MessageExportService } from '../services/message-export-service.js';
+import path from 'path';
 
 type ResponseModeOpt = 'auto' | 'inline' | 'handle' | 'file' | undefined;
 type StorageTypeOpt = 'temp' | 'persistent' | undefined;
@@ -369,6 +372,48 @@ export function emailTools(
       })),
       // Convenience: ready to pass to imap_bulk_delete_emails / imap_bulk_move_emails.
       uids: limited.map(m => m.uid),
+    });
+  }));
+
+  // Export messages to standard .eml files on disk — download & save (#170)
+  server.registerTool('imap_export_email', {
+    description:
+      'Export one or more messages to standard .eml files on the server host (download & save). ' +
+      '.eml is the raw RFC822 source — lossless, opens in Outlook/Thunderbird/Apple Mail, with attachments ' +
+      'and inline images preserved. Files are written under the per-user outbox ' +
+      '(~/.imap-mcp/users/{userId}/outbox/exports/), optionally grouped in a named subfolder. All processing is local.',
+    inputSchema: {
+      accountId: z.string().describe('Account ID'),
+      folder: z.string().default('INBOX').describe('Folder containing the messages (default: INBOX)'),
+      uids: z.array(z.number()).min(1).describe('UIDs of the messages to export'),
+      subfolder: z.string().optional().describe('Optional subfolder name under exports/ to group the files (sanitized to a single path segment)'),
+    }
+  }, withErrorHandling(async ({ accountId, folder, uids, subfolder }) => {
+    const userId = resolveUserId(db) ?? 'default';
+    const messages = await imapService.getRawMessages(accountId, folder, uids);
+    if (messages.length === 0) {
+      return jsonResult({ success: false, message: 'No messages found for the given UIDs', folder, requestedUids: uids });
+    }
+
+    // Output dir lives under the per-user outbox (always allow-listed). The
+    // optional subfolder is reduced to a single sanitized segment so it cannot
+    // escape the outbox via path traversal.
+    const seg = subfolder ? sanitizeFilename(subfolder).replace(/[\\/]/g, '') : '';
+    const outputDir = path.join(getOutboxDir(userId), 'exports', seg);
+
+    const result = await new MessageExportService().exportEml(outputDir, messages);
+
+    return jsonResult({
+      success: true,
+      format: 'eml',
+      folder,
+      outputDir: result.outputDir,
+      count: result.count,
+      totalBytes: result.totalBytes,
+      totalSize: humanBytes(result.totalBytes),
+      files: result.files.map(f => ({ uid: f.uid, filename: f.filename, path: f.path, size: humanBytes(f.bytes) })),
+      requestedUids: uids,
+      missingUids: uids.filter(u => !messages.some(m => m.uid === u)),
     });
   }));
 
