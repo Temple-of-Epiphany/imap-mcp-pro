@@ -1,14 +1,13 @@
 name: Build .mcpb extension
 
 # Triggers:
-#   - tag push matching v*.*.* — produces release artifacts
-#   - manual workflow_dispatch — produces preview artifacts (no release upload)
+#   - tag push matching v*.*.* — builds the universal .mcpb, attaches it to the
+#     GitHub Release, and publishes the server to the MCP Registry.
+#   - manual workflow_dispatch — builds a preview artifact (no release, no publish).
 #
-# Builds a Claude Desktop Extension (.mcpb) for each supported platform via
-# dxt/build.mjs. better-sqlite3 ships native bindings, so each platform must
-# build its own archive.
-#
-# Phase 6 (#108) of the SDK alignment & .mcpb tracker (#102).
+# The runtime is pure JavaScript (node:sqlite + file-based AES-256-GCM; no native
+# modules after the keytar/sqlcipher removal), so a SINGLE universal .mcpb runs on
+# every platform — no per-platform build matrix needed.
 
 on:
   push:
@@ -16,35 +15,17 @@ on:
       - 'v*.*.*'
   workflow_dispatch:
 
-# Force JavaScript actions onto Node.js 24. GitHub deprecated Node 20 in
-# their action runtime — without this opt-in, every run logs the deprecation
-# warning, and Node 20 will be removed entirely on 2026-09-16. See
-# https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 permissions:
-  contents: write  # needed for release upload
+  contents: write   # release upload
+  id-token: write   # MCP Registry OIDC auth
 
 jobs:
   build:
-    name: Build (${{ matrix.label }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-14         # Apple Silicon
-            label: macos-arm64
-          - os: windows-latest
-            label: windows-x64
-          - os: ubuntu-latest
-            label: linux-x64
-          # macos-x64 (Intel) intentionally dropped — GitHub-hosted macos-13
-          # runners are queue-starved through 2026 (Apple Silicon transition).
-          # macOS Intel users can run the linux-x64 .mcpb under Rosetta or
-          # build from source. Tracked in commit history; revisit if a clean
-          # macos-x64 runner pool returns.
-    runs-on: ${{ matrix.os }}
+    name: Build universal .mcpb
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
@@ -58,8 +39,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build .mcpb
-        run: node dxt/build.mjs
+      - name: Build universal .mcpb
+        run: node dxt/build.mjs --universal
 
       - name: Verify artifact exists
         shell: bash
@@ -70,7 +51,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
-          name: mcpb-${{ matrix.label }}
+          name: mcpb-universal
           path: |
             dxt/build/*.mcpb
             dxt/build/*.mcpb.sha256
@@ -82,30 +63,25 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
-      - name: Checkout (for release notes)
+      - name: Checkout (for changelog)
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
 
-      - name: Download all artifacts
+      - name: Download artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
-          path: dist-artifacts
-
-      - name: Flatten artifacts
-        run: |
-          mkdir -p release-files
-          find dist-artifacts -type f \( -name '*.mcpb' -o -name '*.mcpb.sha256' \) -exec cp {} release-files/ \;
-          ls -la release-files/
+          name: mcpb-universal
+          path: release-files
 
       - name: Build release notes preamble
         run: |
           {
             echo '## Claude Desktop Extension (.mcpb)'
             echo ''
-            echo 'Per-platform `.mcpb` archives. SHA-256 checksums are in the matching `.sha256` files.'
+            echo 'Single **universal** `.mcpb` — runs on macOS, Windows, and Linux (pure-JS runtime, no native binaries).'
             echo ''
-            echo 'To install: open Claude Desktop → Settings → Extensions → Install Extension… and choose the `.mcpb` for your platform.'
+            echo 'Install: Claude Desktop → Settings → Extensions → Install Extension… and choose the `.mcpb`.'
             echo ''
-            echo '### Checksums'
+            echo '### Checksum'
             echo ''
             echo '```'
             cat release-files/*.sha256 || true
@@ -121,5 +97,46 @@ jobs:
           body_path: release-body.md
           draft: false
           prerelease: false
-          # Append to existing notes if the release already exists
           append_body: true
+
+  publish-registry:
+    name: Publish to MCP Registry
+    needs: release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout (for server.json)
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
+
+      - name: Download artifact (for SHA-256)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: mcpb-universal
+          path: release-files
+
+      - name: Patch server.json (version, asset URL, fileSha256)
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"            # e.g. v2.17.16
+          VERSION="${TAG#v}"                  # e.g. 2.17.16
+          ASSET="imap-mcp-pro-${VERSION}.mcpb"
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${ASSET}"
+          SHA="$(openssl dgst -sha256 "release-files/${ASSET}" | awk '{print $2}')"
+          echo "version=$VERSION  sha=$SHA"
+          echo "url=$URL"
+          jq --arg v "$VERSION" --arg url "$URL" --arg sha "$SHA" '
+            .version = $v
+            | .packages[0].identifier = $url
+            | .packages[0].fileSha256 = $sha
+          ' server.json > server.tmp && mv server.tmp server.json
+          cat server.json
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Authenticate (GitHub OIDC)
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish to MCP Registry
+        run: ./mcp-publisher publish
