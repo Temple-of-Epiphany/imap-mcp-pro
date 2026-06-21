@@ -966,7 +966,9 @@ export function emailTools(
     try {
       resolved = await sentFolder.resolveSentFolder(accountId, {
         override: sentFolderOverride,
-        autoCreate: false,
+        // Honor IMAP_MCP_AUTO_CREATE_SENT_FOLDER / the "Auto-Create Sent Folder"
+        // user_config (previously hardcoded false, so the setting was ignored).
+        autoCreate: process.env.IMAP_MCP_AUTO_CREATE_SENT_FOLDER === 'true',
       });
     } catch (e: any) {
       return {
@@ -1005,6 +1007,9 @@ export function emailTools(
             result: 'sent_not_archived',
             archiveSkipped: 'no-sent-folder-found',
             resolutionMethod: resolved.method,
+            availableFolders: resolved.availableFolders,
+            hint: 'No Sent folder detected. Re-send with sentFolderOverride set to one of availableFolders, ' +
+              'or set IMAP_MCP_AUTO_CREATE_SENT_FOLDER=true to create a "Sent" folder automatically.',
           }, null, 2)
         }]
       };
