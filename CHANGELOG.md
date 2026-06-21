@@ -5,6 +5,29 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.19.0] - 2026-06-21
+
+Mailbox-cleanup tooling, local export, and a security-hardening pass. Tools 99 → 106; test suite 87 → 164.
+
+### Added
+- **`imap_get_email_sizes`** (#169) — find large messages by RFC822.SIZE (no body download); folder or explicit UID set, `minSizeBytes` filter, largest-first, with a `uids` array ready for bulk delete/move.
+- **Local export / "download & save"** (#170): `imap_export_email` (1+ UIDs → `.eml`), `imap_export_folder` and `imap_export_account` (mirror the IMAP folder structure on disk), and `imap_extract_attachments` (save attachments, with inline-skip / size / extension filters). Lossless raw-source `.eml`; writes confined to the per-user outbox.
+- **`imap_get_quota`** (#192) — account storage used/limit/percent via the IMAP QUOTA extension (RFC 9208); `supported:false` when unavailable.
+- **`imap_get_unsubscribe_links_for`** (#194) — read-only bulk extractor returning per-message unsubscribe links (header + body) plus sender, **recipient**, and subject; no DB write.
+- Human-readable byte sizes across all tool output (adaptive B/KB/MB/GB), via a shared `human-bytes` util.
+
+### Fixed
+- **Sent folder detection** (#190) — leaf-name, case-insensitive, localization-aware matching (resolves `INBOX.Sent`, `Enviados`, `Gesendete Objekte`, etc.); honor `IMAP_MCP_AUTO_CREATE_SENT_FOLDER` (previously ignored); return the folder list + a `sentFolderOverride` hint on failure.
+- **List-Unsubscribe header parsing** (#194) — mailparser groups `List-*` under a `list` key, so `headers.get('list-unsubscribe')` was always undefined and the header path never fired (body-only). Now reads the verbatim value from `headerLines` — also repairs `imap_extract_unsubscribe_links`.
+
+### Security
+- **nodemailer 7 → 9.0.1** (#208) — patches High send-path advisories (SMTP command injection, CRLF in transport/List-* headers, OAuth2 TLS, raw-send SSRF). Send path verified (incl. Bcc-preserving Sent copy).
+- **js-yaml 4 → 5.0.0** (#209) — patches the quadratic-complexity DoS advisory.
+- **Path-traversal containment guard** (#204) on the export/attachment write paths.
+- **Prototype-pollution guard** in the config loader's nested setter, and **CI supply-chain integrity** — the `mcp-publisher` install is now pinned + SHA-256-verified (#206).
+- Removed two orphan debug HTML pages with `innerHTML` XSS sinks (#207).
+- Known deferred (upstream blocker): the MCP SDK ReDoS / cross-client-leak advisories require SDK ≥1.26, which crashes `tsc`; both are low-applicability for a single-user local stdio server (#205).
+
 ## [2.18.1] - 2026-06-21
 
 ### Fixed
