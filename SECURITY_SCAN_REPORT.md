@@ -1,5 +1,7 @@
 # Snyk Security Scan Report - v2.5.0
 
+> **⚠️ Historical document (v2.5.0).** Findings referencing `AccountManager` and the SQLCipher/CBC key path are **resolved and no longer apply**: `AccountManager` was replaced by `DatabaseService`, and the native `keytar`/SQLCipher dependencies were removed entirely (#181). Credential storage is now file-based AES-256-GCM via `node:sqlite`. For the current security posture see `SECURITY.md`; for the latest dependency/SAST status see the Aikido audit tracked in #205. Retained for audit history.
+
 **Scan Date:** 2025-11-05  
 **Project:** IMAP MCP Pro v2.5.0  
 **Scanner:** Snyk Code Test

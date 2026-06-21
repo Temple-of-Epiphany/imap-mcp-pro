@@ -33,8 +33,8 @@ src/
 │   ├── attachment-staging-service.ts  # WP2: chunked-upload sessions + GC
 │   ├── results-service.ts        # Tool-result cache (handle/file modes), LRU eviction
 │   ├── file-export-service.ts    # Encrypted JSON/JSONL writer for file-mode results
-│   └── encryption/               # Key storage paths (keyring vs file)
-├── tools/                        # 91 MCP tools across 12 files
+│   └── message-export-service.ts # Local .eml/attachment export, path-traversal-guarded (#170)
+├── tools/                        # 107 MCP tools across 12 files (run imap_list_tools for the live catalog)
 │   ├── account-tools.ts          # 8  add/remove/list/share accounts
 │   ├── email-tools.ts            # 32 search/get/mark/delete/move/copy/send/bulk + WP1/2/3/4
 │   ├── folder-tools.ts           # 6  list/status/create/delete/rename

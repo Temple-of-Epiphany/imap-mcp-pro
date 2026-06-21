@@ -4,7 +4,7 @@
   "display_name": "IMAP MCP Pro",
   "version": "__VERSION__",
   "description": "Production-grade IMAP & SMTP integration for Claude Desktop. Connect any IMAP account, search and triage at scale, send messages with attachments, and run spam/domain checks via the UserCheck integration.",
-  "long_description": "IMAP MCP Pro turns Claude Desktop into a full-featured email client. It connects to any standard IMAP server (Gmail, Outlook, Fastmail, iCloud, Dovecot, etc.), supports multiple accounts per user, and exposes 80+ tools for searching, reading, sending, organizing, and analyzing email — including bulk operations on tens of thousands of messages without blowing your token budget thanks to the resource-handle response system.\n\nKey capabilities:\n- Multi-account IMAP via secure encrypted credential storage (AES-256-GCM)\n- Send mail through SMTP with backward-compatible attachment handling\n- Bulk search/move/copy/delete with auto-chunking and worker-pool parsing\n- Three-tier response (inline / handle / file-backed) keeps results small\n- UserCheck integration for spam-sender detection\n- DNS firewall checks for outbound link safety\n- 80+ MCP tools — every IMAP4rev2 (RFC 9051) operation we use is implemented\n\nThis extension installs a self-contained Node runtime and stores credentials in your OS keyring when run as a Claude Desktop extension.",
+  "long_description": "IMAP MCP Pro turns Claude Desktop into a full-featured email client. It connects to any standard IMAP server (Gmail, Outlook, Fastmail, iCloud, Dovecot, etc.), supports multiple accounts per user, and exposes 100+ tools for searching, reading, sending, organizing, and analyzing email — including bulk operations on tens of thousands of messages without blowing your token budget thanks to the resource-handle response system.\n\nKey capabilities:\n- Multi-account IMAP via secure encrypted credential storage (AES-256-GCM)\n- Send mail through SMTP with backward-compatible attachment handling\n- Bulk search/move/copy/delete with auto-chunking and worker-pool parsing\n- Find and clean up large messages by size; export messages and attachments locally as .eml; report mailbox quota\n- Three-tier response (inline / handle / file-backed) keeps results small\n- UserCheck integration for spam-sender detection\n- DNS firewall checks for outbound link safety\n- 100+ MCP tools — every IMAP4rev2 (RFC 9051) operation we use is implemented\n\nThis extension installs a self-contained Node runtime. Credentials are encrypted at rest with AES-256-GCM using a file-based key (stored at ~/.imap-mcp/.encryption-key, mode 600) — no native OS-keyring dependency.",
   "author": {
     "name": "Colin Bitterfield",
     "email": "colin.bitterfield@templeofepiphany.com",
@@ -58,7 +58,7 @@
     "encryption_key": {
       "type": "string",
       "title": "Encryption Key (optional)",
-      "description": "Master key for credential storage. Leave blank to use the system keyring (recommended on Claude Desktop).",
+      "description": "Master key for credential storage. Leave blank to auto-generate a file-based key (~/.imap-mcp/.encryption-key, mode 600); credentials are encrypted with AES-256-GCM. Set a value only to supply your own key.",
       "sensitive": true,
       "required": false
     },
