@@ -86,7 +86,7 @@
     "js-yaml": "^4.1.1",
     "mailparser": "^3.7.4",
     "mime-types": "^3.0.2",
-    "nodemailer": "^7.0.5",
+    "nodemailer": "^9.0.1",
     "open": "^10.2.0",
     "ora": "^8.2.0",
     "zod": "^3.25.76",
