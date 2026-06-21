@@ -1,0 +1,22 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Temple-of-Epiphany/imap-mcp-pro",
+  "title": "IMAP MCP Pro",
+  "description": "Production-grade IMAP & SMTP integration for Claude. Connect any IMAP account, search and triage at scale, send messages with attachments, and run spam/domain checks via the UserCheck integration.",
+  "version": "2.17.16",
+  "repository": {
+    "url": "https://github.com/Temple-of-Epiphany/imap-mcp-pro",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/Temple-of-Epiphany/imap-mcp-pro#readme",
+  "packages": [
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/Temple-of-Epiphany/imap-mcp-pro/releases/download/v2.17.16/imap-mcp-pro-v2.17.16.mcpb",
+      "fileSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
