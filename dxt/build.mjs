@@ -43,6 +43,10 @@ const serverDir = path.join(buildDir, 'server');
 const args = new Set(process.argv.slice(2));
 const skipRebuild = args.has('--skip-rebuild');
 const skipZip = args.has('--skip-zip');
+// Universal mode: the runtime is pure JS (node:sqlite, no native deps), so one
+// bundle runs on every platform. Drops the platform suffix from the archive
+// name (imap-mcp-pro-<version>.mcpb) — used for the single MCP Registry artifact.
+const universal = args.has('--universal');
 
 function log(...m) {
   process.stderr.write(`[dxt/build] ${m.join(' ')}\n`);
@@ -194,7 +198,9 @@ if (skipZip) {
   process.exit(0);
 }
 
-const archiveName = `imap-mcp-pro-${version}-${platform}.mcpb`;
+const archiveName = universal
+  ? `imap-mcp-pro-${version}.mcpb`
+  : `imap-mcp-pro-${version}-${platform}.mcpb`;
 const archivePath = path.join(dxtDir, 'build', archiveName);
 
 // Use system zip on macOS/Linux; on Windows use PowerShell Compress-Archive.
