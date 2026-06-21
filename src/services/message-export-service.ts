@@ -70,6 +70,20 @@ export class MessageExportService {
   }
 
   /**
+   * Map an IMAP folder name to a relative on-disk path, mirroring the mailbox
+   * hierarchy. Each segment (split on `/` or `.`) is sanitized independently so
+   * a folder like `INBOX.Archive.2026` becomes `INBOX/Archive/2026` on disk.
+   * Returns '' for the implicit root so callers can join safely.
+   */
+  folderToDiskPath(folder: string): string {
+    const segments = (folder || '')
+      .split(/[/.]/)
+      .map((s) => sanitizeFilename(s.trim()).replace(/[\\/]/g, ''))
+      .filter(Boolean);
+    return segments.join(path.sep);
+  }
+
+  /**
    * Write each item's raw source as a `.eml` file into `outputDir` (created if
    * needed, mode 0700). Returns a manifest of what was written.
    */

@@ -35,6 +35,26 @@ describe('MessageExportService.buildFilename', () => {
   });
 });
 
+describe('MessageExportService.folderToDiskPath', () => {
+  const svc = new MessageExportService();
+  const sep = path.sep;
+
+  it('mirrors a namespaced folder hierarchy to nested dirs', () => {
+    expect(svc.folderToDiskPath('INBOX.Archive.2026')).toBe(['INBOX', 'Archive', '2026'].join(sep));
+    expect(svc.folderToDiskPath('INBOX/Sent Items')).toBe(['INBOX', 'Sent Items'].join(sep));
+  });
+
+  it('handles a single-segment folder', () => {
+    expect(svc.folderToDiskPath('Sent')).toBe('Sent');
+  });
+
+  it('neutralizes traversal and drops empty segments', () => {
+    // split-on-"." turns ".." into empty segments, which are filtered out.
+    expect(svc.folderToDiskPath('A/../weird')).toBe(['A', 'weird'].join(sep));
+    expect(svc.folderToDiskPath('//Sent//')).toBe('Sent');
+  });
+});
+
 describe('MessageExportService.exportEml', () => {
   let dir: string;
   const svc = new MessageExportService();
