@@ -1,5 +1,7 @@
 # IMAP MCP Pro - Test Results
 
+> **⚠️ Historical snapshot (v2.12.0).** The tool counts and tool lists below reflect that release and are out of date. For the current tool catalog see [docs/TOOL_CATALOG.md](docs/TOOL_CATALOG.md) (or `imap_list_tools`); current automated-test status is the `vitest` suite (`npm test`). Retained for history.
+
 **Date:** 2025-11-17
 **Version:** 2.12.0
 **Node.js:** v24.11.0

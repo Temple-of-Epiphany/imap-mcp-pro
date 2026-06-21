@@ -1,5 +1,7 @@
 # IMAP MCP Pro - Development TODO
 
+> **⚠️ Historical document.** Active work is tracked in **GitHub Issues / Projects**, not here. Any tool counts or task lists below are a point-in-time snapshot and are out of date — the authoritative tool list is [docs/TOOL_CATALOG.md](docs/TOOL_CATALOG.md) (or `imap_list_tools`). Retained for history.
+
 **Project**: IMAP MCP Pro (Enterprise Edition)
 **Organization**: Temple of Epiphany
 **Repository**: https://github.com/Temple-of-Epiphany/imap-mcp-pro

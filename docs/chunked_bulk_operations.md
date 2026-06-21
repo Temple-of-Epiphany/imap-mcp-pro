@@ -1,5 +1,7 @@
 # Chunked Bulk Operations - Solution for Large-Scale Email Processing
 
+> **Note:** Design/reference document. Any "N tools registered" figures in the example output are illustrative and dated — the authoritative tool list is [TOOL_CATALOG.md](./TOOL_CATALOG.md) (or `imap_list_tools`). The chunked-bulk design described here is current.
+
 **Author:** Colin Bitterfield
 **Email:** colin.bitterfield@templeofepiphany.com
 **Date Created:** 2025-01-24
