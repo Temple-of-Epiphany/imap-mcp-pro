@@ -4,14 +4,14 @@
 > manifest by `scripts/gen-tool-catalog.mjs` (runs on `npm run build`).
 > The authoritative runtime list is always available via the `imap_list_tools` tool.
 
-**112 MCP tools** total.
+**113 MCP tools** total.
 
 ## Categories
 
 - [Users (MSP multi-tenant)](#users-msp-multitenant) — 3
 - [Account management](#account-management) — 15
 - [Bulk operations](#bulk-operations) — 11
-- [Size, export & quota](#size-export-quota) — 7
+- [Size, export & quota](#size-export-quota) — 8
 - [Attachment staging](#attachment-staging) — 6
 - [Email operations](#email-operations) — 13
 - [Folder & mailbox operations](#folder-mailbox-operations) — 11
@@ -76,6 +76,7 @@
 | `imap_export_email` | Export one or more messages to standard .eml files on the server host (download & save). |
 | `imap_export_folder` | Export all messages in a folder to standard .eml files on the server host, mirroring the folder hierarchy under the per-user outbox (exports/[subfolder]/{folder path}/). |
 | `imap_extract_attachments` | Extract file attachments from a block of messages and save them to disk under the per-user outbox (exports/attachments/[subfolder]/). |
+| `imap_get_attachment` | Fetch a single attachment from a message for preview or download. |
 | `imap_get_email_sizes` | List messages by size to find large emails — uses RFC822.SIZE (no body download, cheap even on big folders). |
 | `imap_get_largest_emails` | Find the largest emails across several folders at once (default: just INBOX) and return the global top-N. |
 | `imap_get_quota` | Report account storage quota — used / limit / percent — via the IMAP QUOTA extension (RFC 9208). |
