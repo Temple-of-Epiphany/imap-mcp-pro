@@ -139,6 +139,7 @@ export const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
   // ---- meta-tools (8) ----
   'imap_about':                        READ_ONLY,
   'imap_list_tools':                   READ_ONLY,
+  'imap_help':                         READ_ONLY,
   'imap_open_web_ui':                  WRITE_LOCAL,
   'imap_connect':                      NEUTRAL_IDEMPOTENT,
   'imap_disconnect':                   NEUTRAL_IDEMPOTENT,

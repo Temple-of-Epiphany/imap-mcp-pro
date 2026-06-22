@@ -44,7 +44,7 @@ const CATEGORIES = [
   ['DNS firewall & domain checks', /^imap_(check_domain|check_domain_dns_firewall|scan_message_domains|test_quad9_dns)$/],
   ['Local cache', /^imap_(search_cache|sync_folder_cache)$/],
   ['Capabilities, diagnostics & metrics', /^imap_(get_capabilities|test_smtp|test_sent_folder|list_unarchived_sends|get_metrics|get_operation_metrics|reset_metrics|get_smtp_metrics|reset_smtp_metrics|get_circuit_breaker|reset_circuit_breaker)$/],
-  ['Meta & discovery', /^imap_(about|list_tools|check_skill_updates|update_skills|results)$/],
+  ['Meta & discovery', /^imap_(about|list_tools|help|check_skill_updates|update_skills|results)$/],
   ['Admin & lifecycle', /^imap_(server_reload|open_web_ui)$/],
 ];
 
