@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { withErrorHandling, AccountNotFoundError } from '../utils/error-handler.js';
 import { ImapAccount } from '../types/index.js';
 import { humanBytes } from '../utils/human-bytes.js';
+import { extractPdfText } from '../utils/pdf-text.js';
 import {
   maybeStoreAsHandle,
   ResponseModeSchema,
@@ -28,6 +29,22 @@ function resolveUserId(db: DatabaseService): string | null {
   } catch {
     return null;
   }
+}
+
+// Attachment text-preview classification, shared by imap_get_attachment and
+// imap_get_email (#89).
+const ATT_TEXT_TYPES = /^(text\/|application\/(json|xml|csv|x-ndjson|javascript|x-yaml))/i;
+const ATT_TEXT_EXTS = new Set(['txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'log', 'xml', 'yml', 'yaml', 'ini', 'conf', 'env']);
+const ATT_INLINE_IMAGE_MAX = 5 * 1024 * 1024; // 5 MiB — above this, save instead of inlining base64.
+
+function attExt(filename: string): string {
+  return path.extname(filename || '').slice(1).toLowerCase();
+}
+function isTextLikeAttachment(filename: string, contentType: string): boolean {
+  return ATT_TEXT_TYPES.test(contentType || '') || ATT_TEXT_EXTS.has(attExt(filename));
+}
+function isPdfAttachment(filename: string, contentType: string): boolean {
+  return attExt(filename) === 'pdf' || /\/pdf$/i.test(contentType || '');
 }
 
 function shouldUseHandle(mode: ResponseModeOpt, n: number): boolean {
@@ -329,21 +346,50 @@ export function emailTools(
 
   // Get email content tool
   server.registerTool('imap_get_email', {
-    description: 'Get the full content of an email or just headers',
+    description:
+      'Get the full content of an email (or just headers). Optionally inline the text of text-like and PDF ' +
+      'attachments with includeAttachmentText (truncated at maxAttachmentTextChars).',
     inputSchema: {
       accountId: z.string().describe('Account ID'),
       folder: z.string().default('INBOX').describe('Folder name'),
       uid: z.number().describe('Email UID'),
-      headersOnly: z.boolean().optional().default(false).describe('Fetch only headers without body content (saves bandwidth and context space)')
+      headersOnly: z.boolean().optional().default(false).describe('Fetch only headers without body content (saves bandwidth and context space)'),
+      includeAttachmentText: z.boolean().optional().default(false).describe('Inline extracted text for text-like (txt/md/csv/json/...) and PDF attachments'),
+      maxAttachmentTextChars: z.number().optional().default(20000).describe('Max characters of extracted text per attachment (default 20000)'),
     }
-  }, withErrorHandling(async ({ accountId, folder, uid, headersOnly }) => {
+  }, withErrorHandling(async ({ accountId, folder, uid, headersOnly, includeAttachmentText, maxAttachmentTextChars }) => {
     const email = await imapService.getEmailContent(accountId, folder, uid, headersOnly);
+
+    let attachments = email.attachments;
+    // Enrich attachment metadata with extracted text on request. Done here (not
+    // in getEmailContent) so the cheap default path stays body-only; this fetches
+    // attachment content via a separate parse only when asked.
+    if (includeAttachmentText && !headersOnly && attachments.length > 0) {
+      const limit = maxAttachmentTextChars ?? 20000;
+      const fetched = await imapService.getAttachments(accountId, folder, [uid]);
+      attachments = await Promise.all(attachments.map(async (meta) => {
+        const match = fetched.find((f) => f.filename === meta.filename && f.contentType === meta.contentType)
+          ?? fetched.find((f) => f.filename === meta.filename);
+        if (!match) return meta;
+        if (isTextLikeAttachment(match.filename, match.contentType)) {
+          const full = match.content.toString('utf8');
+          const truncated = full.length > limit;
+          return { ...meta, textContent: truncated ? full.slice(0, limit) : full, textContentTruncated: truncated };
+        }
+        if (isPdfAttachment(match.filename, match.contentType)) {
+          const pdf = await extractPdfText(match.content, limit);
+          return { ...meta, textContent: pdf.text, textContentTruncated: pdf.truncated };
+        }
+        return meta;
+      }));
+    }
 
     return jsonResult({
       email: {
         ...email,
         textContent: clip(email.textContent),
         htmlContent: clip(email.htmlContent),
+        attachments,
       },
     });
   }));
@@ -689,12 +735,8 @@ export function emailTools(
 
   // Fetch a single attachment for preview/download (#89): text-like attachments
   // are returned inline as text, images inline as base64 (so Claude can view
-  // them), and other binaries are saved to the per-user outbox. Large images are
-  // saved rather than inlined to protect the token budget.
-  const ATT_TEXT_TYPES = /^(text\/|application\/(json|xml|csv|x-ndjson|javascript|x-yaml))/i;
-  const ATT_TEXT_EXTS = new Set(['txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'log', 'xml', 'yml', 'yaml', 'ini', 'conf', 'env']);
-  const ATT_INLINE_IMAGE_MAX = 5 * 1024 * 1024; // 5 MiB — above this, save instead of inlining base64.
-
+  // them), PDFs as extracted text, and other binaries are saved to the per-user
+  // outbox. Large images are saved rather than inlined to protect the token budget.
   server.registerTool('imap_get_attachment', {
     description:
       'Fetch a single attachment from a message for preview or download. Text-like attachments ' +
@@ -733,7 +775,6 @@ export function emailTools(
     }
 
     const userId = resolveUserId(db) ?? 'default';
-    const ext = path.extname(att.filename).slice(1).toLowerCase();
     const saveToDisk = async () => {
       const dir = path.join(getOutboxDir(userId), 'attachments');
       const r = await new MessageExportService().writeAttachments(dir, [att!]);
@@ -755,22 +796,33 @@ export function emailTools(
       };
     }
 
+    const limit = maxTextChars ?? 100000;
+
     // Text-like → inline text (truncated).
-    if (ATT_TEXT_TYPES.test(att.contentType) || ATT_TEXT_EXTS.has(ext)) {
+    if (isTextLikeAttachment(att.filename, att.contentType)) {
       const full = att.content.toString('utf8');
-      const limit = maxTextChars ?? 100000;
       const truncated = full.length > limit;
       const savedAs = save ? await saveToDisk() : undefined;
       return jsonResult({ success: true, uid, filename: att.filename, contentType: att.contentType, size: humanBytes(att.size), kind: 'text', truncated, ...(savedAs ? { savedAs } : {}), text: truncated ? full.slice(0, limit) : full });
     }
 
-    // Other binary (incl. PDF) → save to disk.
+    // PDF → extract text inline (and save the file too).
+    if (isPdfAttachment(att.filename, att.contentType)) {
+      const savedAs = await saveToDisk();
+      const pdf = await extractPdfText(att.content, limit);
+      return jsonResult({
+        success: true, uid, filename: att.filename, contentType: att.contentType, size: humanBytes(att.size),
+        kind: 'pdf', pages: pdf.pages, truncated: pdf.truncated, savedAs,
+        ...(pdf.error ? { note: `Saved to disk; PDF text extraction failed: ${pdf.error}` } : {}),
+        text: pdf.text,
+      });
+    }
+
+    // Other binary → save to disk.
     const savedAs = await saveToDisk();
     return jsonResult({
       success: true, uid, filename: att.filename, contentType: att.contentType, size: humanBytes(att.size), kind: 'binary', savedAs,
-      note: ext === 'pdf'
-        ? 'PDF saved to disk. Inline text extraction is not enabled yet (requires the pdf-parse dependency).'
-        : 'Binary attachment saved to disk.',
+      note: 'Binary attachment saved to disk.',
     });
   }));
 

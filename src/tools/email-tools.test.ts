@@ -39,6 +39,7 @@ function makeImap(overrides: Record<string, any> = {}) {
     getEmailContent: async () => ({
       uid: 1, subject: 'Hello', from: 'a@x.com',
       textContent: 'T'.repeat(20000), htmlContent: 'H'.repeat(20000),
+      attachments: [],
     }),
     markAsRead: async () => {},
     markAsUnread: async () => {},
@@ -164,6 +165,54 @@ describe('emailTools core routes', () => {
     const asc = await invoke(tools, 'imap_get_email_sizes', { accountId: 'a', folder: 'INBOX', order: 'asc', limit: 2 });
     expect(asc.returned).toBe(2);
     expect(asc.messages.map((m: any) => m.uid)).toEqual([1, 3]); // smallest first, capped
+  });
+});
+
+describe('imap_get_email includeAttachmentText (#89)', () => {
+  function imapWithAttachmentText() {
+    return makeImap({
+      getEmailContent: async () => ({
+        uid: 1, subject: 'Hi', from: 'a@x.com', textContent: 'body', htmlContent: '',
+        attachments: [
+          { filename: 'notes.txt', contentType: 'text/plain', size: 11 },
+          { filename: 'doc.pdf', contentType: 'application/pdf', size: 999 },
+          { filename: 'logo.png', contentType: 'image/png', size: 4 },
+        ],
+      }),
+      getAttachments: async () => [
+        { uid: 1, filename: 'notes.txt', content: Buffer.from('hello there'), contentType: 'text/plain', size: 11, inline: false },
+        { uid: 1, filename: 'doc.pdf', content: Buffer.from('not a real pdf'), contentType: 'application/pdf', size: 999, inline: false },
+        { uid: 1, filename: 'logo.png', content: Buffer.from([0x89]), contentType: 'image/png', size: 4, inline: true },
+      ],
+    });
+  }
+
+  it('does not fetch attachment text by default', async () => {
+    const out = await invoke(register(makeImap()), 'imap_get_email', { accountId: 'a', folder: 'INBOX', uid: 1 });
+    expect(out.email.attachments).toEqual([]);
+  });
+
+  it('inlines text for text attachments and attempts PDF extraction when requested', async () => {
+    const out = await invoke(register(imapWithAttachmentText()), 'imap_get_email', {
+      accountId: 'a', folder: 'INBOX', uid: 1, includeAttachmentText: true,
+    });
+    const byName = Object.fromEntries(out.email.attachments.map((a: any) => [a.filename, a]));
+    expect(byName['notes.txt'].textContent).toBe('hello there');
+    expect(byName['notes.txt'].textContentTruncated).toBe(false);
+    // PDF: extraction runs and degrades gracefully on a non-PDF buffer (no throw).
+    expect(byName['doc.pdf']).toHaveProperty('textContent');
+    expect(byName['doc.pdf'].textContent).toBe('');
+    // Images are left as metadata only.
+    expect(byName['logo.png'].textContent).toBeUndefined();
+  });
+
+  it('truncates attachment text at maxAttachmentTextChars', async () => {
+    const out = await invoke(register(imapWithAttachmentText()), 'imap_get_email', {
+      accountId: 'a', folder: 'INBOX', uid: 1, includeAttachmentText: true, maxAttachmentTextChars: 4,
+    });
+    const notes = out.email.attachments.find((a: any) => a.filename === 'notes.txt');
+    expect(notes.textContent).toBe('hell');
+    expect(notes.textContentTruncated).toBe(true);
   });
 });
 
