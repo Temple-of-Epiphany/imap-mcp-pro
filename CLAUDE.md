@@ -64,17 +64,17 @@ This project implements IMAP4rev2 (RFC 9051) via the ImapFlow library. The full 
 - **Authentication**: TLS/STARTTLS, AUTHENTICATE, PLAIN
 - **Extensions**: IDLE, UIDPLUS, ESEARCH, NAMESPACE (via ImapFlow)
 
-#### ⚠️ Partially Implemented
-- **STATUS**: Available via ImapFlow but no dedicated MCP tool yet
-- **UNSELECT**: Available via ImapFlow
-- **ENABLE**: Available via ImapFlow
+#### ✅ Mailbox Management & Message Append (Issue #50 — COMPLETE)
+- **STATUS**: `imap_get_mailbox_status` (+ `imap_folder_status`)
+- **CREATE**: `imap_create_folder`
+- **DELETE**: `imap_delete_folder`
+- **RENAME**: `imap_rename_folder`
+- **APPEND**: `imap_append_message`
+- **SUBSCRIBE / UNSUBSCRIBE**: `imap_subscribe_mailbox` / `imap_unsubscribe_mailbox` (+ `imap_list_subscribed_mailboxes`)
+- A structural compliance regression suite (`src/tools/rfc9051-compliance.test.ts`, Issue #57) asserts each required command stays wired to a tool + ImapService method.
 
-#### ❌ Missing Required Commands (Issue #50)
-- **CREATE**: Create mailbox (required for compliance)
-- **DELETE**: Delete mailbox (required for compliance)
-- **RENAME**: Rename mailbox (required for compliance)
-- **APPEND**: Append message to mailbox (required for compliance)
-- **SUBSCRIBE/UNSUBSCRIBE**: Subscription management
+#### ⚠️ Available via ImapFlow (no dedicated MCP tool)
+- **UNSELECT**, **ENABLE**
 
 ### IMAP4rev2 Built-in Extensions
 
@@ -98,7 +98,7 @@ The following are part of IMAP4rev2 base (no capability negotiation needed):
 
 ### Standard Flags (System Flags)
 - `\Seen` - ✅ Implemented (mark read/unread)
-- `\Answered` - ⚠️ Planned (Issue #48)
+- `\Answered` - ✅ Implemented (`imap_bulk_mark_emails` answered/unanswered; Issue #48)
 - `\Flagged` - ✅ Implemented (flag/unflag)
 - `\Deleted` - ✅ Implemented (delete operations)
 - `\Draft` - ❌ Not yet implemented
@@ -125,15 +125,11 @@ These are recognized when present but not enforced:
 
 ### Compliance Roadmap
 
-See tracked issues for implementation:
-- **Issue #48**: Priority flags and \Answered support (v2.12.0)
-- **Issue #49**: CAPABILITY query tool (v2.12.0)
-- **Issue #50**: Full RFC 9051 compliance audit (v2.13.0+)
-  - CREATE, DELETE, RENAME, APPEND commands
-  - SUBSCRIBE/UNSUBSCRIBE
-  - Draft flag support
-  - Recommended keywords
-  - STATUS tool
+- **Issue #48** ✅: Priority flags (`imap_set/get_email_priority`) and `\Answered` support — DONE.
+- **Issue #49** ✅: CAPABILITY query tool (`imap_get_capabilities`) — DONE.
+- **Issue #50** ✅: Required commands (CREATE, DELETE, RENAME, APPEND, SUBSCRIBE/UNSUBSCRIBE, STATUS) — DONE.
+- **Issue #57** ✅: RFC 9051 compliance regression suite (`src/tools/rfc9051-compliance.test.ts`) — DONE.
+- Remaining (optional, not required for core compliance): Draft-flag tool surface and the recommended keywords ($Forwarded/$Junk/etc.) can be set today via `imap_add_keyword`.
 
 ### References
 - RFC 9051 (IMAP4rev2): `rfc/rfc9051.txt`
