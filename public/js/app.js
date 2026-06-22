@@ -235,6 +235,21 @@ function copyConfig(elementId) {
   });
 }
 
+// Copy `text` and briefly flip the clicked button's label to confirm (#64).
+function copyWithFeedback(btn, text) {
+  navigator.clipboard.writeText(text).then(() => {
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    btn.classList.add('text-green-600');
+    setTimeout(() => {
+      btn.textContent = orig;
+      btn.classList.remove('text-green-600');
+    }, 1500);
+  }).catch(() => {
+    alert('Copy failed. Please select and copy the ID manually.');
+  });
+}
+
 function copyText(text) {
   navigator.clipboard.writeText(text).then(() => {
     // Visual feedback is minimal for inline copy buttons
@@ -1060,6 +1075,12 @@ async function loadAccountsList() {
               <h5 class="font-semibold">${acc.user}</h5>
               <p class="text-sm text-gray-500">Name: ${acc.name}</p>
               <p class="text-sm text-gray-500">Host: ${acc.host}:${acc.port}</p>
+              <p class="text-sm text-gray-500 flex items-center gap-2">
+                <span>Account ID:</span>
+                <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded select-all">${acc.id}</code>
+                <button type="button" onclick="copyWithFeedback(this, '${acc.id}')" title="Copy account ID"
+                        class="text-xs text-blue-600 hover:text-blue-800">Copy</button>
+              </p>
               <span class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Configured</span>
             </div>
             <div class="flex gap-2">
