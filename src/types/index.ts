@@ -118,6 +118,10 @@ export interface Attachment {
   contentType: string;
   size: number;
   contentId?: string;
+  /** Extracted text preview (text-like or PDF attachments), when requested (#89). */
+  textContent?: string;
+  /** True when textContent was truncated to the requested character limit. */
+  textContentTruncated?: boolean;
 }
 
 /** A mailbox/folder node, optionally with nested children. */
