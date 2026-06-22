@@ -5,6 +5,17 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.24.0] - 2026-06-22
+
+Completes attachment preview with PDF text extraction. Test suite 229 → 235.
+
+### Added
+- **PDF text extraction** (#89) — `imap_get_attachment` now returns extracted text for PDF attachments inline (`kind: 'pdf'`, with `pages` and `truncated`) in addition to saving the file.
+- **Inline attachment text in `imap_get_email`** (#89) — new `includeAttachmentText` + `maxAttachmentTextChars` options inline the text of text-like and PDF attachments (fetched on demand, so the default path stays body-only). New `textContent` / `textContentTruncated` fields on the attachment shape.
+
+### Dependencies
+- Added `pdf-parse` (1.1.1), imported lazily and wrapped so extraction failures degrade gracefully. Adds no new audited vulnerabilities; the universal `.mcpb` grows ~8 MB (vendored PDF.js).
+
 ## [2.23.0] - 2026-06-21
 
 Attachment preview/download, a Web UI account-ID affordance, and CI/review workflows. Tools 112 → 113; test suite 224 → 229.
