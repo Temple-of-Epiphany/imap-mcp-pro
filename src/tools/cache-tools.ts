@@ -26,7 +26,7 @@ import {
   CacheMissError,
 } from '../services/message-cache-service.js';
 
-const SearchModeSchema = z.enum(['by_domain', 'by_address', 'group_by_sender']);
+const SearchModeSchema = z.enum(['by_domain', 'by_address', 'group_by_sender', 'fulltext']);
 
 /**
  * Convert a "since" string ("90d", "24h", ISO date) to a unix-ms lower bound.
@@ -82,7 +82,9 @@ export function cacheTools(
     description:
       'Fast SQL-backed search against the local header cache. ' +
       'Modes: by_domain (rows where from_domain matches), by_address (exact ' +
-      'from_address match), group_by_sender (top-N senders by message count). ' +
+      'from_address match), group_by_sender (top-N senders by message count), ' +
+      'fulltext (FTS5 ranked search over subject + sender name/address — for ' +
+      'partial-recall queries; no message bodies are searched). ' +
       'Returns explicit cache_miss error if the folder has not been synced — ' +
       'call imap_sync_folder_cache first.',
     inputSchema: {
@@ -91,10 +93,11 @@ export function cacheTools(
       mode: SearchModeSchema.describe(
         'by_domain: rows for one domain. ' +
         'by_address: rows for one exact address. ' +
-        'group_by_sender: top-N senders by message count.'
+        'group_by_sender: top-N senders by message count. ' +
+        'fulltext: FTS5 ranked search over subject + sender (value = query text).'
       ),
       value: z.string().optional()
-        .describe('Domain or address (required for by_domain/by_address modes)'),
+        .describe('Domain (by_domain), address (by_address), or query text (fulltext) — required for those modes'),
       since: z.string().optional()
         .describe('Lower bound: relative ("90d", "24h") or ISO date'),
       limit: z.number().int().positive().optional()
@@ -119,6 +122,10 @@ export function cacheTools(
           break;
         case 'group_by_sender':
           payload = await cache.groupBySender(accountId, folder, opts);
+          break;
+        case 'fulltext':
+          if (!value) throw new Error('fulltext mode requires value (the search query)');
+          payload = await cache.searchFullText(accountId, folder, value, opts);
           break;
       }
       return {

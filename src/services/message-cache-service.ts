@@ -389,6 +389,54 @@ export class MessageCacheService {
     return rows.map(rowFromDb);
   }
 
+  /**
+   * Full-text search over the cached subject + sender display name + sender
+   * address via the messages_cache_fts FTS5 index (#119). Ranked by bm25, then
+   * recency. No message bodies are involved — this searches only the header
+   * fields already in the cache. Cache miss (folder not synced) throws.
+   *
+   * The query is tokenized and each term quoted, so FTS5 operators in user
+   * input can't change the query semantics or cause a syntax error.
+   */
+  async searchFullText(
+    accountId: string,
+    folder: string,
+    query: string,
+    options: SearchOptions = {},
+  ): Promise<CachedMessageRow[]> {
+    this.assertSynced(accountId, folder);
+
+    const ftsQuery = String(query ?? '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((t) => '"' + t.replace(/"/g, '""') + '"')
+      .join(' ');
+    if (!ftsQuery) return [];
+
+    const limit = Math.min(options.limit ?? 50, 1000);
+    const params: Record<string, unknown> = {
+      $a: accountId,
+      $f: folder,
+      $q: ftsQuery,
+      $limit: limit,
+    };
+    let extra = '';
+    if (options.since !== undefined) { extra += ` AND m.date_received >= $since`; params.$since = options.since; }
+    if (options.until !== undefined) { extra += ` AND m.date_received <= $until`; params.$until = options.until; }
+
+    const rows = this.db.getDb().prepare(
+      `SELECT m.* FROM messages_cache m
+       JOIN messages_cache_fts ON messages_cache_fts.rowid = m.rowid
+       WHERE messages_cache_fts MATCH $q
+         AND m.account_id = $a AND m.folder = $f${extra}
+       ORDER BY bm25(messages_cache_fts), m.date_received DESC
+       LIMIT $limit`
+    ).all(params as any) as any[];
+
+    return rows.map(rowFromDb);
+  }
+
   async groupBySender(
     accountId: string,
     folder: string,
