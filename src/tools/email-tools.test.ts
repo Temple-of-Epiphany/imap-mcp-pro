@@ -57,6 +57,10 @@ function makeImap(overrides: Record<string, any> = {}) {
     getEmailPriority: async (_a: string, _f: string, uid: number) => ({
       uid, priority: 'high', source: 'header', flags: ['\\Seen'],
     }),
+    getAttachments: async (_a: string, _f: string, uids: number[]) => [
+      { uid: uids[0], filename: 'notes.txt', content: Buffer.from('X'.repeat(50)), contentType: 'text/plain', size: 50, inline: false },
+      { uid: uids[0], filename: 'logo.png', content: Buffer.from([0x89, 0x50, 0x4e, 0x47]), contentType: 'image/png', size: 4, inline: true, cid: 'logo@x' },
+    ],
     ...overrides,
   };
 }
@@ -160,6 +164,44 @@ describe('emailTools core routes', () => {
     const asc = await invoke(tools, 'imap_get_email_sizes', { accountId: 'a', folder: 'INBOX', order: 'asc', limit: 2 });
     expect(asc.returned).toBe(2);
     expect(asc.messages.map((m: any) => m.uid)).toEqual([1, 3]); // smallest first, capped
+  });
+});
+
+describe('imap_get_attachment (#89)', () => {
+  it('returns text attachments inline, selected by filename', async () => {
+    const tools = register(makeImap());
+    const out = await invoke(tools, 'imap_get_attachment', { accountId: 'a', folder: 'INBOX', uid: 1, filename: 'notes.txt' });
+    expect(out).toMatchObject({ success: true, kind: 'text', filename: 'notes.txt', truncated: false });
+    expect(out.text).toBe('X'.repeat(50));
+  });
+
+  it('truncates text at maxTextChars', async () => {
+    const tools = register(makeImap());
+    const out = await invoke(tools, 'imap_get_attachment', { accountId: 'a', folder: 'INBOX', uid: 1, filename: 'notes.txt', maxTextChars: 10 });
+    expect(out.truncated).toBe(true);
+    expect(out.text).toHaveLength(10);
+  });
+
+  it('returns small images inline as base64, selected by cid', async () => {
+    const tools = register(makeImap());
+    const res = await tools.get('imap_get_attachment')!.handler({ accountId: 'a', folder: 'INBOX', uid: 1, cid: 'logo@x' });
+    const summary = JSON.parse(res.content[0].text);
+    expect(summary).toMatchObject({ success: true, kind: 'image', inlined: true, filename: 'logo.png' });
+    expect(res.content[1]).toMatchObject({ type: 'image', mimeType: 'image/png' });
+    expect(res.content[1].data).toBe(Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString('base64'));
+  });
+
+  it('lists available attachments when the selector is ambiguous', async () => {
+    const tools = register(makeImap());
+    const out = await invoke(tools, 'imap_get_attachment', { accountId: 'a', folder: 'INBOX', uid: 1 });
+    expect(out.success).toBe(false);
+    expect(out.available.map((x: any) => x.filename)).toEqual(['notes.txt', 'logo.png']);
+  });
+
+  it('reports when the message has no attachments', async () => {
+    const tools = register(makeImap({ getAttachments: async () => [] }));
+    const out = await invoke(tools, 'imap_get_attachment', { accountId: 'a', folder: 'INBOX', uid: 1 });
+    expect(out).toMatchObject({ success: false, message: expect.stringMatching(/No attachments/) });
   });
 });
 

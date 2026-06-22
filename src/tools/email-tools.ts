@@ -687,6 +687,93 @@ export function emailTools(
     });
   }));
 
+  // Fetch a single attachment for preview/download (#89): text-like attachments
+  // are returned inline as text, images inline as base64 (so Claude can view
+  // them), and other binaries are saved to the per-user outbox. Large images are
+  // saved rather than inlined to protect the token budget.
+  const ATT_TEXT_TYPES = /^(text\/|application\/(json|xml|csv|x-ndjson|javascript|x-yaml))/i;
+  const ATT_TEXT_EXTS = new Set(['txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'log', 'xml', 'yml', 'yaml', 'ini', 'conf', 'env']);
+  const ATT_INLINE_IMAGE_MAX = 5 * 1024 * 1024; // 5 MiB — above this, save instead of inlining base64.
+
+  server.registerTool('imap_get_attachment', {
+    description:
+      'Fetch a single attachment from a message for preview or download. Text-like attachments ' +
+      '(txt/md/csv/json/log/...) are returned inline as text (truncated at maxTextChars); images are returned ' +
+      'inline as base64 so they can be viewed (large images are saved to disk instead); other binaries (incl. ' +
+      'PDFs) are saved under the per-user outbox and the path is returned. Identify the attachment by filename ' +
+      'or cid; if the message has exactly one attachment, neither is required.',
+    inputSchema: {
+      accountId: z.string().describe('Account ID'),
+      folder: z.string().default('INBOX').describe('Folder containing the message (default: INBOX)'),
+      uid: z.number().describe('UID of the message'),
+      filename: z.string().optional().describe('Select the attachment by filename (case-insensitive)'),
+      cid: z.string().optional().describe('Select the attachment by Content-ID (for inline images)'),
+      maxTextChars: z.number().optional().default(100000).describe('Max characters to return for text attachments (default 100000)'),
+      save: z.boolean().optional().default(false).describe('Also save the attachment to the per-user outbox (always done for non-text binaries)'),
+    }
+  }, withErrorHandling(async ({ accountId, folder, uid, filename, cid, maxTextChars, save }) => {
+    const all = await imapService.getAttachments(accountId, folder, [uid]);
+    if (all.length === 0) {
+      return jsonResult({ success: false, message: 'No attachments found on this message', folder, uid });
+    }
+
+    const norm = (c?: string) => (c ?? '').replace(/^<|>$/g, '');
+    let att = cid
+      ? all.find((a) => norm(a.cid) === norm(cid))
+      : filename
+        ? all.find((a) => a.filename.toLowerCase() === filename.toLowerCase())
+        : all.length === 1 ? all[0] : undefined;
+
+    if (!att) {
+      return jsonResult({
+        success: false,
+        message: (filename || cid) ? 'No attachment matched filename/cid' : 'Message has multiple attachments — specify filename or cid',
+        available: all.map((a) => ({ filename: a.filename, contentType: a.contentType, size: humanBytes(a.size), inline: a.inline, cid: a.cid })),
+      });
+    }
+
+    const userId = resolveUserId(db) ?? 'default';
+    const ext = path.extname(att.filename).slice(1).toLowerCase();
+    const saveToDisk = async () => {
+      const dir = path.join(getOutboxDir(userId), 'attachments');
+      const r = await new MessageExportService().writeAttachments(dir, [att!]);
+      return r.files[0]?.path;
+    };
+
+    // Image → inline base64 (unless too large), optionally saved too.
+    if (/^image\//i.test(att.contentType)) {
+      if (att.size > ATT_INLINE_IMAGE_MAX) {
+        const savedAs = await saveToDisk();
+        return jsonResult({ success: true, uid, filename: att.filename, contentType: att.contentType, size: humanBytes(att.size), kind: 'image', inlined: false, savedAs, note: `Image exceeds ${humanBytes(ATT_INLINE_IMAGE_MAX)}; saved to disk instead of inlining.` });
+      }
+      const savedAs = save ? await saveToDisk() : undefined;
+      return {
+        content: [
+          { type: 'text', text: JSON.stringify({ success: true, uid, filename: att.filename, contentType: att.contentType, size: humanBytes(att.size), kind: 'image', inlined: true, ...(savedAs ? { savedAs } : {}) }, null, 2) },
+          { type: 'image', data: att.content.toString('base64'), mimeType: att.contentType },
+        ],
+      };
+    }
+
+    // Text-like → inline text (truncated).
+    if (ATT_TEXT_TYPES.test(att.contentType) || ATT_TEXT_EXTS.has(ext)) {
+      const full = att.content.toString('utf8');
+      const limit = maxTextChars ?? 100000;
+      const truncated = full.length > limit;
+      const savedAs = save ? await saveToDisk() : undefined;
+      return jsonResult({ success: true, uid, filename: att.filename, contentType: att.contentType, size: humanBytes(att.size), kind: 'text', truncated, ...(savedAs ? { savedAs } : {}), text: truncated ? full.slice(0, limit) : full });
+    }
+
+    // Other binary (incl. PDF) → save to disk.
+    const savedAs = await saveToDisk();
+    return jsonResult({
+      success: true, uid, filename: att.filename, contentType: att.contentType, size: humanBytes(att.size), kind: 'binary', savedAs,
+      note: ext === 'pdf'
+        ? 'PDF saved to disk. Inline text extraction is not enabled yet (requires the pdf-parse dependency).'
+        : 'Binary attachment saved to disk.',
+    });
+  }));
+
   // Bulk delete emails tool
   // AUTO-CHUNKING: Automatically uses chunked processing for >50 UIDs
   server.registerTool('imap_bulk_delete_emails', {

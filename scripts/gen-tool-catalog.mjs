@@ -34,7 +34,7 @@ const CATEGORIES = [
   ['Users (MSP multi-tenant)', /^imap_(create_user|get_user|list_users)$/],
   ['Account management', /^imap_(add_account|add_account_auto|add_account_with_provider|remove_account|list_accounts|connect|disconnect|test_account|share_account|unshare_account|list_providers|db_add_account|db_get_account|db_list_accounts|db_remove_account)$/],
   ['Bulk operations', /^imap_bulk_/],
-  ['Size, export & quota', /^imap_(get_email_sizes|get_largest_emails|export_email|export_folder|export_account|extract_attachments|get_quota)$/],
+  ['Size, export & quota', /^imap_(get_email_sizes|get_largest_emails|export_email|export_folder|export_account|extract_attachments|get_attachment|get_quota)$/],
   ['Attachment staging', /^imap_(attachment_stage_|list_staged_attachments|get_outbox_dir)/],
   ['Email operations', /^imap_(search_emails|get_email|get_latest_emails|mark_as_read|mark_as_unread|delete_email|copy_email|move_email|send_email|reply_to_email|forward_email|get_email_priority|set_email_priority)$/],
   ['Folder & mailbox operations', /^imap_(list_folders|folder_status|get_unread_count|create_folder|delete_folder|rename_folder|get_mailbox_status|subscribe_mailbox|unsubscribe_mailbox|list_subscribed_mailboxes|append_message)$/],
