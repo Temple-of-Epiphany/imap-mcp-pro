@@ -5,6 +5,17 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.23.0] - 2026-06-21
+
+Attachment preview/download, a Web UI account-ID affordance, and CI/review workflows. Tools 112 → 113; test suite 224 → 229.
+
+### Added
+- **`imap_get_attachment`** (#89) — fetch a single attachment by filename or Content-ID (or the sole attachment) and return it by type: text-like attachments inline (truncated at `maxTextChars`), images inline as base64 (large images saved to disk instead, to protect the token budget), other binaries/PDFs saved under the per-user outbox. (PDF *text extraction* and inline attachment text in `imap_get_email` remain open on #89 pending a `pdf-parse` dependency decision.)
+- **Web UI** (#64) — each account card now shows its full Account ID with a one-click Copy button (handy for CLI/MCP calls, multi-account reference, and support).
+
+### CI / tooling
+- **Claude PR review + assistant workflows** (#93) — `claude-code-review.yml` and `claude.yml`, SHA-pinned and dormant by default (gated on `vars.ENABLE_CLAUDE_REVIEW`); activate by adding the `ANTHROPIC_API_KEY` secret and setting the variable. The build/test CI (`ci.yml`) already runs on every push/PR.
+
 ## [2.22.0] - 2026-06-21
 
 Quad9 verification, live reload, an in-product help guide, and RFC 9051 compliance closure. Tools 110 → 112; test suite 186 → 224.
