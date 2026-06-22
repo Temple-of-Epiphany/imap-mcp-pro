@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.11.0",
+  "schemaVersion": "1.12.0",
   "description": "Release-indexed manifest of schema migrations. Each entry is applied in order via the `schema_version` ledger. A migration is complete when its `to` version is present in the ledger.",
   "migrations": [
     {
@@ -72,6 +72,13 @@
       "file": "schema_update_1.10.0_TO_1.11.0.sql",
       "rollbackFile": "schema_update_1.10.0_TO_1.11.0.down.sql",
       "description": "Add messages_cache table for v2.17.0 MVP local message header cache (Issue #124)"
+    },
+    {
+      "from": "1.11.0",
+      "to": "1.12.0",
+      "file": "schema_update_1.11.0_TO_1.12.0.sql",
+      "rollbackFile": "schema_update_1.11.0_TO_1.12.0.down.sql",
+      "description": "Add messages_cache_fts FTS5 full-text index over subject + sender (Track B, Issue #119)"
     }
   ]
 }
