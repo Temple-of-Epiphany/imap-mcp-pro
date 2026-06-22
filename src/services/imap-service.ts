@@ -594,6 +594,28 @@ export class ImapService {
   }
 
   /**
+   * Disconnect every pooled IMAP connection (server reload, #84). Returns the
+   * number of connections that were closed. Next operation reconnects lazily.
+   */
+  async disconnectAll(): Promise<number> {
+    const accountIds = Array.from(this.activeConnections.keys());
+    for (const accountId of accountIds) {
+      await this.disconnect(accountId);
+    }
+    return accountIds.length;
+  }
+
+  /**
+   * Clear the in-memory server-capabilities cache (server reload, #84). Returns
+   * the number of cached entries dropped; they re-populate on next query.
+   */
+  clearCapabilitiesCache(): number {
+    const n = this.capabilitiesCache.size;
+    this.capabilitiesCache.clear();
+    return n;
+  }
+
+  /**
    * One-shot connectivity probe (#90). Spawns a fresh ImapFlow client so the
    * test does not interact with the connection pool, retry queue, or circuit
    * breaker — the probe is for diagnostics, not for warming up state. Returns

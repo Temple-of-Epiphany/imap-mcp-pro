@@ -36,15 +36,16 @@ const CATEGORIES = [
   ['Bulk operations', /^imap_bulk_/],
   ['Size, export & quota', /^imap_(get_email_sizes|get_largest_emails|export_email|export_folder|export_account|extract_attachments|get_quota)$/],
   ['Attachment staging', /^imap_(attachment_stage_|list_staged_attachments|get_outbox_dir)/],
-  ['Email operations', /^imap_(search_emails|get_email|get_latest_emails|mark_as_read|mark_as_unread|delete_email|copy_email|move_email|send_email|reply_to_email|forward_email)$/],
+  ['Email operations', /^imap_(search_emails|get_email|get_latest_emails|mark_as_read|mark_as_unread|delete_email|copy_email|move_email|send_email|reply_to_email|forward_email|get_email_priority|set_email_priority)$/],
   ['Folder & mailbox operations', /^imap_(list_folders|folder_status|get_unread_count|create_folder|delete_folder|rename_folder|get_mailbox_status|subscribe_mailbox|unsubscribe_mailbox|list_subscribed_mailboxes|append_message)$/],
   ['Subscriptions & unsubscribe', /^imap_(extract_unsubscribe_links|get_unsubscribe_links|get_unsubscribe_links_for|execute_unsubscribe|get_subscription_summary|list_unsubscribe_candidates|mark_subscription_unsubscribed|update_subscription_category|update_subscription_notes)$/],
   ['Categorization & scoring', /^imap_(add_keyword|remove_keyword|list_categories|apply_categories|analyze_folder_confidence|score_email_confidence)$/],
   ['Spam & UserCheck', /^imap_(check_email_spam|check_emails_spam_bulk|check_folder_spam|scan_account_spam|add_usercheck_key|get_usercheck_key|delete_usercheck_key)$/],
-  ['DNS firewall & domain checks', /^imap_(check_domain|check_domain_dns_firewall|scan_message_domains)$/],
+  ['DNS firewall & domain checks', /^imap_(check_domain|check_domain_dns_firewall|scan_message_domains|test_quad9_dns)$/],
   ['Local cache', /^imap_(search_cache|sync_folder_cache)$/],
   ['Capabilities, diagnostics & metrics', /^imap_(get_capabilities|test_smtp|test_sent_folder|list_unarchived_sends|get_metrics|get_operation_metrics|reset_metrics|get_smtp_metrics|reset_smtp_metrics|get_circuit_breaker|reset_circuit_breaker)$/],
   ['Meta & discovery', /^imap_(about|list_tools|check_skill_updates|update_skills|results)$/],
+  ['Admin & lifecycle', /^imap_(server_reload|open_web_ui)$/],
 ];
 
 function categoryFor(name) {

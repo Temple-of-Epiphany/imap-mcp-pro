@@ -4,7 +4,7 @@
 > manifest by `scripts/gen-tool-catalog.mjs` (runs on `npm run build`).
 > The authoritative runtime list is always available via the `imap_list_tools` tool.
 
-**110 MCP tools** total.
+**111 MCP tools** total.
 
 ## Categories
 
@@ -13,16 +13,16 @@
 - [Bulk operations](#bulk-operations) — 11
 - [Size, export & quota](#size-export-quota) — 7
 - [Attachment staging](#attachment-staging) — 6
-- [Email operations](#email-operations) — 11
+- [Email operations](#email-operations) — 13
 - [Folder & mailbox operations](#folder-mailbox-operations) — 11
 - [Subscriptions & unsubscribe](#subscriptions-unsubscribe) — 9
 - [Categorization & scoring](#categorization-scoring) — 6
 - [Spam & UserCheck](#spam-usercheck) — 7
-- [DNS firewall & domain checks](#dns-firewall-domain-checks) — 3
+- [DNS firewall & domain checks](#dns-firewall-domain-checks) — 4
 - [Local cache](#local-cache) — 2
 - [Capabilities, diagnostics & metrics](#capabilities-diagnostics-metrics) — 11
 - [Meta & discovery](#meta-discovery) — 5
-- [Other](#other) — 3
+- [Admin & lifecycle](#admin-lifecycle) — 1
 
 ## Users (MSP multi-tenant)
 
@@ -99,6 +99,7 @@
 | `imap_delete_email` | Delete an email (moves to trash or expunges) |
 | `imap_forward_email` | Forward an existing email |
 | `imap_get_email` | Get the full content of an email or just headers |
+| `imap_get_email_priority` | Get the resolved priority of a message: our $Priority-* keyword if set (the explicit user setting), otherwise the compose-time X-Priority / Importance / X-MSMail-Priority header, otherwise normal. |
 | `imap_get_latest_emails` | Get the latest emails from a folder. |
 | `imap_mark_as_read` | Mark an email as read |
 | `imap_mark_as_unread` | Mark an email as unread |
@@ -106,6 +107,7 @@
 | `imap_reply_to_email` | Reply to an existing email |
 | `imap_search_emails` | Search for emails in a folder. |
 | `imap_send_email` | Send an email via SMTP and (by default) append the message to the IMAP Sent folder. |
+| `imap_set_email_priority` | Set the priority (high / normal / low) of one or more messages. |
 
 ## Folder & mailbox operations
 
@@ -167,6 +169,7 @@
 | `imap_check_domain` | Check a domain against UserCheck for spam/validity |
 | `imap_check_domain_dns_firewall` | Check if a domain is blocked by DNS firewall (Quad9 threat intelligence) |
 | `imap_scan_message_domains` | Extract and validate all domains from an email message against DNS firewall |
+| `imap_test_quad9_dns` | Verify Quad9 DNS threat-blocking is active. |
 
 ## Local cache
 
@@ -201,11 +204,9 @@
 | `imap_results` | Manage cached MCP tool results (resource-handle pattern). |
 | `imap_update_skills` | Apply skill updates from public GitHub for explicitly named skills. |
 
-## Other
+## Admin & lifecycle
 
 | Tool | Description |
 | --- | --- |
-| `imap_get_email_priority` | Get the resolved priority of a message: our $Priority-* keyword if set (the explicit user setting), otherwise the compose-time X-Priority / Importance / X-MSMail-Priority header, otherwise normal. |
-| `imap_set_email_priority` | Set the priority (high / normal / low) of one or more messages. |
-| `imap_test_quad9_dns` | Verify Quad9 DNS threat-blocking is active. |
+| `imap_server_reload` | Reset the server's runtime state without restarting Claude Desktop: close pooled IMAP and SMTP connections and clear the in-memory IMAP capabilities cache. |
 
