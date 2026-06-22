@@ -1,0 +1,40 @@
+name: Claude Code Review
+
+# Automated PR code review by Claude (#93).
+#
+# DORMANT BY DEFAULT. This job only runs when BOTH are configured:
+#   - repository variable  ENABLE_CLAUDE_REVIEW = true   (opt-in switch)
+#   - repository secret    ANTHROPIC_API_KEY            (Claude API key)
+# Until then the job is skipped (not failed), so PR checks stay green.
+# Gating on a variable (not the secret) avoids referencing secrets in `if`,
+# which GitHub does not support.
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  claude-review:
+    name: Claude review
+    if: ${{ vars.ENABLE_CLAUDE_REVIEW == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
+        with:
+          fetch-depth: 1
+
+      - name: Claude review
+        uses: anthropics/claude-code-action@2fee15510437d71399d9139ed60433470484a8fb  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Review this pull request for the imap-mcp-pro TypeScript MCP server.
+            Focus on: correctness, security (credential handling, path traversal,
+            injection), IMAP/SMTP edge cases, error handling, and test coverage.
+            Be concise; flag real issues with file/line references and skip nits.
