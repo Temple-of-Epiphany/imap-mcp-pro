@@ -23,7 +23,7 @@ export function metaTools(server: McpServer, webUIManager?: WebUIManager): void 
         packageName: PACKAGE_NAME
       },
       license: {
-        model: 'Dual-License',
+        model: 'PolyForm Noncommercial 1.0.0 (commercial license available)',
         nonCommercial: 'FREE for personal, educational, and non-profit use',
         commercial: 'PAID license required for business use',
         contact: 'colin.bitterfield@templeofepiphany.com'
@@ -56,7 +56,7 @@ export function metaTools(server: McpServer, webUIManager?: WebUIManager): void 
           'Folder management (list, status, unread counts, create, delete, rename)'
         ],
         spamFiltering: [
-          'CleanTalk spam detection API integration',
+          'UserCheck spam detection API integration',
           'UserCheck DNS firewall for domain reputation',
           'Bulk spam checking for multiple emails',
           'Per-folder spam scanning',
@@ -105,7 +105,7 @@ export function metaTools(server: McpServer, webUIManager?: WebUIManager): void 
           'Account Management (5 tools)',
           'Email Operations (18 tools)',
           'Folder Operations (6 tools)',
-          'Spam Detection (9 tools) - CleanTalk/UserCheck integration',
+          'Spam Detection - UserCheck integration',
           'Subscription Management (8 tools) - Unsubscribe automation',
           'DNS Firewall (3 tools) - Domain reputation checking',
           'RFC 9051 Compliance (7 tools) - Keywords, APPEND, SUBSCRIBE',
@@ -454,6 +454,153 @@ export function metaTools(server: McpServer, webUIManager?: WebUIManager): void 
         type: 'text',
         text: JSON.stringify(response, null, 2)
       }]
+    };
+  }));
+
+  // imap_help — categorized capability overview + copy-paste workflow recipes
+  // (#39). Discovery aid that points at imap_list_tools / TOOL_CATALOG.md for
+  // the exhaustive list rather than duplicating it.
+  const HELP: Record<string, string> = {
+    overview: [
+      '# IMAP MCP Pro — Help',
+      '',
+      'Comprehensive IMAP + SMTP email automation for Claude. 100+ tools across accounts, search/read, sending, folders, bulk operations, mailbox cleanup, subscriptions, and spam/DNS security.',
+      '',
+      'Pick a topic with `imap_help { category }`:',
+      '- `getting-started` — add an account and verify it',
+      '- `reading` — search, read, and triage mail',
+      '- `sending` — send / reply / forward (with attachments)',
+      '- `organizing` — folders, flags, priority, move/copy',
+      '- `cleanup` — find large mail, quota, export, bulk delete',
+      '- `subscriptions` — find and act on unsubscribe links',
+      '- `security` — spam (UserCheck) + DNS firewall (Quad9)',
+      '- `bulk` — high-volume operations without blowing the token budget',
+      '- `workflows` — end-to-end recipes',
+      '- `admin` — reset/reload, metrics, diagnostics',
+      '',
+      'Discover every tool: call `imap_list_tools`, or see the generated `docs/TOOL_CATALOG.md`.',
+    ].join('\n'),
+
+    'getting-started': [
+      '# Getting started',
+      '',
+      '1. Add an account (auto-detects server settings for common providers):',
+      '   `imap_add_account_auto { email, password }` — or `imap_add_account` for manual host/port.',
+      '2. List accounts: `imap_list_accounts` (note the `accountId`).',
+      '3. Verify connectivity: `imap_test_account { accountId }` (IMAP) and `imap_test_smtp { accountId }` (SMTP, also reports the server SIZE limit).',
+      '4. List folders: `imap_list_folders { accountId }`.',
+      '',
+      'Credentials are encrypted at rest (AES-256-GCM, file-based key). Multi-account and multi-user (MSP) supported.',
+    ].join('\n'),
+
+    reading: [
+      '# Reading & triage',
+      '',
+      '- Search: `imap_search_emails { accountId, folder, from?, subject?, since?, unreadOnly? }`.',
+      '- Read one: `imap_get_email { accountId, folder, uid }`.',
+      '- Latest N: `imap_get_latest_emails { accountId, folder, limit }`.',
+      '- Mark: `imap_mark_as_read` / `imap_mark_as_unread`.',
+      '- Unread count: `imap_get_unread_count { accountId, folder }`.',
+      '',
+      'For thousands of messages use the bulk tools (see `imap_help { category: "bulk" }`).',
+    ].join('\n'),
+
+    sending: [
+      '# Sending',
+      '',
+      '- Send: `imap_send_email { accountId, to, subject, text?, html?, attachments? }`.',
+      '- Reply: `imap_reply_to_email { accountId, folder, uid, ... }`. Forward: `imap_forward_email { ... }`.',
+      '- A copy is placed in the Sent folder automatically (Bcc preserved).',
+      '- Oversized sends fail fast against the server SIZE limit (RFC 1870) — check it with `imap_test_smtp`.',
+    ].join('\n'),
+
+    organizing: [
+      '# Organizing',
+      '',
+      '- Folders: `imap_create_folder` / `imap_rename_folder` / `imap_delete_folder`, `imap_folder_status`.',
+      '- Move / copy: `imap_move_email` / `imap_copy_email` (and `imap_bulk_move_emails` / `imap_bulk_copy_emails`).',
+      '- Flags: read/unread/flagged/answered via `imap_mark_as_read` and `imap_bulk_mark_emails`.',
+      '- Priority: `imap_set_email_priority { ..., priority: high|normal|low }` / `imap_get_email_priority`.',
+      '- Keywords: `imap_add_keyword` / `imap_remove_keyword`; categories via `imap_apply_categories`.',
+    ].join('\n'),
+
+    cleanup: [
+      '# Mailbox cleanup (reclaim space)',
+      '',
+      '1. Find the big stuff: `imap_get_email_sizes { accountId, folder, minSizeBytes? }` (one folder) or',
+      '   `imap_get_largest_emails { accountId, folders?, topN? }` (across folders).',
+      '2. Check quota: `imap_get_quota { accountId }`.',
+      '3. Save anything worth keeping: `imap_export_email` / `imap_export_folder` (.eml) or `imap_extract_attachments`.',
+      '4. Delete/move in bulk using the returned UIDs: `imap_bulk_delete_emails` or `imap_bulk_move_emails` (to Trash).',
+    ].join('\n'),
+
+    subscriptions: [
+      '# Subscriptions / unsubscribe',
+      '',
+      '- Bulk-read links (no DB write): `imap_get_unsubscribe_links_for { accountId, folder, uids }`.',
+      '- Scan + store a folder: `imap_extract_unsubscribe_links { userId, accountId, folder, maxDurationMs?, afterUid? }` — header-first and time-budgeted; on a large folder it returns `truncated` + `nextUid` to resume.',
+      '- Review candidates: `imap_list_unsubscribe_candidates`. Act: `imap_execute_unsubscribe`.',
+    ].join('\n'),
+
+    security: [
+      '# Spam & DNS security',
+      '',
+      '- Spam (UserCheck): `imap_check_email_spam`, `imap_check_folder_spam`, `imap_scan_account_spam`. Set the API key with `imap_add_usercheck_key`.',
+      '- DNS firewall (Quad9): `imap_check_domain_dns_firewall { domain }`, `imap_scan_message_domains`.',
+      '- Verify Quad9 blocking is active: `imap_test_quad9_dns`.',
+    ].join('\n'),
+
+    bulk: [
+      '# Bulk operations',
+      '',
+      'Bulk tools auto-chunk and use a three-tier response (inline / handle / file-backed) so large results never blow the token budget. Retrieve handle/file results with `imap_results`.',
+      '',
+      '- `imap_bulk_get_emails` / `_chunked`, `imap_bulk_mark_emails` / `_chunked`,',
+      '  `imap_bulk_move_emails`, `imap_bulk_copy_emails`, `imap_bulk_delete_emails` / `_chunked`.',
+      '- Local header cache for fast repeat reads + sender grouping: `imap_sync_folder_cache` then `imap_search_cache`.',
+    ].join('\n'),
+
+    workflows: [
+      '# Workflows (recipes)',
+      '',
+      '## Clear space fast',
+      '`imap_get_largest_emails { accountId, folders: ["INBOX","[Gmail]/All Mail"], topN: 50 }` → review →',
+      '`imap_export_folder` the keepers → `imap_bulk_move_emails` the rest to Trash → `imap_get_quota` to confirm.',
+      '',
+      '## Unsubscribe sweep',
+      '`imap_extract_unsubscribe_links { userId, accountId, folder: "INBOX", olderThan: 30 }` (resume with `afterUid` if `truncated`) →',
+      '`imap_list_unsubscribe_candidates` → `imap_execute_unsubscribe`.',
+      '',
+      '## Triage unread',
+      '`imap_search_emails { accountId, folder: "INBOX", unreadOnly: true }` → `imap_check_emails_spam_bulk` →',
+      '`imap_bulk_move_emails` spam to Junk, `imap_set_email_priority` the rest.',
+    ].join('\n'),
+
+    admin: [
+      '# Admin & diagnostics',
+      '',
+      '- Reset runtime state without restarting Claude Desktop: `imap_server_reload` (closes pooled connections, clears the capabilities cache). Config/env changes still need a full restart.',
+      '- Metrics: `imap_get_metrics`, `imap_get_operation_metrics`, `imap_get_smtp_metrics`. Circuit breaker: `imap_get_circuit_breaker` / `imap_reset_circuit_breaker`.',
+      '- Capabilities: `imap_get_capabilities`. Sent-folder check: `imap_test_sent_folder`.',
+    ].join('\n'),
+  };
+
+  server.registerTool('imap_help', {
+    description:
+      'Show IMAP MCP Pro capabilities and copy-paste workflow recipes, by category. Start with no argument (or ' +
+      'category="overview") for the topic list. Categories: overview, getting-started, reading, sending, ' +
+      'organizing, cleanup, subscriptions, security, bulk, workflows, admin. For the exhaustive tool list use ' +
+      'imap_list_tools.',
+    inputSchema: {
+      category: z.enum([
+        'overview', 'getting-started', 'reading', 'sending', 'organizing',
+        'cleanup', 'subscriptions', 'security', 'bulk', 'workflows', 'admin',
+      ]).optional().default('overview').describe('Help topic (default: overview)'),
+    }
+  }, withErrorHandling(async ({ category }) => {
+    const key = category ?? 'overview';
+    return {
+      content: [{ type: 'text', text: HELP[key] ?? HELP.overview }]
     };
   }));
 

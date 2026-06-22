@@ -4,7 +4,7 @@
 > manifest by `scripts/gen-tool-catalog.mjs` (runs on `npm run build`).
 > The authoritative runtime list is always available via the `imap_list_tools` tool.
 
-**111 MCP tools** total.
+**112 MCP tools** total.
 
 ## Categories
 
@@ -21,7 +21,7 @@
 - [DNS firewall & domain checks](#dns-firewall-domain-checks) — 4
 - [Local cache](#local-cache) — 2
 - [Capabilities, diagnostics & metrics](#capabilities-diagnostics-metrics) — 11
-- [Meta & discovery](#meta-discovery) — 5
+- [Meta & discovery](#meta-discovery) — 6
 - [Admin & lifecycle](#admin-lifecycle) — 1
 
 ## Users (MSP multi-tenant)
@@ -200,6 +200,7 @@
 | --- | --- |
 | `imap_about` | Get comprehensive information about the IMAP MCP Pro service including version, features, and capabilities |
 | `imap_check_skill_updates` | Check public GitHub for newer skill versions without changing anything on disk. |
+| `imap_help` | Show IMAP MCP Pro capabilities and copy-paste workflow recipes, by category. |
 | `imap_list_tools` | List all available MCP tools with descriptions and parameters |
 | `imap_results` | Manage cached MCP tool results (resource-handle pattern). |
 | `imap_update_skills` | Apply skill updates from public GitHub for explicitly named skills. |
