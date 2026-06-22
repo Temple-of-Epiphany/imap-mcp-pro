@@ -5,6 +5,16 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.25.0] - 2026-06-22
+
+Full-text search over the local message cache. Test suite 235 → 244.
+
+### Added
+- **`imap_search_cache` `fulltext` mode** (#119, Track B slice) — FTS5-ranked full-text search over the locally cached **subject + sender name + sender address** for partial-recall queries ("something about a closing schedule from someone at a law firm"). Privacy-neutral: no message bodies are fetched or stored. Query input is tokenized and quoted per term, so FTS5 operators in input are safe.
+
+### Database
+- **Migration 1.11.0 → 1.12.0** — adds `messages_cache_fts`, an external-content FTS5 index kept in sync with `messages_cache` by triggers, with a backfill of existing rows. Down-migration included. (Applied automatically on startup; `node:sqlite` ships FTS5.)
+
 ## [2.24.0] - 2026-06-22
 
 Completes attachment preview with PDF text extraction. Test suite 229 → 235.
