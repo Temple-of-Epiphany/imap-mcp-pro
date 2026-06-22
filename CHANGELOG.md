@@ -5,6 +5,21 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.22.0] - 2026-06-21
+
+Quad9 verification, live reload, an in-product help guide, and RFC 9051 compliance closure. Tools 110 → 112; test suite 186 → 224.
+
+### Added
+- **`imap_test_quad9_dns`** (#65) — verify Quad9 DNS threat-blocking is active by resolving a clean control domain and a (configurable) blocked-test domain via Quad9 DNS-over-HTTPS, with clear pass/fail and distinct messages for unreachable / misconfigured cases.
+- **`imap_server_reload`** (#84) — reset runtime state without restarting Claude Desktop: close pooled IMAP/SMTP connections and clear the in-memory capabilities cache (each toggleable). Config/env/tool-registry changes still require a full restart; the database is untouched.
+- **`imap_help`** (#39) — categorized capability guide + copy-paste workflow recipes (overview, getting-started, reading, sending, organizing, cleanup, subscriptions, security, bulk, workflows, admin), pointing at `imap_list_tools` for the exhaustive catalog.
+
+### Changed
+- `imap_about` now reports the correct license (PolyForm Noncommercial 1.0.0, commercial available) and UserCheck (was a stale "Dual-License" / CleanTalk string).
+
+### Compliance / tests
+- **RFC 9051 (IMAP4rev2) closed** (#50, #57): all required commands (CREATE/DELETE/RENAME/APPEND/SUBSCRIBE/UNSUBSCRIBE/STATUS + LIST/SEARCH/COPY/MOVE/STORE/CAPABILITY) are implemented, now guarded by a structural compliance regression suite (`src/tools/rfc9051-compliance.test.ts`) that asserts each command maps to a tool and a backing service method.
+
 ## [2.21.0] - 2026-06-21
 
 Message priority management, a large-folder reliability fix, and a drift-proof tool catalog. Tools 107 → 109; test suite 172 → 181.
