@@ -1,0 +1,45 @@
+name: Claude PR Assistant
+
+# Responds to `@claude` mentions in issues / PR comments (#93).
+#
+# DORMANT BY DEFAULT. Only runs when BOTH are configured:
+#   - repository variable  ENABLE_CLAUDE_REVIEW = true
+#   - repository secret    ANTHROPIC_API_KEY
+# Otherwise the job is skipped (not failed). The comment-body check keeps the
+# action from running on every comment.
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  claude:
+    name: Claude assistant
+    if: >-
+      ${{ vars.ENABLE_CLAUDE_REVIEW == 'true' &&
+          (
+            (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+            (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+            (github.event_name == 'issues' && contains(github.event.issue.body, '@claude'))
+          ) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
+        with:
+          fetch-depth: 1
+
+      - name: Claude assistant
+        uses: anthropics/claude-code-action@2fee15510437d71399d9139ed60433470484a8fb  # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
