@@ -5,6 +5,11 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.25.1] - 2026-06-22
+
+### Security
+- **Owner-only data-at-rest permissions** (#235) — the SQLite database was created at the process umask (typically `0644`, world-readable) while it caches plaintext subjects/senders; only the `.encryption-key` was `0600`. `DatabaseService` now enforces `~/.imap-mcp` → `0700` and `data.db` (+ any journal/WAL sidecars) → `0600`, with **repair-on-startup** for files created before this fix. Best-effort and logged; no-op on Windows (which doesn't model these modes).
+
 ## [2.25.0] - 2026-06-22
 
 Full-text search over the local message cache. Test suite 235 → 244.
