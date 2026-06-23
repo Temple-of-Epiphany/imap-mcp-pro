@@ -16,7 +16,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { withErrorHandling } from '../utils/error-handler.js';
 import { resolveUserOrThrow } from '../utils/user-resolver.js';
-import { UserCheckService, SpamCheckCriteria } from '../services/usercheck-service.js';
+import { UserCheckService, SpamCheckCriteria, normalizeAddress } from '../services/usercheck-service.js';
 import { DatabaseService } from '../services/database-service.js';
 import { ImapService } from '../services/imap-service.js';
 
@@ -222,33 +222,10 @@ export function userCheckTools(server: McpServer, db: DatabaseService, imapServi
       allowPublicDomains
     };
 
-    const results = [];
-    const emailsToCheck = [];
-
-    // Check cache first if enabled
-    if (useCache) {
-      for (const email of emails) {
-        const cached = await userCheck.getCachedResult(email);
-        if (cached) {
-          results.push({ ...cached, cached: true });
-        } else {
-          emailsToCheck.push(email);
-        }
-      }
-    } else {
-      emailsToCheck.push(...emails);
-    }
-
-    // Check remaining emails with UserCheck API
-    if (emailsToCheck.length > 0) {
-      const apiResults = await userCheck.checkEmailsBatch(userId, emailsToCheck, criteria);
-
-      // Cache all results
-      for (const result of apiResults) {
-        await userCheck.cacheResult(result.email, result);
-        results.push({ ...result, cached: false });
-      }
-    }
+    // checkEmailsBatch normalizes + dedupes addresses and consults the cache
+    // per address (write-through on miss), so each unique sender costs at most
+    // one UserCheck call. The per-result `cached` flag reflects cache vs API.
+    const results = await userCheck.checkEmailsBatch(userId, emails, criteria, { useCache });
 
     // Separate spam from legitimate
     const spam = results.filter(r => r.isSpam);
@@ -300,27 +277,19 @@ export function userCheckTools(server: McpServer, db: DatabaseService, imapServi
     const allEmails = await imapService.searchEmails(accountId, folder, {});
     const emails = allEmails.slice(0, limit);
 
-    // Extract unique sender emails
-    const senderEmails = [...new Set(emails.map(e => e.from))];
+    // Unique, normalized senders (one check per address regardless of how many
+    // messages they sent or how the From header is formatted), capped at 1000.
+    const senderEmails = [...new Set(emails.map(e => normalizeAddress(e.from)))].slice(0, 1000);
 
-    // Batch check sender emails
-    const spamChecks = await userCheck.checkEmailsBatch(userId, senderEmails.slice(0, 1000), criteria);
+    // Cache-aware batch: cached senders cost no API call (write-through on miss).
+    const spamChecks = await userCheck.checkEmailsBatch(userId, senderEmails, criteria, { useCache });
 
-    // Create map of email -> spam status
+    // Map normalized-address -> result; look up each message by its normalized sender.
     const spamMap = new Map(spamChecks.map(r => [r.email, r]));
-
-    // Filter emails from spam senders
     const spamMessages = emails.filter(e => {
-      const check = spamMap.get(e.from);
+      const check = spamMap.get(normalizeAddress(e.from));
       return check && check.isSpam;
     });
-
-    // Cache results
-    for (const result of spamChecks) {
-      if (useCache) {
-        await userCheck.cacheResult(result.email, result);
-      }
-    }
 
     return {
       content: [{
@@ -339,7 +308,7 @@ export function userCheckTools(server: McpServer, db: DatabaseService, imapServi
             from: e.from,
             subject: e.subject,
             date: e.date,
-            spamInfo: spamMap.get(e.from)
+            spamInfo: spamMap.get(normalizeAddress(e.from))
           }))
         }, null, 2)
       }]
@@ -356,9 +325,10 @@ export function userCheckTools(server: McpServer, db: DatabaseService, imapServi
       checkBlocklisted: z.boolean().optional().default(true).describe('Flag blocklisted email addresses'),
       checkRoleAccount: z.boolean().optional().default(true).describe('Flag role-based email accounts'),
       checkMx: z.boolean().optional().default(true).describe('Check MX records'),
-      allowPublicDomains: z.boolean().optional().default(true).describe('Allow public email domains')
+      allowPublicDomains: z.boolean().optional().default(true).describe('Allow public email domains'),
+      useCache: z.boolean().optional().default(true).describe('Use cached results if available (a sender is checked once across folders/runs within the cache TTL)')
     }
-  }, withErrorHandling(async ({ userId: userIdRaw, accountId, maxEmailsPerFolder, checkDisposable, checkBlocklisted, checkRoleAccount, checkMx, allowPublicDomains }) => {
+  }, withErrorHandling(async ({ userId: userIdRaw, accountId, maxEmailsPerFolder, checkDisposable, checkBlocklisted, checkRoleAccount, checkMx, allowPublicDomains, useCache }) => {
     const userId = resolveUserOrThrow(db, userIdRaw);
     const criteria: SpamCheckCriteria = {
       checkDisposable,
@@ -383,18 +353,16 @@ export function userCheckTools(server: McpServer, db: DatabaseService, imapServi
 
         if (emails.length === 0) continue;
 
-        // Extract unique sender emails
-        const senderEmails = [...new Set(emails.map(e => e.from))];
+        // Unique, normalized senders for this folder (capped at 1000). The
+        // cache makes a sender seen in an earlier folder/run cost no API call,
+        // so cross-folder duplicates are checked once per TTL.
+        const senderEmails = [...new Set(emails.map(e => normalizeAddress(e.from)))].slice(0, 1000);
 
-        // Batch check sender emails
-        const spamChecks = await userCheck.checkEmailsBatch(userId, senderEmails.slice(0, 1000), criteria);
+        const spamChecks = await userCheck.checkEmailsBatch(userId, senderEmails, criteria, { useCache });
 
-        // Create map of email -> spam status
         const spamMap = new Map(spamChecks.map(r => [r.email, r]));
-
-        // Filter emails from spam senders
         const spamMessages = emails.filter(e => {
-          const check = spamMap.get(e.from);
+          const check = spamMap.get(normalizeAddress(e.from));
           return check && check.isSpam;
         });
 
@@ -414,11 +382,7 @@ export function userCheckTools(server: McpServer, db: DatabaseService, imapServi
             reason: s.spamReason
           }))
         });
-
-        // Cache results
-        for (const result of spamChecks) {
-          await userCheck.cacheResult(result.email, result);
-        }
+        // (Caching is handled write-through inside checkEmailsBatch.)
       } catch (error) {
         folderResults.push({
           folder: folder.name,
