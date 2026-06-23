@@ -12,6 +12,17 @@
 
 import { DatabaseService } from './database-service.js';
 
+/**
+ * Normalize an address for UserCheck lookups + cache keys: extract the address
+ * from a "Display Name <addr>" header, strip surrounding whitespace, lowercase.
+ * Ensures one sender is checked/cached once regardless of header formatting.
+ */
+export function normalizeAddress(raw: string): string {
+  if (!raw) return '';
+  const m = raw.match(/<([^>]+)>/);
+  return (m ? m[1] : raw).trim().toLowerCase();
+}
+
 export interface UserCheckResult {
   email: string;
   normalized_email: string;
@@ -31,6 +42,7 @@ export interface UserCheckResult {
   isSpam: boolean;
   spamReason?: string;
   spamScore: number; // 0-1 (0 = not spam, 1 = definitely spam)
+  cached?: boolean;  // true when this result came from spam_cache, not the API
 }
 
 export interface UserCheckDomainResult {
@@ -221,26 +233,49 @@ export class UserCheckService {
   }
 
   /**
-   * Check multiple email addresses (sequential to avoid rate limits)
-   * Note: UserCheck doesn't have a batch endpoint, so we check one at a time
+   * Check multiple email addresses against UserCheck (sequential — there is no
+   * batch endpoint). UserCheck is billed/rate-limited per address, so this:
+   *   1. NORMALIZES each address ("Alice <a@X.com>" → "a@x.com") and DEDUPES,
+   *      so a sender appearing on many messages is checked at most once.
+   *   2. Consults the local spam_cache first (unless useCache:false), so a
+   *      sender already checked (this run, another folder, or within the TTL of
+   *      a prior run) costs zero API calls. Cache writes happen here too, so all
+   *      bulk callers share one cache-aware path.
+   * Results are keyed by the normalized address (the `email` field), so callers
+   * can map message → result via normalizeAddress(message.from).
    */
-  async checkEmailsBatch(userId: string, emails: string[], criteria: SpamCheckCriteria = {}): Promise<UserCheckResult[]> {
-    if (emails.length === 0) {
-      return [];
-    }
+  async checkEmailsBatch(
+    userId: string,
+    emails: string[],
+    criteria: SpamCheckCriteria = {},
+    options: { useCache?: boolean } = {},
+  ): Promise<UserCheckResult[]> {
+    const useCache = options.useCache !== false;
+    const unique = [...new Set(emails.map(normalizeAddress).filter(Boolean))];
+    if (unique.length === 0) return [];
 
     const results: UserCheckResult[] = [];
 
-    for (const email of emails) {
+    for (const addr of unique) {
       try {
-        const result = await this.checkEmail(userId, email, criteria);
-        results.push(result);
+        if (useCache) {
+          const cached = await this.getCachedResult(addr);
+          if (cached) {
+            results.push({ ...cached, email: addr, cached: true });
+            continue;
+          }
+        }
 
-        // Small delay to avoid rate limits (adjust as needed)
+        const result = await this.checkEmail(userId, addr, criteria);
+        // Write-through so the next folder / next run hits the cache.
+        await this.cacheResult(addr, result);
+        results.push({ ...result, email: addr, cached: false });
+
+        // Small delay to avoid rate limits — only paid for actual API calls.
         await new Promise(resolve => setTimeout(resolve, 100));
       } catch (error) {
-        // Continue with other emails even if one fails
-        console.error(`Failed to check ${email}:`, error);
+        // Continue with other addresses even if one fails.
+        console.error(`Failed to check ${addr}:`, error);
       }
     }
 
