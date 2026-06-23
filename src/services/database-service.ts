@@ -47,9 +47,9 @@ export class DatabaseService {
     const dbPath = config?.dbPath || path.join(os.homedir(), '.imap-mcp', 'data.db');
     const dbDir = path.dirname(dbPath);
 
-    // Create directory if it doesn't exist
+    // Create directory if it doesn't exist (owner-only).
     if (!fs.existsSync(dbDir)) {
-      fs.mkdirSync(dbDir, { recursive: true });
+      fs.mkdirSync(dbDir, { recursive: true, mode: 0o700 });
     }
 
     // node:sqlite — same SQLite file format as better-sqlite3, so the
@@ -59,6 +59,13 @@ export class DatabaseService {
     // .node binaries get rejected by library-validation.
     this.db = new DatabaseSync(dbPath);
 
+    // SECURITY (#235): the data directory and DB file hold plaintext metadata
+    // (cached subjects/senders) and the encryption key — all owner-only data at
+    // rest. The DB file is created at the process umask (often 0644), so tighten
+    // it (and the dir + any journal/WAL sidecars) here, with repair-on-startup
+    // for files that predate this fix. Mirrors the key-file handling below.
+    this.secureStorage(dbPath, dbDir);
+
     // Set up encryption key
     this.encryptionKey = this.getOrCreateEncryptionKey(dbDir);
 
@@ -66,6 +73,36 @@ export class DatabaseService {
     this.initializeSchema();
 
     console.error('[DatabaseService] Initialized at:', dbPath);
+  }
+
+  /**
+   * SECURITY (#235): enforce owner-only permissions on the data directory
+   * (0700) and the SQLite database file plus any journal/WAL sidecars (0600).
+   * Repairs looser permissions on existing files, logging the change — the same
+   * pattern getOrCreateEncryptionKey uses for the key file.
+   */
+  private secureStorage(dbPath: string, dbDir: string): void {
+    this.enforceMode(dbDir, 0o700, 'data directory');
+    this.enforceMode(dbPath, 0o600, 'database file');
+    for (const suffix of ['-journal', '-wal', '-shm']) {
+      this.enforceMode(dbPath + suffix, 0o600, `database sidecar (${suffix})`);
+    }
+  }
+
+  /** chmod `target` to `expected` if it exists and differs. Best-effort; logs. */
+  private enforceMode(target: string, expected: number, label: string): void {
+    try {
+      if (!fs.existsSync(target)) return;
+      const mode = fs.statSync(target).mode & 0o777;
+      if (mode !== expected) {
+        fs.chmodSync(target, expected);
+        console.error(
+          `[SECURITY] Tightened ${label} permissions ${mode.toString(8)} -> ${expected.toString(8)}: ${target}`
+        );
+      }
+    } catch (err) {
+      console.error(`[SECURITY WARNING] Could not set ${label} permissions on ${target}:`, err);
+    }
   }
 
   /**
