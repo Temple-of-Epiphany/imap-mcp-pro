@@ -141,6 +141,9 @@ export const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
   'imap_bulk_jobs':                    READ_ONLY,
   'imap_bulk_job_status':              READ_ONLY,
   'imap_bulk_job_cancel':              WRITE_LOCAL,
+  'imap_bulk_job_resume':              READ_REMOTE,
+  'imap_scan_account_spam_start':      READ_REMOTE,
+  'imap_check_emails_spam_bulk_start': READ_REMOTE,
 
   // ---- meta-tools (8) ----
   'imap_about':                        READ_ONLY,

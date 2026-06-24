@@ -19,9 +19,13 @@ import { resolveUserOrThrow } from '../utils/user-resolver.js';
 import { UserCheckService, SpamCheckCriteria, normalizeAddress } from '../services/usercheck-service.js';
 import { DatabaseService } from '../services/database-service.js';
 import { ImapService } from '../services/imap-service.js';
+import { BulkJobService } from '../services/bulk-job-service.js';
+import { BULK_RUNNERS, runJobWithBudget, RunnerDeps } from './bulk-runners.js';
 
-export function userCheckTools(server: McpServer, db: DatabaseService, imapService: ImapService): void {
+export function userCheckTools(server: McpServer, db: DatabaseService, imapService: ImapService, jobs: BulkJobService): void {
   const userCheck = new UserCheckService(db);
+  const runnerDeps: RunnerDeps = { imapService, userCheck };
+  const DEFAULT_BUDGET_MS = 30000;
 
   // ===== UserCheck API Key Management Tools =====
 
@@ -406,5 +410,110 @@ export function userCheckTools(server: McpServer, db: DatabaseService, imapServi
         }, null, 2)
       }]
     };
+  }));
+
+  // ---------------------------------------------------------------------------
+  // Async / resumable variants (Issue #117). Each starts a persistent job and
+  // runs it with a 30s sync budget: if the scan finishes in time you get the
+  // full summary; otherwise a job_id to poll (imap_bulk_job_status), cancel
+  // (imap_bulk_job_cancel), or resume (imap_bulk_job_resume). UserCheck is
+  // called once per unique sender; spam_cache short-circuits repeats.
+  // The original synchronous tools above are unchanged.
+  // ---------------------------------------------------------------------------
+
+  server.registerTool('imap_scan_account_spam_start', {
+    description:
+      'Start a resumable account-wide spam scan (UserCheck) as a tracked job. Scans every folder, dedupes ' +
+      'senders to unique addresses, and checks each once (cached senders cost no API call). Returns the full ' +
+      'summary if it completes within ~30s, otherwise a jobId to poll/resume/cancel. Unlike imap_scan_account_spam ' +
+      'this has no 1000-sender cap and survives interruption.',
+    inputSchema: {
+      userId: z.string().describe('User ID (UUID or username) with an active UserCheck API key'),
+      accountId: z.string().describe('IMAP account ID'),
+      maxEmailsPerFolder: z.number().optional().default(100).describe('Max emails to sample per folder for sender extraction'),
+      checkDisposable: z.boolean().optional().default(true),
+      checkBlocklisted: z.boolean().optional().default(true),
+      checkRoleAccount: z.boolean().optional().default(true),
+      checkMx: z.boolean().optional().default(true),
+      allowPublicDomains: z.boolean().optional().default(true),
+      useCache: z.boolean().optional().default(true).describe('Skip senders already in spam_cache (default true)'),
+      budgetMs: z.number().optional().default(30000).describe('Sync wait budget before returning a jobId (default 30000)'),
+    },
+  }, withErrorHandling(async (args) => {
+    const userId = resolveUserOrThrow(db, args.userId);
+    const params = {
+      accountId: args.accountId, maxEmailsPerFolder: args.maxEmailsPerFolder,
+      checkDisposable: args.checkDisposable, checkBlocklisted: args.checkBlocklisted,
+      checkRoleAccount: args.checkRoleAccount, checkMx: args.checkMx,
+      allowPublicDomains: args.allowPublicDomains, useCache: args.useCache,
+    };
+    const runner = BULK_RUNNERS.imap_scan_account_spam;
+    const items = await runner.deriveItems(userId, params, runnerDeps);
+    const jobId = jobs.createJob({ userId, accountId: args.accountId, toolName: 'imap_scan_account_spam', params, totalItems: items.length });
+    return runJobWithBudget(jobs, jobId, items,
+      (k) => runner.processOne(userId, k, params, runnerDeps),
+      (jid) => runner.summarize(jid, params, jobs),
+      args.budgetMs ?? DEFAULT_BUDGET_MS);
+  }));
+
+  server.registerTool('imap_check_emails_spam_bulk_start', {
+    description:
+      'Start a resumable bulk spam check of a list of email addresses (UserCheck) as a tracked job. Dedupes ' +
+      'to unique addresses, one check each (cache-first). Returns the full summary if done within ~30s, else a ' +
+      'jobId to poll/resume/cancel.',
+    inputSchema: {
+      userId: z.string().describe('User ID (UUID or username) with an active UserCheck API key'),
+      accountId: z.string().optional().default('').describe('Optional account ID for grouping the job'),
+      emails: z.array(z.string()).min(1).describe('Email addresses to check'),
+      checkDisposable: z.boolean().optional().default(true),
+      checkBlocklisted: z.boolean().optional().default(true),
+      checkRoleAccount: z.boolean().optional().default(true),
+      checkMx: z.boolean().optional().default(true),
+      allowPublicDomains: z.boolean().optional().default(true),
+      useCache: z.boolean().optional().default(true),
+      budgetMs: z.number().optional().default(30000),
+    },
+  }, withErrorHandling(async (args) => {
+    const userId = resolveUserOrThrow(db, args.userId);
+    const params = {
+      emails: args.emails, checkDisposable: args.checkDisposable, checkBlocklisted: args.checkBlocklisted,
+      checkRoleAccount: args.checkRoleAccount, checkMx: args.checkMx,
+      allowPublicDomains: args.allowPublicDomains, useCache: args.useCache,
+    };
+    const runner = BULK_RUNNERS.imap_check_emails_spam_bulk;
+    const items = await runner.deriveItems(userId, params, runnerDeps);
+    const jobId = jobs.createJob({ userId, accountId: args.accountId || 'n/a', toolName: 'imap_check_emails_spam_bulk', params, totalItems: items.length });
+    return runJobWithBudget(jobs, jobId, items,
+      (k) => runner.processOne(userId, k, params, runnerDeps),
+      (jid) => runner.summarize(jid, params, jobs),
+      args.budgetMs ?? DEFAULT_BUDGET_MS);
+  }));
+
+  server.registerTool('imap_bulk_job_resume', {
+    description:
+      'Resume a paused, failed, or cancelled bulk job from where it stopped — only unprocessed items are run ' +
+      '(already-checked senders are skipped). Re-derives the work from the job\'s saved params. Returns the full ' +
+      'summary if it finishes within ~30s, else the jobId to keep polling.',
+    inputSchema: {
+      jobId: z.string().describe('Job ID from a *_start tool'),
+      budgetMs: z.number().optional().default(30000),
+    },
+  }, withErrorHandling(async ({ jobId, budgetMs }) => {
+    const job = jobs.getJob(jobId);
+    if (!job) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: 'job_not_found', jobId }, null, 2) }], isError: true };
+    }
+    if (job.status === 'done') {
+      return { content: [{ type: 'text', text: JSON.stringify({ jobId, status: 'done', note: 'Job already complete.', summary: job.resultSummary }, null, 2) }] };
+    }
+    const runner = BULK_RUNNERS[job.toolName];
+    if (!runner) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: 'not_resumable', jobId, toolName: job.toolName }, null, 2) }], isError: true };
+    }
+    const items = await runner.deriveItems(job.userId, job.params as any, runnerDeps);
+    return runJobWithBudget(jobs, jobId, items,
+      (k) => runner.processOne(job.userId, k, job.params as any, runnerDeps),
+      (jid) => runner.summarize(jid, job.params as any, jobs),
+      budgetMs ?? DEFAULT_BUDGET_MS);
   }));
 }
