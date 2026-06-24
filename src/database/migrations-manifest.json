@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.12.0",
+  "schemaVersion": "1.13.0",
   "description": "Release-indexed manifest of schema migrations. Each entry is applied in order via the `schema_version` ledger. A migration is complete when its `to` version is present in the ledger.",
   "migrations": [
     {
@@ -79,6 +79,13 @@
       "file": "schema_update_1.11.0_TO_1.12.0.sql",
       "rollbackFile": "schema_update_1.11.0_TO_1.12.0.down.sql",
       "description": "Add messages_cache_fts FTS5 full-text index over subject + sender (Track B, Issue #119)"
+    },
+    {
+      "from": "1.12.0",
+      "to": "1.13.0",
+      "file": "schema_update_1.12.0_TO_1.13.0.sql",
+      "rollbackFile": "schema_update_1.12.0_TO_1.13.0.down.sql",
+      "description": "Add bulk_operations + bulk_operation_items for job persistence (Track A, Issue #117)"
     }
   ]
 }

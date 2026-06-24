@@ -4,13 +4,13 @@
 > manifest by `scripts/gen-tool-catalog.mjs` (runs on `npm run build`).
 > The authoritative runtime list is always available via the `imap_list_tools` tool.
 
-**113 MCP tools** total.
+**116 MCP tools** total.
 
 ## Categories
 
 - [Users (MSP multi-tenant)](#users-msp-multitenant) — 3
 - [Account management](#account-management) — 15
-- [Bulk operations](#bulk-operations) — 11
+- [Bulk operations](#bulk-operations) — 14
 - [Size, export & quota](#size-export-quota) — 8
 - [Attachment staging](#attachment-staging) — 6
 - [Email operations](#email-operations) — 13
@@ -62,6 +62,9 @@
 | `imap_bulk_delete_emails_chunked` | Bulk delete emails with chunking for large operations (1000+ messages). |
 | `imap_bulk_get_emails` | Bulk fetch multiple emails at once. |
 | `imap_bulk_get_emails_chunked` | Bulk fetch emails with chunking for large operations (1000+ messages). |
+| `imap_bulk_job_cancel` | Request cancellation of a running/queued bulk job. |
+| `imap_bulk_job_status` | Get one bulk job's detail: status, done/total progress, error count, ETA, and last error. |
+| `imap_bulk_jobs` | List persistent bulk-operation jobs (long-running scans) with status and progress. |
 | `imap_bulk_mark_emails` | Bulk mark multiple emails with standard IMAP flags. |
 | `imap_bulk_mark_emails_chunked` | Bulk mark emails with chunking for large operations (1000+ messages). |
 | `imap_bulk_move_emails` | Bulk move multiple emails to another folder (copy + delete) |
@@ -99,7 +102,7 @@
 | `imap_copy_email` | Copy an email to another folder |
 | `imap_delete_email` | Delete an email (moves to trash or expunges) |
 | `imap_forward_email` | Forward an existing email |
-| `imap_get_email` | Get the full content of an email or just headers |
+| `imap_get_email` | Get the full content of an email (or just headers). |
 | `imap_get_email_priority` | Get the resolved priority of a message: our $Priority-* keyword if set (the explicit user setting), otherwise the compose-time X-Priority / Importance / X-MSMail-Priority header, otherwise normal. |
 | `imap_get_latest_emails` | Get the latest emails from a folder. |
 | `imap_mark_as_read` | Mark an email as read |

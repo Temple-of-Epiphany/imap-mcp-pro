@@ -137,6 +137,11 @@ export const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
   // ---- admin-tools (1) ----
   'imap_server_reload':                NEUTRAL_IDEMPOTENT,
 
+  // ---- bulk-job-tools (3) ----
+  'imap_bulk_jobs':                    READ_ONLY,
+  'imap_bulk_job_status':              READ_ONLY,
+  'imap_bulk_job_cancel':              WRITE_LOCAL,
+
   // ---- meta-tools (8) ----
   'imap_about':                        READ_ONLY,
   'imap_list_tools':                   READ_ONLY,
