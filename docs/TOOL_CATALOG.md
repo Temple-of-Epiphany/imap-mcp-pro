@@ -4,20 +4,20 @@
 > manifest by `scripts/gen-tool-catalog.mjs` (runs on `npm run build`).
 > The authoritative runtime list is always available via the `imap_list_tools` tool.
 
-**116 MCP tools** total.
+**119 MCP tools** total.
 
 ## Categories
 
 - [Users (MSP multi-tenant)](#users-msp-multitenant) — 3
 - [Account management](#account-management) — 15
-- [Bulk operations](#bulk-operations) — 14
+- [Bulk operations](#bulk-operations) — 15
 - [Size, export & quota](#size-export-quota) — 8
 - [Attachment staging](#attachment-staging) — 6
 - [Email operations](#email-operations) — 13
 - [Folder & mailbox operations](#folder-mailbox-operations) — 11
 - [Subscriptions & unsubscribe](#subscriptions-unsubscribe) — 9
 - [Categorization & scoring](#categorization-scoring) — 6
-- [Spam & UserCheck](#spam-usercheck) — 7
+- [Spam & UserCheck](#spam-usercheck) — 9
 - [DNS firewall & domain checks](#dns-firewall-domain-checks) — 4
 - [Local cache](#local-cache) — 2
 - [Capabilities, diagnostics & metrics](#capabilities-diagnostics-metrics) — 11
@@ -63,6 +63,7 @@
 | `imap_bulk_get_emails` | Bulk fetch multiple emails at once. |
 | `imap_bulk_get_emails_chunked` | Bulk fetch emails with chunking for large operations (1000+ messages). |
 | `imap_bulk_job_cancel` | Request cancellation of a running/queued bulk job. |
+| `imap_bulk_job_resume` | Resume a paused, failed, or cancelled bulk job from where it stopped — only unprocessed items are run (already-checked senders are skipped). |
 | `imap_bulk_job_status` | Get one bulk job's detail: status, done/total progress, error count, ETA, and last error. |
 | `imap_bulk_jobs` | List persistent bulk-operation jobs (long-running scans) with status and progress. |
 | `imap_bulk_mark_emails` | Bulk mark multiple emails with standard IMAP flags. |
@@ -161,10 +162,12 @@
 | `imap_add_usercheck_key` | Add a UserCheck API key for a user (admin or own user only) |
 | `imap_check_email_spam` | Check a single email address against UserCheck for spam |
 | `imap_check_emails_spam_bulk` | Check multiple email addresses against UserCheck for spam (max 1000) |
+| `imap_check_emails_spam_bulk_start` | Start a resumable bulk spam check of a list of email addresses (UserCheck) as a tracked job. |
 | `imap_check_folder_spam` | Check all emails in a folder against UserCheck and return spam messages |
 | `imap_delete_usercheck_key` | Delete a UserCheck API key |
 | `imap_get_usercheck_key` | Get UserCheck API key information for a user |
 | `imap_scan_account_spam` | Scan entire IMAP account for spam using UserCheck, checking all folders |
+| `imap_scan_account_spam_start` | Start a resumable account-wide spam scan (UserCheck) as a tracked job. |
 
 ## DNS firewall & domain checks
 

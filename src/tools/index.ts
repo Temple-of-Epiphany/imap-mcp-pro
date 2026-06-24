@@ -69,6 +69,10 @@ export function registerTools(
   // so re-entrant calls (e.g. from buildToolsManifest) start fresh.
   const restoreRegisterTool = withAnnotations(server);
 
+  // One shared BulkJobService instance (Issue #117) backs both the job
+  // management tools and the async *_start / resume tools in userCheckTools.
+  const bulkJobs = new BulkJobService(db);
+
   // Register user & database management tools (v2.6.0 - SQLite3 integration)
   userTools(server, db);
 
@@ -92,7 +96,7 @@ export function registerTools(
   dnsFirewallTools(server, imapService, db);
 
   // Register UserCheck SPAM detection tools (Issues #3, #17, #18)
-  userCheckTools(server, db, imapService);
+  userCheckTools(server, db, imapService, bulkJobs);
 
   // Register confidence scoring tools (Issue #42)
   registerScoringTools(server, imapService);
@@ -119,8 +123,8 @@ export function registerTools(
   // Register admin/lifecycle tools (Issue #84 - runtime reset without restart)
   adminTools(server, imapService, smtpService);
 
-  // Register bulk-job management tools (Issue #117 - job persistence)
-  bulkJobTools(server, new BulkJobService(db), db);
+  // Register bulk-job management tools (Issue #117 - job persistence).
+  bulkJobTools(server, bulkJobs, db);
 
   // Register meta/discovery tools (passes webUIManager so meta-tools can expose
   // the imap_open_web_ui MCP tool when the embedded Web UI is available).
