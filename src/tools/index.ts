@@ -15,6 +15,8 @@ import { emailTools } from './email-tools.js';
 import { folderTools } from './folder-tools.js';
 import { metaTools } from './meta-tools.js';
 import { adminTools } from './admin-tools.js';
+import { bulkJobTools } from './bulk-job-tools.js';
+import { BulkJobService } from '../services/bulk-job-service.js';
 import { userTools } from './user-tools.js';
 import { userCheckTools } from './usercheck-tools.js';
 import { registerScoringTools } from './scoring-tools.js';
@@ -116,6 +118,9 @@ export function registerTools(
 
   // Register admin/lifecycle tools (Issue #84 - runtime reset without restart)
   adminTools(server, imapService, smtpService);
+
+  // Register bulk-job management tools (Issue #117 - job persistence)
+  bulkJobTools(server, new BulkJobService(db), db);
 
   // Register meta/discovery tools (passes webUIManager so meta-tools can expose
   // the imap_open_web_ui MCP tool when the embedded Web UI is available).
