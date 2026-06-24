@@ -17,6 +17,67 @@ import { z } from 'zod';
 import { withErrorHandling } from '../utils/error-handler.js';
 import { getToolContext } from './tool-context.js';
 
+/** A category row as stored: name, comma/semicolon keyword list, destination. */
+interface CategoryRow { category_name: string; keywords: string; target_folder: string; }
+/** Minimal email shape the evaluator needs. */
+interface EvalEmail { uid: number; from?: string; subject?: string; date?: unknown; }
+
+/** Split a category's keyword string into normalized, non-empty terms. */
+function splitKeywords(keywords: string): string[] {
+  return (keywords || '').split(/[,;]/).map((k) => k.trim().toLowerCase()).filter((k) => k.length > 0);
+}
+
+/**
+ * Pure dry-run categorization analysis (#72): for each email find ALL matching
+ * categories (not just the first), so we can report coverage, conflicts
+ * (multi-category matches), per-category counts, and the uncategorized set —
+ * without moving anything. "Destination" mirrors imap_apply_categories'
+ * first-match-wins behavior (categories are evaluated in the given order).
+ */
+export function evaluateCategories(emails: EvalEmail[], categories: CategoryRow[]) {
+  const prepared = categories.map((c) => ({ name: c.category_name, target: c.target_folder, keywords: splitKeywords(c.keywords) }));
+  const perCategory: Record<string, { count: number; target: string }> = {};
+  for (const c of prepared) perCategory[c.name] = { count: 0, target: c.target };
+
+  const matched: Array<{ uid: number; subject: string; from: string; date: unknown; destination: string; matchedCategory: string; matchedKeyword: string; allCategories: string[] }> = [];
+  const uncategorized: Array<{ uid: number; subject: string; from: string; date: unknown }> = [];
+  let conflicts = 0;
+
+  for (const email of emails) {
+    const text = `${email.from || ''} ${email.subject || ''}`.toLowerCase();
+    const hits: Array<{ category: string; keyword: string; target: string }> = [];
+    for (const c of prepared) {
+      const kw = c.keywords.find((k) => text.includes(k));
+      if (kw) hits.push({ category: c.name, keyword: kw, target: c.target });
+    }
+    if (hits.length === 0) {
+      uncategorized.push({ uid: email.uid, subject: email.subject || '(no subject)', from: email.from || '', date: email.date });
+      continue;
+    }
+    const first = hits[0]; // first-match-wins destination (matches apply behavior)
+    perCategory[first.category].count++;
+    const distinct = [...new Set(hits.map((h) => h.category))];
+    if (distinct.length > 1) conflicts++;
+    matched.push({
+      uid: email.uid, subject: email.subject || '(no subject)', from: email.from || '', date: email.date,
+      destination: first.target, matchedCategory: first.category, matchedKeyword: first.keyword, allCategories: distinct,
+    });
+  }
+
+  const total = emails.length;
+  const categorized = matched.length;
+  return {
+    total,
+    categorized,
+    uncategorized: uncategorized.length,
+    coveragePercent: total > 0 ? Math.round((categorized / total) * 1000) / 10 : 0,
+    conflicts,
+    perCategory,
+    matched,
+    uncategorizedList: uncategorized,
+  };
+}
+
 export function categoryTools(
   server: McpServer,
   imapService: ImapService,
@@ -151,6 +212,59 @@ export function categoryTools(
           message: dryRun
             ? `Dry run complete. Found ${categorizedCount} emails that would be categorized.`
             : `Categorization complete. Moved ${categorizedCount} emails to target folders.`
+        }, null, 2)
+      }]
+    };
+  }));
+
+  // Test categorization without moving anything (#72)
+  server.registerTool('imap_test_categories', {
+    description:
+      'Dry-run the Quick Categories against a folder WITHOUT moving any email: reports coverage (% that would ' +
+      'be categorized), per-category counts + destination, which keyword triggered each match, emails matching ' +
+      'multiple categories (conflicts), and the uncategorized set. Use to tune keywords before imap_apply_categories.',
+    inputSchema: {
+      accountId: z.string().describe('Account ID'),
+      folder: z.string().default('INBOX').describe('Folder to test against (default: INBOX)'),
+      limit: z.number().optional().default(200).describe('Max most-recent emails to test (default 200, cap 1000)'),
+      unreadOnly: z.boolean().optional().default(false).describe('Test only unread emails'),
+      sampleSize: z.number().optional().default(50).describe('Max rows to include in each sample list (default 50)'),
+    }
+  }, withErrorHandling(async ({ accountId, folder, limit, unreadOnly, sampleSize }) => {
+    const { userId } = getToolContext(db);
+    const categories = db.getEnabledCategoriesForAccount(userId, accountId);
+    if (categories.length === 0) {
+      return { content: [{ type: 'text', text: JSON.stringify({ success: false, message: 'No enabled categories for this account. Create categories first in the Web UI.' }, null, 2) }] };
+    }
+
+    const cap = Math.min(limit ?? 200, 1000);
+    const all = await imapService.searchEmails(accountId, folder, unreadOnly ? { unreadOnly: true } : {});
+    const emails = all.length > cap ? [...all].sort((a, b) => b.uid - a.uid).slice(0, cap) : all;
+
+    const a = evaluateCategories(emails, categories as any);
+    const n = Math.max(0, sampleSize ?? 50);
+    const warnings: string[] = [];
+    if (all.length > cap) warnings.push(`Folder has ${all.length} emails; tested the ${cap} most recent.`);
+
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          success: true,
+          folder,
+          summary: {
+            tested: a.total,
+            categorized: a.categorized,
+            uncategorized: a.uncategorized,
+            coveragePercent: a.coveragePercent,
+            conflicts: a.conflicts,
+          },
+          perCategory: a.perCategory,
+          // Capped samples to protect the token budget; counts above are complete.
+          wouldMove: a.matched.slice(0, n).map((m) => ({ uid: m.uid, from: m.from, subject: m.subject, date: m.date, destination: m.destination, matchedKeyword: m.matchedKeyword, matchedCategory: m.matchedCategory, ...(m.allCategories.length > 1 ? { conflictsWith: m.allCategories } : {}) })),
+          uncategorizedSample: a.uncategorizedList.slice(0, n).map((u) => ({ uid: u.uid, from: u.from, subject: u.subject, date: u.date })),
+          warnings: warnings.length ? warnings : undefined,
+          note: 'Dry run — no emails were moved.',
         }, null, 2)
       }]
     };

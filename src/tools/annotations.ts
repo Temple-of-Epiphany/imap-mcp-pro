@@ -163,6 +163,7 @@ export const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
 
   // ---- category-tools (5) ----
   'imap_list_categories':              READ_ONLY,
+  'imap_test_categories':              READ_REMOTE,         // dry-run analysis, no moves
   'imap_apply_categories':             WRITE_REMOTE,        // sets keyword flags on messages
   'imap_add_keyword':                  WRITE_REMOTE,
   'imap_remove_keyword':               WRITE_REMOTE,
