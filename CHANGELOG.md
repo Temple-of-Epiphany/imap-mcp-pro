@@ -5,6 +5,14 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.27.0] - 2026-06-24
+
+Categorization tuning tools. Tools 119 → 121; test suite 265 → 274.
+
+### Added
+- **`imap_test_categories`** (#72) — dry-run the Quick Categories against a folder *without moving anything*: coverage % (categorized vs total), per-category counts + destination, the keyword that triggered each match, multi-category **conflicts**, and the uncategorized set. Tune keywords before `imap_apply_categories`.
+- **`imap_recommend_keywords`** (#73) — analyze a folder and return candidate category keywords (top sender domains, top senders, frequent subject terms + bigrams), each flagged whether an existing keyword already covers it, plus a `suggestedKeywords` shortlist. Data-for-Claude: the server runs no LLM; it returns structured stats for the assistant to recommend from.
+
 ## [2.26.0] - 2026-06-23
 
 Resumable, cancellable, progress-tracked bulk spam scans (#117). Tools 116 → 119; test suite 254 → 265.
