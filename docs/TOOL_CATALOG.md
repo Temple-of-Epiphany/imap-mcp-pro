@@ -4,7 +4,7 @@
 > manifest by `scripts/gen-tool-catalog.mjs` (runs on `npm run build`).
 > The authoritative runtime list is always available via the `imap_list_tools` tool.
 
-**120 MCP tools** total.
+**121 MCP tools** total.
 
 ## Categories
 
@@ -16,7 +16,7 @@
 - [Email operations](#email-operations) — 13
 - [Folder & mailbox operations](#folder-mailbox-operations) — 11
 - [Subscriptions & unsubscribe](#subscriptions-unsubscribe) — 9
-- [Categorization & scoring](#categorization-scoring) — 7
+- [Categorization & scoring](#categorization-scoring) — 8
 - [Spam & UserCheck](#spam-usercheck) — 9
 - [DNS firewall & domain checks](#dns-firewall-domain-checks) — 4
 - [Local cache](#local-cache) — 2
@@ -152,6 +152,7 @@
 | `imap_analyze_folder_confidence` | Analyze all emails in a folder and provide confidence statistics. |
 | `imap_apply_categories` | Apply Quick Categories to emails in a folder. |
 | `imap_list_categories` | List all Quick Categories for a user, optionally filtered by account |
+| `imap_recommend_keywords` | Analyze a folder and return candidate category keywords for Claude to turn into recommendations: top sender domains, top senders, and frequent subject terms + bigrams — each flagged whether an existing category keyword already covers it. |
 | `imap_remove_keyword` | Remove a custom keyword from emails |
 | `imap_score_email_confidence` | Analyze email headers to detect spoofing and calculate confidence score (-100 to +100). |
 | `imap_test_categories` | Dry-run the Quick Categories against a folder WITHOUT moving any email: reports coverage (% that would be categorized), per-category counts + destination, which keyword triggered each match, emails matching multiple categories (conflicts),  |

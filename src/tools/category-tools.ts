@@ -78,6 +78,80 @@ export function evaluateCategories(emails: EvalEmail[], categories: CategoryRow[
   };
 }
 
+// Common words to ignore when mining subject lines for keyword candidates.
+const KEYWORD_STOPWORDS = new Set([
+  're', 'fwd', 'fw', 'the', 'a', 'an', 'and', 'or', 'of', 'to', 'for', 'in', 'on', 'at', 'is', 'are', 'be',
+  'your', 'you', 'we', 'our', 'us', 'my', 'me', 'it', 'this', 'that', 'with', 'from', 'by', 'as', 'has', 'have',
+  'will', 'can', 'new', 'now', 'get', 'please', 'thanks', 'thank', 'hi', 'hello', 'no', 'yes', 'not', 'do', 'all',
+]);
+
+function domainOf(rawFrom: string): string | null {
+  const m = (rawFrom || '').match(/<([^>]+)>/);
+  const addr = (m ? m[1] : rawFrom).trim().toLowerCase();
+  const at = addr.lastIndexOf('@');
+  return at >= 0 && at < addr.length - 1 ? addr.slice(at + 1) : null;
+}
+function addressOf(rawFrom: string): string | null {
+  const m = (rawFrom || '').match(/<([^>]+)>/);
+  const addr = (m ? m[1] : rawFrom).trim().toLowerCase();
+  return addr.includes('@') ? addr : null;
+}
+function topN<T extends { count: number }>(map: Map<string, number>, make: (k: string, c: number) => T, n: number, minCount: number): T[] {
+  return [...map.entries()].filter(([, c]) => c >= minCount).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, c]) => make(k, c));
+}
+
+/**
+ * Mine a sample of emails for category-keyword candidates (#73, data-for-Claude):
+ * top sender domains, top senders, and frequent subject terms + bigrams, each
+ * flagged as already-covered by existing keywords. Returns structured stats for
+ * the client (Claude) to turn into recommendations — the server does not call an
+ * LLM. Pure + deterministic.
+ */
+export function recommendKeywords(
+  emails: Array<{ from?: string; subject?: string }>,
+  opts: { topN?: number; minCount?: number; existingKeywords?: string[] } = {},
+) {
+  const n = opts.topN ?? 20;
+  const minCount = opts.minCount ?? 2;
+  const covered = new Set((opts.existingKeywords ?? []).map((k) => k.toLowerCase().trim()).filter(Boolean));
+
+  const domains = new Map<string, number>();
+  const senders = new Map<string, number>();
+  const terms = new Map<string, number>();
+
+  for (const e of emails) {
+    const d = domainOf(e.from || '');
+    if (d) domains.set(d, (domains.get(d) ?? 0) + 1);
+    const a = addressOf(e.from || '');
+    if (a) senders.set(a, (senders.get(a) ?? 0) + 1);
+
+    const tokens = (e.subject || '')
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length >= 3 && !/^\d+$/.test(t) && !KEYWORD_STOPWORDS.has(t));
+    for (let i = 0; i < tokens.length; i++) {
+      terms.set(tokens[i], (terms.get(tokens[i]) ?? 0) + 1);
+      if (i + 1 < tokens.length) {
+        const bigram = `${tokens[i]} ${tokens[i + 1]}`;
+        terms.set(bigram, (terms.get(bigram) ?? 0) + 1);
+      }
+    }
+  }
+
+  const isCovered = (k: string) => covered.has(k.toLowerCase());
+  const topDomains = topN(domains, (domain, count) => ({ domain, count, covered: isCovered(domain) }), n, minCount);
+  const topSenders = topN(senders, (address, count) => ({ address, count, covered: isCovered(address) }), n, minCount);
+  const subjectTerms = topN(terms, (term, count) => ({ term, count, covered: isCovered(term) }), n, minCount);
+
+  // Suggested = the highest-signal not-yet-covered candidates (domains weighted first).
+  const suggested = [
+    ...topDomains.filter((d) => !d.covered).slice(0, 10).map((d) => d.domain),
+    ...subjectTerms.filter((t) => !t.covered).slice(0, 10).map((t) => t.term),
+  ];
+
+  return { sampled: emails.length, topDomains, topSenders, subjectTerms, suggestedKeywords: [...new Set(suggested)] };
+}
+
 export function categoryTools(
   server: McpServer,
   imapService: ImapService,
@@ -265,6 +339,52 @@ export function categoryTools(
           uncategorizedSample: a.uncategorizedList.slice(0, n).map((u) => ({ uid: u.uid, from: u.from, subject: u.subject, date: u.date })),
           warnings: warnings.length ? warnings : undefined,
           note: 'Dry run — no emails were moved.',
+        }, null, 2)
+      }]
+    };
+  }));
+
+  // Recommend category keywords from a folder's mail (#73, data-for-Claude)
+  server.registerTool('imap_recommend_keywords', {
+    description:
+      'Analyze a folder and return candidate category keywords for Claude to turn into recommendations: top ' +
+      'sender domains, top senders, and frequent subject terms + bigrams — each flagged whether an existing ' +
+      'category keyword already covers it. The server does no AI itself; it returns structured stats so the ' +
+      'assistant can propose categories/keywords. Read-only.',
+    inputSchema: {
+      accountId: z.string().describe('Account ID'),
+      folder: z.string().default('INBOX').describe('Folder to analyze (default: INBOX)'),
+      limit: z.number().optional().default(500).describe('Max most-recent emails to sample (default 500, cap 2000)'),
+      topN: z.number().optional().default(20).describe('How many candidates to return per category (default 20)'),
+      minCount: z.number().optional().default(2).describe('Ignore candidates seen fewer than this many times (default 2)'),
+    }
+  }, withErrorHandling(async ({ accountId, folder, limit, topN: topCount, minCount }) => {
+    const { userId } = getToolContext(db);
+    const cap = Math.min(limit ?? 500, 2000);
+    const all = await imapService.searchEmails(accountId, folder, {});
+    const emails = all.length > cap ? [...all].sort((a, b) => b.uid - a.uid).slice(0, cap) : all;
+
+    // Existing keywords (across this account's categories) to flag coverage.
+    const existingKeywords: string[] = [];
+    try {
+      for (const c of db.getEnabledCategoriesForAccount(userId, accountId) as any[]) {
+        existingKeywords.push(...splitKeywords(c.keywords));
+      }
+    } catch { /* categories optional */ }
+
+    const rec = recommendKeywords(emails, { topN: topCount ?? 20, minCount: minCount ?? 2, existingKeywords });
+    const warnings = all.length > cap ? [`Folder has ${all.length} emails; analyzed the ${cap} most recent.`] : undefined;
+
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          success: true,
+          folder,
+          ...rec,
+          existingKeywordCount: existingKeywords.length,
+          warnings,
+          note: 'Candidates only — review and apply via the Web UI or imap_add_keyword. "covered" means an existing category keyword already matches.',
         }, null, 2)
       }]
     };

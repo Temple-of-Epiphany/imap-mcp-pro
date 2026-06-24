@@ -3,7 +3,7 @@
 // Tests for evaluateCategories — the dry-run categorization analysis (#72).
 
 import { describe, expect, it } from 'vitest';
-import { evaluateCategories } from './category-tools.js';
+import { evaluateCategories, recommendKeywords } from './category-tools.js';
 
 const CATS = [
   { category_name: 'Newsletters', keywords: 'newsletter, digest', target_folder: 'INBOX/News' },
@@ -50,5 +50,42 @@ describe('evaluateCategories (#72)', () => {
   it('handles an empty email set', () => {
     const a = evaluateCategories([], CATS);
     expect(a).toMatchObject({ total: 0, categorized: 0, coveragePercent: 0, conflicts: 0 });
+  });
+});
+
+describe('recommendKeywords (#73)', () => {
+  const SAMPLE = [
+    { from: 'News <news@acme.com>', subject: 'Weekly product update' },
+    { from: 'deals@acme.com', subject: 'Weekly product deals' },
+    { from: 'Bob <bob@other.com>', subject: 'lunch' },
+    { from: 'sales@acme.com', subject: 'product launch' },
+  ];
+
+  it('ranks top sender domains by frequency', () => {
+    const r = recommendKeywords(SAMPLE, { minCount: 1 });
+    expect(r.topDomains[0]).toMatchObject({ domain: 'acme.com', count: 3 });
+    expect(r.sampled).toBe(4);
+  });
+
+  it('mines frequent subject terms and bigrams above minCount', () => {
+    const r = recommendKeywords(SAMPLE, { minCount: 2 });
+    const terms = r.subjectTerms.map((t) => t.term);
+    expect(terms).toContain('product');          // appears 3x
+    expect(terms).toContain('weekly product');   // bigram appears 2x
+    expect(terms).not.toContain('lunch');         // only once → below minCount
+  });
+
+  it('flags candidates already covered by existing keywords', () => {
+    const r = recommendKeywords(SAMPLE, { minCount: 1, existingKeywords: ['acme.com'] });
+    expect(r.topDomains.find((d) => d.domain === 'acme.com')?.covered).toBe(true);
+    expect(r.suggestedKeywords).not.toContain('acme.com'); // covered → not suggested
+  });
+
+  it('drops stopwords and pure numbers from subject terms', () => {
+    const r = recommendKeywords([{ from: 'a@x.com', subject: 'Your 2026 the order' }, { from: 'b@x.com', subject: 'your 2026 order' }], { minCount: 2 });
+    const terms = r.subjectTerms.map((t) => t.term);
+    expect(terms).toContain('order');
+    expect(terms).not.toContain('your'); // stopword
+    expect(terms).not.toContain('2026'); // pure number
   });
 });
