@@ -5,6 +5,11 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.25.2] - 2026-06-23
+
+### Fixed
+- **UserCheck bulk scans now check each unique sender at most once** (#238) — `imap_check_folder_spam` and `imap_scan_account_spam` previously re-hit the UserCheck API for every sender on every run (their batch path never consulted `spam_cache`) and deduped on the raw `From` header. `checkEmailsBatch` now normalizes addresses (`"Alice <a@x.com>"` → `a@x.com`), dedupes, and consults the cache per address with write-through on miss, so cached senders — same run, another folder, or within the cache TTL of a prior run — cost zero API calls. `imap_scan_account_spam` gains a `useCache` option and dedupes the same sender across folders.
+
 ## [2.25.1] - 2026-06-22
 
 ### Security
