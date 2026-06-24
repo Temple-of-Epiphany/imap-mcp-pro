@@ -5,6 +5,20 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.26.0] - 2026-06-23
+
+Resumable, cancellable, progress-tracked bulk spam scans (#117). Tools 116 → 119; test suite 254 → 265.
+
+### Added
+- **Job persistence for long-running bulk operations** (#117) — a new `BulkJobService` + `bulk_operations` / `bulk_operation_items` tables (migration 1.12.0 → 1.13.0) persist *job state* so a scan can be polled, cancelled, and resumed.
+  - **`imap_scan_account_spam_start`** / **`imap_check_emails_spam_bulk_start`** — start a tracked UserCheck scan. Each unique sender is checked once (cache-first). If it finishes within ~30 s you get the full summary; otherwise a `jobId` and the scan continues in the background. The account scan has **no 1000-sender cap**.
+  - **`imap_bulk_job_resume`** — resume a paused/failed/cancelled job; only unprocessed senders are run (already-checked ones are skipped).
+  - **`imap_bulk_jobs`** / **`imap_bulk_job_status`** / **`imap_bulk_job_cancel`** — list jobs, poll one (progress + ETA), and request cancellation (worker stops at the next checkpoint).
+  - The existing synchronous `imap_scan_account_spam` / `imap_check_emails_spam_bulk` are unchanged.
+
+### Database
+- **Migration 1.12.0 → 1.13.0** — `bulk_operations` + `bulk_operation_items` (reversible). Applied automatically on startup.
+
 ## [2.25.2] - 2026-06-23
 
 ### Fixed
