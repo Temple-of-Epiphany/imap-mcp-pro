@@ -1405,6 +1405,26 @@ export function emailTools(
     }
 
     // ---- 3. Resolve Sent folder ----
+    // The SMTP send self-connects, but resolving the Sent folder and APPENDing
+    // the copy need an active IMAP connection. Ensure one (idempotent — no-op
+    // if already connected) so archiving doesn't fail with "no-sent-folder-found"
+    // when the account hasn't been imap_connect'd first (#261).
+    try {
+      await imapService.connect(account);
+    } catch (e: any) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            ...baseResult,
+            result: 'sent_not_archived',
+            archiveSkipped: 'imap-connect-failed',
+            archiveError: e?.message,
+          }, null, 2)
+        }]
+      };
+    }
+
     let resolved;
     try {
       resolved = await sentFolder.resolveSentFolder(accountId, {

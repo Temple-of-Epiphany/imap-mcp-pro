@@ -1547,16 +1547,25 @@ export class ImapService {
       // ImapFlow API: append(path, content, flags?, idate?). The 3rd & 4th
       // args are POSITIONAL — passing { flags, internalDate } as one object
       // (the previous shape here) silently breaks the APPEND.
-      const result = await client.append(
-        mailboxName,
-        messageContent,
-        options?.flags,
-        options?.internalDate
-      );
+      let result;
+      try {
+        result = await client.append(
+          mailboxName,
+          messageContent,
+          options?.flags,
+          options?.internalDate
+        );
+      } catch (e: any) {
+        // Surface the real server reason (e.g. [OVERQUOTA] mailbox full) instead
+        // of ImapFlow's generic "Command failed" (#261).
+        const code = e?.serverResponseCode ? ` [${e.serverResponseCode}]` : '';
+        const detail = e?.responseText || e?.response || e?.message || 'unknown error';
+        throw new Error(`APPEND to "${mailboxName}" failed${code}: ${detail}`);
+      }
 
       // Handle false return (failed append) or successful AppendResponseObject
       if (!result) {
-        throw new Error('APPEND command failed');
+        throw new Error(`APPEND to "${mailboxName}" failed: server returned no result`);
       }
 
       return {
