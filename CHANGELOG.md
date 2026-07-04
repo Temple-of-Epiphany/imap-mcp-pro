@@ -5,6 +5,11 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.28.1] - 2026-07-04
+
+### Changed
+- Reworded 11 tool descriptions from imperative cross-tool directives ("use/call X first") to purely descriptive statements, per the Anthropic directory review guideline ("describe what the tool does; do not tell Claude how to behave"). No behavior change.
+
 ## [2.28.0] - 2026-07-04
 
 Per-user allow/deny lists and Anthropic directory submission readiness. Tools 121 → 127; test suite 274 → 299.
