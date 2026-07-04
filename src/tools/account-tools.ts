@@ -258,7 +258,7 @@ export function accountTools(
 
   // Add account using a named provider preset
   server.registerTool('imap_add_account_with_provider', {
-    description: 'Add a new IMAP account using a provider preset (auto-fills IMAP/SMTP settings). Use imap_list_providers to see available providers.',
+    description: 'Add a new IMAP account using a provider preset (auto-fills IMAP/SMTP settings). Available providers are listed by imap_list_providers.',
     inputSchema: {
       providerId: z.string().describe('Provider ID (e.g., "gmail", "outlook", "yahoo"). Use imap_list_providers to see all options.'),
       name: z.string().describe('Friendly name for the account'),

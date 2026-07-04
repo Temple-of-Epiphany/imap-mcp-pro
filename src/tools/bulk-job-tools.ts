@@ -46,7 +46,7 @@ export function bulkJobTools(server: McpServer, jobs: BulkJobService, db: Databa
   server.registerTool('imap_bulk_jobs', {
     description:
       'List persistent bulk-operation jobs (long-running scans) with status and progress. ' +
-      'Filter by status; scope to a user. Use imap_bulk_job_status for one job\'s detail.',
+      'Filter by status; scope to a user. Per-job detail is available from imap_bulk_job_status.',
     inputSchema: {
       userId: z.string().optional().describe('Scope to this user (UUID or username); omit for all'),
       status: StatusSchema.optional().describe('Filter by status'),

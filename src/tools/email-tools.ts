@@ -264,7 +264,7 @@ export function emailTools(
       'Search for emails in a folder. Default limit is 50. ' +
       'Inline mode (default for small results) caps at 100 to prevent token overflow; ' +
       "set responseMode='handle' or 'file' to return a resultId for larger sets (up to 10,000). " +
-      "Use imap_results action='get' to page through handle results.",
+      "Handle results are paged through imap_results (action='get').",
     inputSchema: {
       accountId: z.string().describe('Account ID'),
       folder: z.string().default('INBOX').describe('Folder name (default: INBOX)'),
@@ -549,7 +549,7 @@ export function emailTools(
       'Set the priority (high / normal / low) of one or more messages. Because IMAP messages are immutable, ' +
       'this is stored as a custom IMAP keyword ($Priority-High / $Priority-Low) via STORE, not by rewriting the ' +
       'X-Priority header; "normal" clears the keyword. Some servers may not allow custom keywords — the result ' +
-      'reports whether the server accepted it. To set real priority headers on outgoing mail, use imap_send_email.',
+      'reports whether the server accepted it. Real priority headers on outgoing mail are set by imap_send_email.',
     inputSchema: {
       accountId: z.string().describe('Account ID'),
       folder: z.string().default('INBOX').describe('Folder containing the messages (default: INBOX)'),
