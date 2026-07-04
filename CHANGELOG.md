@@ -5,6 +5,16 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.28.0] - 2026-07-04
+
+Per-user allow/deny lists and Anthropic directory submission readiness. Tools 121 → 127; test suite 274 → 299.
+
+### Added
+- **Per-user allow/deny address lists** (#69/#70) — `imap_add_list_entry` / `imap_remove_list_entry` / `imap_list_entries` / `imap_check_address` / `imap_import_list` / `imap_clear_list`. Emails or domains; verdict resolution (email beats domain, allow beats deny); bulk import from CSV and vCard/.vcf (incl. Apple Contacts). Migration 1.13.0 → 1.14.0 (`address_list_entries`). (Web UI editor to follow.)
+
+### Changed
+- **Directory submission readiness** (#248) — every tool now exposes a human-readable `title` and an applicable read-only/destructive hint; added a **privacy policy** (`PRIVACY.md` + manifest `privacy_policies` URL + README section) per the Anthropic Desktop Extensions requirements.
+
 ## [2.27.0] - 2026-06-24
 
 Categorization tuning tools. Tools 119 → 121; test suite 265 → 274.
