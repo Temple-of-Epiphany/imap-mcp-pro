@@ -24,6 +24,7 @@ import { registerScoringTools } from './scoring-tools.js';
 import { registerSubscriptionTools } from './subscription-tools.js';
 import { capabilityTools } from './capability-tools.js';
 import { dnsFirewallTools } from './dns-firewall-tools.js';
+import { spamScanTools } from './spam-scan-tools.js';
 import { categoryTools } from './category-tools.js';
 import { resultTools } from './result-tools.js';
 import { cacheTools } from './cache-tools.js';
@@ -100,6 +101,9 @@ export function registerTools(
 
   // Register DNS Firewall tools (Issue #59)
   dnsFirewallTools(server, imapService, db);
+
+  // Combined spam scan (UserCheck + DNS firewall + allow/deny) over a block of messages
+  spamScanTools(server, imapService, db);
 
   // Register UserCheck SPAM detection tools (Issues #3, #17, #18)
   userCheckTools(server, db, imapService, bulkJobs);

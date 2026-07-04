@@ -105,9 +105,10 @@ export function dnsFirewallTools(
       accountId: z.string().describe('Account ID'),
       folderName: z.string().describe('Folder name'),
       uid: z.number().describe('Message UID'),
-      autoMarkSpam: z.boolean().optional().describe('Automatically mark as spam if malicious domains found (default: false)'),
+      autoMarkSpam: z.boolean().optional().describe('Move the message to the spam folder if malicious domains found (default: false)'),
+      spamFolder: z.string().optional().default('Junk').describe('Destination folder when autoMarkSpam is true (default: Junk)'),
     }
-  }, withErrorHandling(async ({ accountId, folderName, uid, autoMarkSpam }) => {
+  }, withErrorHandling(async ({ accountId, folderName, uid, autoMarkSpam, spamFolder }) => {
     // Fetch message content
     const message = await imapService.getEmailContent(accountId, folderName, uid);
 
@@ -117,13 +118,15 @@ export function dnsFirewallTools(
     // Validate domains
     const scanResult = await dnsFirewall.validateMessageDomains(uid, domains);
 
-    // Auto-mark as spam if requested and malicious domains found
+    // Move to the spam folder if requested and malicious domains found
+    // (safe/reversible — never a bare \Deleted).
+    const targetSpamFolder = spamFolder ?? 'Junk';
     if (autoMarkSpam && !scanResult.isSafe) {
       try {
-        await imapService.bulkMarkEmails(accountId, folderName, [uid], 'deleted');
-        console.error(`[DnsFirewall] Marked message ${uid} as spam (blocked domains: ${scanResult.blockedDomains.join(', ')})`);
+        await imapService.bulkMoveEmails(accountId, folderName, [uid], targetSpamFolder);
+        console.error(`[DnsFirewall] Moved message ${uid} to ${targetSpamFolder} (blocked domains: ${scanResult.blockedDomains.join(', ')})`);
       } catch (error) {
-        console.error(`[DnsFirewall] Failed to mark message ${uid} as spam:`, error);
+        console.error(`[DnsFirewall] Failed to move message ${uid} to spam folder:`, error);
       }
     }
 
@@ -150,9 +153,10 @@ export function dnsFirewallTools(
       accountId: z.string().describe('Account ID'),
       folderName: z.string().describe('Folder name'),
       uids: z.array(z.number()).describe('Array of message UIDs to scan'),
-      autoMarkSpam: z.boolean().optional().describe('Automatically mark as spam if malicious domains found (default: false)'),
+      autoMarkSpam: z.boolean().optional().describe('Move messages with malicious domains to the spam folder (default: false)'),
+      spamFolder: z.string().optional().default('Junk').describe('Destination folder when autoMarkSpam is true (default: Junk)'),
     }
-  }, withErrorHandling(async ({ accountId, folderName, uids, autoMarkSpam }) => {
+  }, withErrorHandling(async ({ accountId, folderName, uids, autoMarkSpam, spamFolder }) => {
     const results = [];
     const spamUIDs: number[] = [];
 
@@ -189,15 +193,17 @@ export function dnsFirewallTools(
       }
     }
 
-    // Auto-mark spam messages if requested
+    // Move flagged messages to the spam folder if requested (safe/reversible —
+    // never a bare \Deleted).
     let markedCount = 0;
+    const targetSpamFolder = spamFolder ?? 'Junk';
     if (autoMarkSpam && spamUIDs.length > 0) {
       try {
-        await imapService.bulkMarkEmails(accountId, folderName, spamUIDs, 'deleted');
+        await imapService.bulkMoveEmails(accountId, folderName, spamUIDs, targetSpamFolder);
         markedCount = spamUIDs.length;
-        console.error(`[DnsFirewall] Marked ${markedCount} messages as spam`);
+        console.error(`[DnsFirewall] Moved ${markedCount} messages to ${targetSpamFolder}`);
       } catch (error) {
-        console.error(`[DnsFirewall] Failed to mark messages as spam:`, error);
+        console.error(`[DnsFirewall] Failed to move messages to spam folder:`, error);
       }
     }
 

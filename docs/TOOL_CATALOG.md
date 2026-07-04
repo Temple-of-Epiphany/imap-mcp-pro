@@ -4,7 +4,7 @@
 > manifest by `scripts/gen-tool-catalog.mjs` (runs on `npm run build`).
 > The authoritative runtime list is always available via the `imap_list_tools` tool.
 
-**129 MCP tools** total.
+**130 MCP tools** total.
 
 ## Categories
 
@@ -17,7 +17,7 @@
 - [Folder & mailbox operations](#folder-mailbox-operations) — 11
 - [Subscriptions & unsubscribe](#subscriptions-unsubscribe) — 9
 - [Categorization & scoring](#categorization-scoring) — 8
-- [Spam & UserCheck](#spam-usercheck) — 9
+- [Spam & UserCheck](#spam-usercheck) — 10
 - [DNS firewall & domain checks](#dns-firewall-domain-checks) — 4
 - [Allow/deny lists](#allowdeny-lists) — 6
 - [Local cache](#local-cache) — 2
@@ -173,6 +173,7 @@
 | `imap_get_usercheck_key` | Get UserCheck API key information for a user |
 | `imap_scan_account_spam` | Scan entire IMAP account for spam using UserCheck, checking all folders |
 | `imap_scan_account_spam_start` | Start a resumable account-wide spam scan (UserCheck) as a tracked job. |
+| `imap_scan_messages_spam` | Scan a block of messages for spam against UserCheck (sender reputation), the DNS firewall (malicious link/domain), or both, and apply the per-user allow/deny lists (allowlisted sender is never flagged; denylisted is always flagged). |
 
 ## DNS firewall & domain checks
 
