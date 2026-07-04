@@ -66,10 +66,12 @@ describe('accountTools', () => {
       'imap_add_account_with_provider',
       'imap_connect',
       'imap_disconnect',
+      'imap_get_account_signature',
       'imap_get_outbox_dir',
       'imap_list_accounts',
       'imap_list_providers',
       'imap_remove_account',
+      'imap_set_account_signature',
       'imap_test_account',
     ]);
   });

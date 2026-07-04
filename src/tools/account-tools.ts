@@ -424,4 +424,34 @@ export function accountTools(
       durationMs: result.durationMs,
     });
   })));
+
+  // Set an account's signature (appended to outgoing mail by imap_send_email).
+  server.registerTool('imap_set_account_signature', {
+    description:
+      'Set the per-account email signature appended to outgoing messages (plain text and/or HTML). ' +
+      'Pass clear:true to remove the signature. The signature is added after the body under the standard ' +
+      '"-- " delimiter; imap_send_email includeSignature:false suppresses it for a single send.',
+    inputSchema: {
+      accountId: z.string().describe('Account ID'),
+      text: z.string().optional().describe('Plain-text signature'),
+      html: z.string().optional().describe('HTML signature (optional; text is used for plain-text parts)'),
+      clear: z.boolean().optional().default(false).describe('Remove the signature (ignores text/html)'),
+    },
+  }, withErrorHandling(async ({ accountId, text, html, clear }) => {
+    if (!db.getAccount(accountId)) throw new AccountNotFoundError(accountId);
+    if (clear) db.setAccountSignature(accountId, { text: null, html: null });
+    else db.setAccountSignature(accountId, { text, html });
+    const sig = db.getAccountSignature(accountId);
+    return { content: [{ type: 'text', text: JSON.stringify({ success: true, accountId, signature: sig, cleared: !!clear }, null, 2) }] };
+  }));
+
+  // Get an account's signature.
+  server.registerTool('imap_get_account_signature', {
+    description: 'Get the per-account email signature (plain text + HTML).',
+    inputSchema: { accountId: z.string().describe('Account ID') },
+  }, withErrorHandling(async ({ accountId }) => {
+    const sig = db.getAccountSignature(accountId);
+    if (!sig) throw new AccountNotFoundError(accountId);
+    return { content: [{ type: 'text', text: JSON.stringify({ accountId, signature: sig, hasSignature: !!(sig.text || sig.html) }, null, 2) }] };
+  }));
 }

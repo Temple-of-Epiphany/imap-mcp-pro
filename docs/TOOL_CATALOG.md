@@ -4,12 +4,12 @@
 > manifest by `scripts/gen-tool-catalog.mjs` (runs on `npm run build`).
 > The authoritative runtime list is always available via the `imap_list_tools` tool.
 
-**127 MCP tools** total.
+**129 MCP tools** total.
 
 ## Categories
 
 - [Users (MSP multi-tenant)](#users-msp-multitenant) — 3
-- [Account management](#account-management) — 15
+- [Account management](#account-management) — 17
 - [Bulk operations](#bulk-operations) — 15
 - [Size, export & quota](#size-export-quota) — 8
 - [Attachment staging](#attachment-staging) — 6
@@ -46,9 +46,11 @@
 | `imap_db_list_accounts` | List all IMAP accounts for a user |
 | `imap_db_remove_account` | Remove IMAP account from database |
 | `imap_disconnect` | Disconnect from an IMAP account |
+| `imap_get_account_signature` | Get the per-account email signature (plain text + HTML). |
 | `imap_list_accounts` | List all IMAP accounts for current user (from MCP_USER_ID environment variable) |
 | `imap_list_providers` | List all available email provider presets (Gmail, Outlook, Yahoo, etc.) with pre-configured IMAP/SMTP settings |
 | `imap_remove_account` | Remove an IMAP account from database |
+| `imap_set_account_signature` | Set the per-account email signature appended to outgoing messages (plain text and/or HTML). |
 | `imap_share_account` | Share an account with another user (MSP feature) |
 | `imap_test_account` | Test an existing account's IMAP connectivity using its stored credentials. |
 | `imap_unshare_account` | Revoke account access from a user |

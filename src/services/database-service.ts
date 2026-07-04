@@ -471,8 +471,26 @@ export class DatabaseService {
       created_at: account.created_at,
       updated_at: account.updated_at,
       last_connected: account.last_connected,
-      is_active: account.is_active
+      is_active: account.is_active,
+      signature_text: (account as any).signature_text ?? null,
+      signature_html: (account as any).signature_html ?? null
     };
+  }
+
+  /** Set (or clear, with null) an account's plain-text and/or HTML signature (#signatures). */
+  setAccountSignature(accountId: string, sig: { text?: string | null; html?: string | null }): void {
+    const fields: string[] = [];
+    const values: any = { $id: accountId };
+    if (sig.text !== undefined) { fields.push('signature_text = $text'); values.$text = sig.text; }
+    if (sig.html !== undefined) { fields.push('signature_html = $html'); values.$html = sig.html; }
+    if (fields.length === 0) return;
+    this.db.prepare(`UPDATE accounts SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE account_id = $id`).run(values);
+  }
+
+  /** Get an account's signature (text + html), or null if the account is gone. */
+  getAccountSignature(accountId: string): { text: string | null; html: string | null } | null {
+    const row = this.db.prepare('SELECT signature_text, signature_html FROM accounts WHERE account_id = ?').get(accountId) as any;
+    return row ? { text: row.signature_text ?? null, html: row.signature_html ?? null } : null;
   }
 
   listAccountsForUser(userId: string): Account[] {

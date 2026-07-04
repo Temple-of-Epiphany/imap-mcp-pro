@@ -32,7 +32,7 @@ const outPath = path.join(repoRoot, 'docs', 'TOOL_CATALOG.md');
 // (e.g. *_chunked, db_*) ahead of broader ones.
 const CATEGORIES = [
   ['Users (MSP multi-tenant)', /^imap_(create_user|get_user|list_users)$/],
-  ['Account management', /^imap_(add_account|add_account_auto|add_account_with_provider|remove_account|list_accounts|connect|disconnect|test_account|share_account|unshare_account|list_providers|db_add_account|db_get_account|db_list_accounts|db_remove_account)$/],
+  ['Account management', /^imap_(add_account|add_account_auto|add_account_with_provider|remove_account|list_accounts|connect|disconnect|test_account|share_account|unshare_account|list_providers|set_account_signature|get_account_signature|db_add_account|db_get_account|db_list_accounts|db_remove_account)$/],
   ['Bulk operations', /^imap_bulk_/],
   ['Size, export & quota', /^imap_(get_email_sizes|get_largest_emails|export_email|export_folder|export_account|extract_attachments|get_attachment|get_quota)$/],
   ['Attachment staging', /^imap_(attachment_stage_|list_staged_attachments|get_outbox_dir)/],
