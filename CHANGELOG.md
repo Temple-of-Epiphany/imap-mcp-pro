@@ -5,6 +5,11 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.29.1] - 2026-07-04
+
+### Fixed
+- **Sent-folder copy** (#261): `imap_send_email` now ensures an IMAP connection before resolving the Sent folder and APPEND (it previously failed with `no-sent-folder-found` when the account had not been connected first — the SMTP send self-connects, but the Sent-copy needs IMAP). APPEND failures now surface the real server response (e.g. `[OVERQUOTA] Quota exceeded (mailbox for user is full)`) instead of a generic "Command failed".
+
 ## [2.29.0] - 2026-07-04
 
 ### Added
