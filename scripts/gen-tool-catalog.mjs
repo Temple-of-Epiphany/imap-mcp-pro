@@ -40,7 +40,7 @@ const CATEGORIES = [
   ['Folder & mailbox operations', /^imap_(list_folders|folder_status|get_unread_count|create_folder|delete_folder|rename_folder|get_mailbox_status|subscribe_mailbox|unsubscribe_mailbox|list_subscribed_mailboxes|append_message)$/],
   ['Subscriptions & unsubscribe', /^imap_(extract_unsubscribe_links|get_unsubscribe_links|get_unsubscribe_links_for|execute_unsubscribe|get_subscription_summary|list_unsubscribe_candidates|mark_subscription_unsubscribed|update_subscription_category|update_subscription_notes)$/],
   ['Categorization & scoring', /^imap_(add_keyword|remove_keyword|list_categories|apply_categories|test_categories|recommend_keywords|analyze_folder_confidence|score_email_confidence)$/],
-  ['Spam & UserCheck', /^imap_(check_email_spam|check_emails_spam_bulk|check_emails_spam_bulk_start|check_folder_spam|scan_account_spam|scan_account_spam_start|add_usercheck_key|get_usercheck_key|delete_usercheck_key)$/],
+  ['Spam & UserCheck', /^imap_(check_email_spam|check_emails_spam_bulk|check_emails_spam_bulk_start|check_folder_spam|scan_account_spam|scan_account_spam_start|scan_messages_spam|add_usercheck_key|get_usercheck_key|delete_usercheck_key)$/],
   ['DNS firewall & domain checks', /^imap_(check_domain|check_domain_dns_firewall|scan_message_domains|test_quad9_dns)$/],
   ['Allow/deny lists', /^imap_(add_list_entry|remove_list_entry|list_entries|check_address|import_list|clear_list)$/],
   ['Local cache', /^imap_(search_cache|sync_folder_cache)$/],

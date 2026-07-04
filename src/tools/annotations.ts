@@ -216,6 +216,7 @@ export const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
   'imap_check_emails_spam_bulk':       READ_REMOTE,
   'imap_check_folder_spam':            READ_REMOTE,
   'imap_scan_account_spam':            READ_REMOTE,
+  'imap_scan_messages_spam':           WRITE_REMOTE,        // can move/flag; runs external checks
 
   // ---- dns-firewall-tools (6) ----
   'imap_check_domain':                 READ_REMOTE,
