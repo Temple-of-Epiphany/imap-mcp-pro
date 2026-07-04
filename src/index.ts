@@ -4,6 +4,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import dotenv from 'dotenv';
 import path from 'path';
+import { existsSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { ImapService } from './services/imap-service.js';
 import { DatabaseService } from './services/database-service.js';
@@ -23,6 +24,22 @@ import { dispatchCli, EXIT_CODES } from './config/cli.js';
 import { loadConfig, ConfigError } from './config/loader.js';
 import { logEvent, timeStage, SERVER_CAPABILITIES } from './startup.js';
 import { PACKAGE_VERSION } from './utils/package-info.js';
+
+// Resolve the bundled-skills directory across every runtime layout (#268).
+// postbuild copies skills/ -> dist/skills/, and the .mcpb ships only dist/
+// (as server/dist/), so in the packaged extension the manifest lives at
+// <__dirname>/skills. Under `npm run dev` (tsx src/index.ts) there is no
+// src/skills, so fall back to the repo-root <__dirname>/../skills. Pick
+// whichever actually contains manifest.json; default to the dist layout so
+// the installer's own "absent -> no-op" path handles a truly missing bundle.
+function resolveBundleSkillsDir(dirname: string): string {
+  const distLayout = path.join(dirname, 'skills');
+  const repoLayout = path.join(dirname, '..', 'skills');
+  if (existsSync(path.join(repoLayout, 'manifest.json')) && !existsSync(path.join(distLayout, 'manifest.json'))) {
+    return repoLayout;
+  }
+  return distLayout;
+}
 
 // Filter stdout to keep stray library chatter (npm-style version banners,
 // dotenv config dumps, etc.) from corrupting the JSON-RPC stream that
@@ -148,7 +165,7 @@ const {
     // 6e. v2.17.4 (#138): skill installer — same instance used for the
     //     post-handshake bundle install AND for the imap_check_skill_updates
     //     / imap_update_skills tools. No network calls at construction time.
-    const bundleSkillsDir = path.join(__dirname, '..', 'skills');
+    const bundleSkillsDir = resolveBundleSkillsDir(__dirname);
     const skillsInstaller = new SkillsInstallerService(bundleSkillsDir);
 
     // 6f. v2.17.10 (#150): Web UI manager — owns the embedded WebUIServer
@@ -290,7 +307,7 @@ async function buildToolsManifest(): Promise<unknown> {
     stagingDir: path.join(os.homedir(), '.imap-mcp', 'staging'),
   });
   const tmpMessageCache = new MessageCacheService(tmpDb, tmpImap);
-  const tmpBundleSkillsDir = path.join(__dirname, '..', 'skills');
+  const tmpBundleSkillsDir = resolveBundleSkillsDir(__dirname);
   const tmpSkillsInstaller = new SkillsInstallerService(tmpBundleSkillsDir);
   registerTools(
     tmpServer, tmpImap, tmpDb, tmpSmtp, tmpResults, tmpWorkerPool,
