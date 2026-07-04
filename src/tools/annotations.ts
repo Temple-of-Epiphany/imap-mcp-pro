@@ -61,6 +61,8 @@ export const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
   'imap_list_providers':               READ_ONLY,
   'imap_share_account':                WRITE_LOCAL,
   'imap_unshare_account':              WRITE_LOCAL,
+  'imap_set_account_signature':        WRITE_LOCAL,
+  'imap_get_account_signature':        READ_ONLY,
 
   // ---- email-tools — search/get/list (read-remote) ----
   'imap_search_emails':                READ_REMOTE,

@@ -40,6 +40,8 @@ export interface Account {
   updated_at: string;
   last_connected?: string;
   is_active: boolean;
+  signature_text?: string | null;
+  signature_html?: string | null;
 }
 
 export interface DecryptedAccount {
@@ -60,6 +62,8 @@ export interface DecryptedAccount {
   updated_at: string;
   last_connected?: string;
   is_active: boolean;
+  signature_text?: string | null;
+  signature_html?: string | null;
 }
 
 export interface UserAccount {

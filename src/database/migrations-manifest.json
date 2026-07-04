@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.14.0",
+  "schemaVersion": "1.15.0",
   "description": "Release-indexed manifest of schema migrations. Each entry is applied in order via the `schema_version` ledger. A migration is complete when its `to` version is present in the ledger.",
   "migrations": [
     {
@@ -93,6 +93,13 @@
       "file": "schema_update_1.13.0_TO_1.14.0.sql",
       "rollbackFile": "schema_update_1.13.0_TO_1.14.0.down.sql",
       "description": "Add address_list_entries (per-user allow/deny lists, #69/#70)"
+    },
+    {
+      "from": "1.14.0",
+      "to": "1.15.0",
+      "file": "schema_update_1.14.0_TO_1.15.0.sql",
+      "rollbackFile": "schema_update_1.14.0_TO_1.15.0.down.sql",
+      "description": "Add per-account signature_text/signature_html (signatures)"
     }
   ]
 }

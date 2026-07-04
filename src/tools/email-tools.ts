@@ -47,6 +47,32 @@ function isPdfAttachment(filename: string, contentType: string): boolean {
   return attExt(filename) === 'pdf' || /\/pdf$/i.test(contentType || '');
 }
 
+const SIG_DELIM_TEXT = '\n\n-- \n';   // RFC 3676 signature delimiter
+const SIG_DELIM_HTML = '<br><br>-- <br>';
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/**
+ * Append an account's signature to the outgoing body (#signatures). Text sig
+ * goes on the text part; HTML sig on the html part (a text-only sig is escaped
+ * onto the html part when the message has an html body but no html sig).
+ */
+export function applySignature(
+  text: string | undefined,
+  html: string | undefined,
+  sig: { text?: string | null; html?: string | null } | null | undefined,
+  include: boolean | undefined,
+): { text: string | undefined; html: string | undefined } {
+  if (include === false || !sig || (!sig.text && !sig.html)) return { text, html };
+  let outText = text, outHtml = html;
+  if (sig.text) outText = (text ?? '') + SIG_DELIM_TEXT + sig.text;
+  if (sig.html) outHtml = (html ?? '') + SIG_DELIM_HTML + sig.html;
+  else if (sig.text && html !== undefined) outHtml = html + SIG_DELIM_HTML + escapeHtml(sig.text).replace(/\n/g, '<br>');
+  return { text: outText, html: outHtml };
+}
+
 function shouldUseHandle(mode: ResponseModeOpt, n: number): boolean {
   if (mode === 'inline') return false;
   if (mode === 'handle' || mode === 'file') return true;
@@ -1010,6 +1036,9 @@ export function emailTools(
         'ceiling (~10 MB) and is not on the server host. For small files in a Workspace/sandbox, ' +
         'prefer the inline `attachments` form — it avoids the multi-call staging dance.'
       ),
+      includeSignature: z.boolean().optional().default(true).describe(
+        'Append the account signature (set via imap_set_account_signature) to the body. Default true.'
+      ),
       appendToSent: z.boolean().optional().default(true).describe(
         'Append the sent message to the IMAP Sent folder after a successful SMTP send. Default true.'
       ),
@@ -1027,7 +1056,7 @@ export function emailTools(
     accountId, to, subject, text, html, cc, bcc, replyTo, attachments,
     attachmentPaths, attachmentContentTypes, attachmentFilenames,
     stagedAttachmentIds,
-    appendToSent, sentFolderOverride, forceAppendToSent, isReply,
+    includeSignature, appendToSent, sentFolderOverride, forceAppendToSent, isReply,
   }) => {
     const dbAccount = db.getDecryptedAccount(accountId);
     if (!dbAccount) {
@@ -1308,9 +1337,14 @@ export function emailTools(
       }
     }
 
+    // Append the account signature (if any) unless suppressed.
+    const { text: sigText, html: sigHtml } = applySignature(
+      text, html, db.getAccountSignature(accountId), includeSignature,
+    );
+
     const emailComposer = {
       from: account.user,
-      to, subject, text, html, cc, bcc, replyTo,
+      to, subject, text: sigText, html: sigHtml, cc, bcc, replyTo,
       attachments: [
         ...sanitizedInlineAttachments,
         ...validatedPathAttachments,
