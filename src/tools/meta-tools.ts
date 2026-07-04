@@ -589,8 +589,8 @@ export function metaTools(server: McpServer, webUIManager?: WebUIManager): void 
     description:
       'Show IMAP MCP Pro capabilities and copy-paste workflow recipes, by category. Start with no argument (or ' +
       'category="overview") for the topic list. Categories: overview, getting-started, reading, sending, ' +
-      'organizing, cleanup, subscriptions, security, bulk, workflows, admin. For the exhaustive tool list use ' +
-      'imap_list_tools.',
+      'organizing, cleanup, subscriptions, security, bulk, workflows, admin. The exhaustive tool list is available ' +
+      'from imap_list_tools.',
     inputSchema: {
       category: z.enum([
         'overview', 'getting-started', 'reading', 'sending', 'organizing',

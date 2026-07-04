@@ -296,7 +296,7 @@ export function categoryTools(
     description:
       'Dry-run the Quick Categories against a folder WITHOUT moving any email: reports coverage (% that would ' +
       'be categorized), per-category counts + destination, which keyword triggered each match, emails matching ' +
-      'multiple categories (conflicts), and the uncategorized set. Use to tune keywords before imap_apply_categories.',
+      'multiple categories (conflicts), and the uncategorized set. Helps tune keywords ahead of imap_apply_categories.',
     inputSchema: {
       accountId: z.string().describe('Account ID'),
       folder: z.string().default('INBOX').describe('Folder to test against (default: INBOX)'),

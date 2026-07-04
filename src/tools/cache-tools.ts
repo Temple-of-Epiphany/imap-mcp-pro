@@ -58,7 +58,7 @@ export function cacheTools(
       'Populate the local message header cache for one folder. Idempotent: ' +
       'subsequent calls only fetch new UIDs since the last sync. Returns ' +
       'row counts + duration. UIDVALIDITY change triggers a full resync. ' +
-      'Required before imap_search_cache will return results.',
+      'imap_search_cache returns results only for folders that have been synced here.',
     inputSchema: {
       accountId: z.string().describe('Account ID'),
       folder: z.string().describe('Folder name (e.g. "INBOX")'),
@@ -85,8 +85,8 @@ export function cacheTools(
       'from_address match), group_by_sender (top-N senders by message count), ' +
       'fulltext (FTS5 ranked search over subject + sender name/address — for ' +
       'partial-recall queries; no message bodies are searched). ' +
-      'Returns explicit cache_miss error if the folder has not been synced — ' +
-      'call imap_sync_folder_cache first.',
+      'Returns an explicit cache_miss error for a folder that has not been synced ' +
+      '(see imap_sync_folder_cache).',
     inputSchema: {
       accountId: z.string().describe('Account ID'),
       folder: z.string().describe('Folder name'),

@@ -91,8 +91,8 @@ export function skillsTools(
       'to ~/.claude/skills/imap-mcp-pro/{name}/, preserves files when the ' +
       'on-disk version is already at or ahead of remote unless force=true. ' +
       'Skills not present in the bundled manifest are rejected (the manifest ' +
-      'is the allowlist). Always pair with imap_check_skill_updates first to ' +
-      'see what would change.',
+      'is the allowlist). imap_check_skill_updates reports what would change ' +
+      'before any update is applied.',
     inputSchema: {
       skills: z.array(z.string()).min(1)
         .describe('Skill names to update (must be in the bundled manifest). Required and non-empty.'),

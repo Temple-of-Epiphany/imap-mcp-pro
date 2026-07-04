@@ -38,8 +38,8 @@ export function registerSubscriptionTools(
     description:
       'Read-only: for a block of messages (explicit UIDs, or a folder scan up to `limit`), return per ' +
       'message the unsubscribe links found in BOTH the List-Unsubscribe header and the body, along with ' +
-      'sender, recipient, and subject. Does NOT write to the subscriptions database or send anything — ' +
-      'use imap_extract_unsubscribe_links for the stored/managed flow, or imap_execute_unsubscribe to act.',
+      'sender, recipient, and subject. Does NOT write to the subscriptions database or send anything; ' +
+      'the stored/managed flow is imap_extract_unsubscribe_links, and imap_execute_unsubscribe performs an unsubscribe.',
     inputSchema: {
       accountId: z.string().describe('Account ID'),
       folder: z.string().default('INBOX').describe('Folder name (default: INBOX)'),

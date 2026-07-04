@@ -175,8 +175,8 @@ export function folderTools(
   server.registerTool('imap_get_quota', {
     description:
       'Report account storage quota — used / limit / percent — via the IMAP QUOTA extension (RFC 9208). ' +
-      'Returns supported:false when the server does not advertise QUOTA. (For a single mailbox size, ' +
-      'use imap_get_mailbox_status, which reports SIZE via STATUS=SIZE.)',
+      'Returns supported:false when the server does not advertise QUOTA. (A single mailbox\'s size ' +
+      'is reported by imap_get_mailbox_status via STATUS=SIZE.)',
     inputSchema: {
       accountId,
       mailbox: z.string().optional().default('INBOX').describe('Mailbox whose quota root to query (default: INBOX)'),
