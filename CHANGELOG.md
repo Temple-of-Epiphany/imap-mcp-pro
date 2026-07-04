@@ -5,6 +5,11 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.28.3] - 2026-07-04
+
+### Fixed
+- Web UI header version badge now populates on page load (it previously only filled when the Profile tab was opened, leaving a "v…" placeholder on the dashboard). Reads the real version from /api/profile.
+
 ## [2.28.2] - 2026-07-04
 
 ### Fixed

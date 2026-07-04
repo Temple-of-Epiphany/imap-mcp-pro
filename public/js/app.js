@@ -1541,6 +1541,21 @@ async function testAllAccounts() {
 }
 
 // Initialize on page load
+// Fill the header version badge on load (independent of the Profile tab).
+async function setVersionBadge() {
+  try {
+    const resp = await fetch('/api/profile');
+    const result = await resp.json();
+    const badge = document.getElementById('versionText');
+    if (badge && result.success && result.profile && result.profile.version) {
+      badge.textContent = 'v' + result.profile.version;
+    }
+  } catch (error) {
+    console.error('Failed to load version:', error);
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   showDashboard();
+  setVersionBadge();
 });
