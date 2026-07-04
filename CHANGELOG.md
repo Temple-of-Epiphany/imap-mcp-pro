@@ -5,6 +5,14 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.30.0] - 2026-07-04
+
+### Added
+- **`imap_scan_messages_spam`** (#264) — one route to scan a block of messages against up to three independently-toggleable engines plus the per-user allow/deny lists: `checkSender` (UserCheck sender reputation), `checkDomains` (DNS firewall over all header + body domains), and `checkLinks` (LinkCheck — enumerates every embedded URL, checks each link's domain against the DNS firewall, and flags URL shorteners / raw-IP hosts). Allowlisted senders are never flagged; denylisted senders always are. Optional `action` moves flagged messages to a Junk folder (default) or flags them.
+
+### Changed
+- **DNS firewall auto-mark is now safe** (#264) — `imap_scan_message_domains` / `imap_bulk_scan_messages` with `autoMarkSpam: true` now **move** flagged messages to a `spamFolder` (default `Junk`, reversible) instead of setting the `\Deleted` flag.
+
 ## [2.29.1] - 2026-07-04
 
 ### Fixed
