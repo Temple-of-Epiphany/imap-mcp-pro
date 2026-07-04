@@ -194,38 +194,9 @@ update-internal:
 	cp package.json "$(INSTALL_DIR)/" || exit 1; \
 	echo "✓ Files updated"; \
 	echo ""; \
-	echo "Applying database schema updates..."; \
-	cd "$(INSTALL_DIR)" && node -e " \
-		const fs = require('fs'); \
-		const path = require('path'); \
-		const Database = require('better-sqlite3'); \
-		const dbPath = path.join(process.env.HOME || '.', '.imap-mcp', 'data.db'); \
-		if (fs.existsSync(dbPath)) { \
-			const db = new Database(dbPath); \
-			const currentVersion = db.prepare('SELECT version FROM schema_version ORDER BY applied_at DESC LIMIT 1').get(); \
-			console.log('Current schema version: ' + (currentVersion ? currentVersion.version : 'unknown')); \
-			const updateFiles = fs.readdirSync('./dist/database').filter(f => f.startsWith('schema_update_') && f.endsWith('.sql')).sort(); \
-			let updatesApplied = 0; \
-			for (const file of updateFiles) { \
-				const match = file.match(/schema_update_(.+)_TO_(.+)\\.sql/); \
-				if (match && currentVersion && currentVersion.version === match[1]) { \
-					console.log('Applying ' + file + '...'); \
-					const sql = fs.readFileSync(path.join('./dist/database', file), 'utf8'); \
-					db.exec(sql); \
-					updatesApplied++; \
-					console.log('✓ Applied ' + file); \
-				} \
-			} \
-			if (updatesApplied === 0) { \
-				console.log('✓ Database schema is up to date'); \
-			} else { \
-				console.log('✓ Applied ' + updatesApplied + ' schema update(s)'); \
-			} \
-			db.close(); \
-		} else { \
-			console.log('✓ No existing database - will be created on first run'); \
-		} \
-	" || echo "✓ Database schema check completed"; \
+	echo "Database schema updates are applied automatically on startup"; \
+	echo "(node:sqlite migration ledger runs pending migrations when the"; \
+	echo "service restarts below). No manual step required."; \
 	echo ""; \
 	echo "Restarting service..."; \
 	$(MAKE) restart; \
