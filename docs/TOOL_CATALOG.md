@@ -4,7 +4,7 @@
 > manifest by `scripts/gen-tool-catalog.mjs` (runs on `npm run build`).
 > The authoritative runtime list is always available via the `imap_list_tools` tool.
 
-**121 MCP tools** total.
+**127 MCP tools** total.
 
 ## Categories
 
@@ -19,6 +19,7 @@
 - [Categorization & scoring](#categorization-scoring) — 8
 - [Spam & UserCheck](#spam-usercheck) — 9
 - [DNS firewall & domain checks](#dns-firewall-domain-checks) — 4
+- [Allow/deny lists](#allowdeny-lists) — 6
 - [Local cache](#local-cache) — 2
 - [Capabilities, diagnostics & metrics](#capabilities-diagnostics-metrics) — 11
 - [Meta & discovery](#meta-discovery) — 6
@@ -179,6 +180,17 @@
 | `imap_check_domain_dns_firewall` | Check if a domain is blocked by DNS firewall (Quad9 threat intelligence) |
 | `imap_scan_message_domains` | Extract and validate all domains from an email message against DNS firewall |
 | `imap_test_quad9_dns` | Verify Quad9 DNS threat-blocking is active. |
+
+## Allow/deny lists
+
+| Tool | Description |
+| --- | --- |
+| `imap_add_list_entry` | Add an entry to a per-user allow or deny list. |
+| `imap_check_address` | Check a sender (a plain address, or a full From header with display name) against the user's allow/deny lists. |
+| `imap_clear_list` | Remove ALL entries from a user's allow or deny list. |
+| `imap_import_list` | Bulk-import addresses into an allow/deny list from CSV or vCard (.vcf — including Apple Contacts exports). |
+| `imap_list_entries` | List a user's allow/deny entries (optionally filtered to one list). |
+| `imap_remove_list_entry` | Remove an entry from a per-user allow or deny list (matches the normalized value). |
 
 ## Local cache
 
