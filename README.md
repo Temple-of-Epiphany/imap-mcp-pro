@@ -613,6 +613,20 @@ The restore script stops the service before replacing files and restarts it auto
 - Database is stored at `~/.imap-mcp/data.db`
 - Never commit or share your encryption keys or database
 
+## Privacy Policy
+
+IMAP MCP Pro runs **entirely on your device** and sends **no data to the
+publisher** — there is no telemetry and no server operated by us. It processes
+only the email accounts you configure; credentials are encrypted at rest
+(AES-256-GCM) and all local files are owner-only. Data leaves your machine only
+at your direction: to your own IMAP/SMTP servers, to optional integrations you
+enable (UserCheck for spam checks, a DNS-over-HTTPS provider for firewall
+checks), and to the Claude client you use. Data persists locally only until you
+delete it (remove an account, clear the cache, or delete `~/.imap-mcp/`).
+
+Full policy — data collected, storage, third-party sharing, retention, and
+contact: **[PRIVACY.md](PRIVACY.md)**.
+
 ## Development
 
 ### Running in Development Mode

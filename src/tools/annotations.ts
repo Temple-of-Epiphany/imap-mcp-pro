@@ -44,9 +44,10 @@ const READ_REMOTE: ToolAnnotations = { readOnlyHint: true, destructiveHint: fals
 const WRITE_LOCAL: ToolAnnotations = { readOnlyHint: false, destructiveHint: true };
 const WRITE_REMOTE: ToolAnnotations = { readOnlyHint: false, destructiveHint: true, openWorldHint: true };
 
-/** Connect/disconnect: not really destructive (idempotent), not really
- *  read-only (state changes, but transient and recoverable). */
-const NEUTRAL_IDEMPOTENT: ToolAnnotations = { idempotentHint: true, openWorldHint: true };
+/** Connect/disconnect/reload: state changes (so not read-only) but not
+ *  destructive of user data. Both hints are set explicitly (false) so every
+ *  tool carries an applicable read-only/destructive hint per the directory. */
+const NEUTRAL_IDEMPOTENT: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true };
 
 export const TOOL_ANNOTATIONS: Record<string, ToolAnnotations> = {
   // ---- account-tools (8) ----
@@ -238,4 +239,26 @@ function fallbackFromName(name: string): ToolAnnotations {
 
 export function getAnnotations(toolName: string): ToolAnnotations {
   return TOOL_ANNOTATIONS[toolName] ?? fallbackFromName(toolName);
+}
+
+// Acronyms/proper-nouns to preserve when title-casing a tool name.
+const TITLE_ACRONYMS: Record<string, string> = {
+  imap: 'IMAP', smtp: 'SMTP', dns: 'DNS', uid: 'UID', url: 'URL', eml: 'EML', ui: 'UI',
+  id: 'ID', ip: 'IP', mx: 'MX', tls: 'TLS', quad9: 'Quad9', usercheck: 'UserCheck',
+  fts: 'FTS', csv: 'CSV', vcf: 'VCF', api: 'API', rfc9051: 'RFC 9051',
+};
+
+/**
+ * Human-readable display title derived from a tool name — required for the
+ * Anthropic directory ("all tools must include a title"). e.g.
+ * `imap_search_emails` → "Search Emails", `imap_get_smtp_metrics` → "Get SMTP
+ * Metrics". A tool may still override this by passing its own `title`.
+ */
+export function titleFromName(name: string): string {
+  return name
+    .replace(/^imap_/, '')
+    .split('_')
+    .filter(Boolean)
+    .map((w) => TITLE_ACRONYMS[w] ?? (w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(' ');
 }
