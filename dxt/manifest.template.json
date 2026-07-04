@@ -17,6 +17,7 @@
   "homepage": "https://github.com/Temple-of-Epiphany/imap-mcp-pro",
   "documentation": "https://github.com/Temple-of-Epiphany/imap-mcp-pro#readme",
   "support": "https://github.com/Temple-of-Epiphany/imap-mcp-pro/issues",
+  "privacy_policies": ["https://github.com/Temple-of-Epiphany/imap-mcp-pro/blob/main/PRIVACY.md"],
   "icon": "icon.png",
   "screenshots": [],
   "keywords": ["email", "imap", "smtp", "mailbox", "mcp", "spam", "outlook", "gmail"],

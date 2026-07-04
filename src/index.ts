@@ -303,8 +303,10 @@ async function buildToolsManifest(): Promise<unknown> {
   const internal = (tmpServer as any)._registeredTools as Record<string, any> | undefined;
   const tools: Array<{
     name: string;
+    title?: string;
     description?: string;
     inputSchema: unknown;
+    annotations?: unknown;
   }> = [];
 
   if (internal) {
@@ -328,8 +330,11 @@ async function buildToolsManifest(): Promise<unknown> {
 
       tools.push({
         name,
+        // Directory requirement: every tool has a human-readable title + hints.
+        title: t?.title ?? t?.annotations?.title ?? undefined,
         description: t?.description ?? undefined,
         inputSchema: inputSchemaJson,
+        annotations: t?.annotations ?? undefined,
       });
     }
   }

@@ -28,7 +28,7 @@ import { categoryTools } from './category-tools.js';
 import { resultTools } from './result-tools.js';
 import { cacheTools } from './cache-tools.js';
 import { skillsTools } from './skills-tools.js';
-import { getAnnotations } from './annotations.js';
+import { getAnnotations, titleFromName } from './annotations.js';
 
 /**
  * Wrap server.registerTool so every call gets MCP annotations injected
@@ -42,9 +42,14 @@ import { getAnnotations } from './annotations.js';
 function withAnnotations<T extends McpServer>(server: T): () => void {
   const original = (server as any).registerTool.bind(server);
   (server as any).registerTool = (name: string, config: any, handler: any) => {
+    // Every tool gets a human-readable title (Anthropic directory requirement),
+    // auto-derived from its name unless the call site set one. Applied at both
+    // the top level and in annotations so either read path sees it.
+    const title = config?.title ?? config?.annotations?.title ?? titleFromName(name);
     const merged = {
       ...config,
-      annotations: { ...getAnnotations(name), ...(config?.annotations ?? {}) },
+      title,
+      annotations: { title, ...getAnnotations(name), ...(config?.annotations ?? {}) },
     };
     return original(name, merged, handler);
   };
