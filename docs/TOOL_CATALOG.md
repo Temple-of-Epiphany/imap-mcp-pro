@@ -173,7 +173,7 @@
 | `imap_get_usercheck_key` | Get UserCheck API key information for a user |
 | `imap_scan_account_spam` | Scan entire IMAP account for spam using UserCheck, checking all folders |
 | `imap_scan_account_spam_start` | Start a resumable account-wide spam scan (UserCheck) as a tracked job. |
-| `imap_scan_messages_spam` | Scan a block of messages for spam against UserCheck (sender reputation), the DNS firewall (malicious link/domain), or both, and apply the per-user allow/deny lists (allowlisted sender is never flagged; denylisted is always flagged). |
+| `imap_scan_messages_spam` | Scan a block of messages for spam with up to three independently-toggleable engines and the per-user allow/deny lists. |
 
 ## DNS firewall & domain checks
 

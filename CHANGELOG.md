@@ -5,6 +5,11 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.30.1] - 2026-07-04
+
+### Fixed
+- **Bundled skill now auto-installs from the `.mcpb`** (#268) — the skills installer resolved its bundle directory to `<__dirname>/../skills`, which in the packaged extension pointed at the nonexistent `server/skills` (the manifest actually ships at `server/dist/skills/manifest.json`). The `#120` self-install and `imap_check_skill_updates` / `imap_update_skills` therefore silently no-op'd inside Claude Desktop. `resolveBundleSkillsDir()` now prefers the `dist/skills` layout (correct for both `node dist` and the bundle) and falls back to the repo-root `../skills` only for `tsx` dev, choosing whichever actually contains `manifest.json`.
+
 ## [2.30.0] - 2026-07-04
 
 ### Added
