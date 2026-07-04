@@ -16,6 +16,7 @@ import { folderTools } from './folder-tools.js';
 import { metaTools } from './meta-tools.js';
 import { adminTools } from './admin-tools.js';
 import { bulkJobTools } from './bulk-job-tools.js';
+import { addressListTools } from './address-list-tools.js';
 import { BulkJobService } from '../services/bulk-job-service.js';
 import { userTools } from './user-tools.js';
 import { userCheckTools } from './usercheck-tools.js';
@@ -125,6 +126,9 @@ export function registerTools(
 
   // Register bulk-job management tools (Issue #117 - job persistence).
   bulkJobTools(server, bulkJobs, db);
+
+  // Register per-user allow/deny list tools (Issues #69/#70)
+  addressListTools(server, db);
 
   // Register meta/discovery tools (passes webUIManager so meta-tools can expose
   // the imap_open_web_ui MCP tool when the embedded Web UI is available).

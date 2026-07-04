@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.13.0",
+  "schemaVersion": "1.14.0",
   "description": "Release-indexed manifest of schema migrations. Each entry is applied in order via the `schema_version` ledger. A migration is complete when its `to` version is present in the ledger.",
   "migrations": [
     {
@@ -86,6 +86,13 @@
       "file": "schema_update_1.12.0_TO_1.13.0.sql",
       "rollbackFile": "schema_update_1.12.0_TO_1.13.0.down.sql",
       "description": "Add bulk_operations + bulk_operation_items for job persistence (Track A, Issue #117)"
+    },
+    {
+      "from": "1.13.0",
+      "to": "1.14.0",
+      "file": "schema_update_1.13.0_TO_1.14.0.sql",
+      "rollbackFile": "schema_update_1.13.0_TO_1.14.0.down.sql",
+      "description": "Add address_list_entries (per-user allow/deny lists, #69/#70)"
     }
   ]
 }

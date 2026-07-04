@@ -42,6 +42,7 @@ const CATEGORIES = [
   ['Categorization & scoring', /^imap_(add_keyword|remove_keyword|list_categories|apply_categories|test_categories|recommend_keywords|analyze_folder_confidence|score_email_confidence)$/],
   ['Spam & UserCheck', /^imap_(check_email_spam|check_emails_spam_bulk|check_emails_spam_bulk_start|check_folder_spam|scan_account_spam|scan_account_spam_start|add_usercheck_key|get_usercheck_key|delete_usercheck_key)$/],
   ['DNS firewall & domain checks', /^imap_(check_domain|check_domain_dns_firewall|scan_message_domains|test_quad9_dns)$/],
+  ['Allow/deny lists', /^imap_(add_list_entry|remove_list_entry|list_entries|check_address|import_list|clear_list)$/],
   ['Local cache', /^imap_(search_cache|sync_folder_cache)$/],
   ['Capabilities, diagnostics & metrics', /^imap_(get_capabilities|test_smtp|test_sent_folder|list_unarchived_sends|get_metrics|get_operation_metrics|reset_metrics|get_smtp_metrics|reset_smtp_metrics|get_circuit_breaker|reset_circuit_breaker)$/],
   ['Meta & discovery', /^imap_(about|list_tools|help|check_skill_updates|update_skills|results)$/],
