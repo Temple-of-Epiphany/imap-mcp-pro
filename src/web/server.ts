@@ -15,6 +15,7 @@ import { UserCheckService } from '../services/usercheck-service.js';
 import { emailProviders, getProviderByEmail } from '../providers/email-providers.js';
 import { dnsProviders } from '../providers/dns-providers.js';
 import { ImapAccount } from '../types/index.js';
+import { PACKAGE_VERSION } from '../utils/package-info.js';
 import crypto from 'crypto';
 
 /** Return a copy of `obj` with all `undefined`-valued keys removed. */
@@ -1006,7 +1007,7 @@ export class WebUIServer {
             userId: this.defaultUserId,
             databasePath: dbPath,
             databaseSize: dbSize,
-            version: '2.12.0'
+            version: PACKAGE_VERSION
           }
         });
       } catch (error) {
@@ -1316,7 +1317,7 @@ export class WebUIServer {
             userAccounts: accountCount
           },
           server: {
-            version: '2.9.0',
+            version: PACKAGE_VERSION,
             port: this.port,
             features: ['multi-tenant', 'account-sharing', 'encrypted-storage', 'usercheck-integration', 'confidence-scoring']
           }

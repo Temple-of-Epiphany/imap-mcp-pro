@@ -269,6 +269,9 @@ async function loadProfile() {
       document.getElementById('profileDbPath').textContent = result.profile.databasePath;
       document.getElementById('profileDbSize').textContent = formatBytes(result.profile.databaseSize);
       document.getElementById('profileVersion').textContent = result.profile.version;
+      // Keep the header badge in sync with the real running version (#version-badge).
+      const badge = document.getElementById('versionText');
+      if (badge && result.profile.version) badge.textContent = 'v' + result.profile.version;
     }
   } catch (error) {
     console.error('Failed to load profile:', error);
