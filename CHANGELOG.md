@@ -5,6 +5,14 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.29.0] - 2026-07-04
+
+### Added
+- **Per-account email signatures** (#257) — set a plain-text and/or HTML signature per account (`imap_set_account_signature` / `imap_get_account_signature`); `imap_send_email` appends it under the standard `-- ` delimiter unless `includeSignature:false`. Migration 1.14.0 → 1.15.0 adds `signature_text` / `signature_html`.
+
+### Documentation
+- Added `docs/claude_desktop_instructions.md` — a paste-ready Claude Desktop Project-instructions block.
+
 ## [2.28.3] - 2026-07-04
 
 ### Fixed
