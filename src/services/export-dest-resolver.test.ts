@@ -77,4 +77,12 @@ describe('resolveExportDest', () => {
     delete process.env.IMAP_MCP_ALLOWED_EXPORT_DIRS;
     expect(allowedExportRoots()).toEqual([os.homedir()]);
   });
+
+  it('parses a comma-separated list and expands ~', () => {
+    process.env.IMAP_MCP_ALLOWED_EXPORT_DIRS = `${root}, ~/Downloads `;
+    expect(allowedExportRoots()).toEqual([
+      path.resolve(root),
+      path.join(os.homedir(), 'Downloads'),
+    ]);
+  });
 });
