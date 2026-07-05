@@ -6,7 +6,7 @@
 # Date: 2025-11-06
 # Version: 1.1.0
 
-.PHONY: help install uninstall start stop restart status logs update test build clean backup restore migrate migrate-status migrate-rollback migrate-dry-run
+.PHONY: help install uninstall start stop restart status logs update update-extension test build clean backup restore migrate migrate-status migrate-rollback migrate-dry-run
 
 # Detect OS
 UNAME_S := $(shell uname -s 2>/dev/null || echo "Windows")
@@ -90,7 +90,8 @@ help:
 	@echo "  make restart    - Restart the service"
 	@echo "  make status     - Check service status"
 	@echo "  make logs       - View service logs"
-	@echo "  make update     - Update to latest release"
+	@echo "  make update     - Update the Web UI service to latest release"
+	@echo "  make update-extension - Update the Claude Desktop .mcpb to latest release"
 	@echo "  make build      - Build the project"
 	@echo "  make backup     - Backup database and keys to a zip file"
 	@echo "  make restore    - Restore database and keys from a zip file"
@@ -159,6 +160,13 @@ logs:
 
 update:
 	@bash scripts/update.sh "$(INSTALL_DIR)" "$(DATA_DIR)" "$(LOG_DIR)"
+
+# Update the installed Claude Desktop extension (.mcpb) to the latest release.
+# Separate from `update` (which manages the launchd Web UI service) — the
+# Claude Desktop extension is a local .mcpb that Desktop never auto-updates.
+# Override with VERSION=x.y.z and/or EXT_DIR="/path". Requires gh.
+update-extension:
+	@VERSION="$(VERSION)" EXT_DIR="$(EXT_DIR)" bash scripts/update-extension.sh
 
 update-internal:
 	@echo "==========================================="; \
