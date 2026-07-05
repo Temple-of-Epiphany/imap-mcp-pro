@@ -5,6 +5,11 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.31.0] - 2026-07-05
+
+### Added
+- **Direct export to a path outside the MCP** (#270) — `imap_export_email`, `imap_export_folder`, and `imap_export_account` gained an optional `destPath`. When set, `.eml` files are written **directly** to that path (e.g. `~/Downloads/sent-mail`) instead of the managed outbox — no export-to-outbox-then-relocate two-hop. Folder/account exports still mirror the mailbox hierarchy under `destPath`. `destPath` is validated by `resolveExportDest()`: must be absolute, resolve within an allowed export root (default: home dir; narrow/widen via `IMAP_MCP_ALLOWED_EXPORT_DIRS`), never inside `~/.imap-mcp`, not the bare home root or a top-level hidden dir, and symlink-escape guarded — preserving the MSP multi-tenant boundary. Omit `destPath` for unchanged outbox behavior.
+
 ## [2.30.1] - 2026-07-04
 
 ### Fixed

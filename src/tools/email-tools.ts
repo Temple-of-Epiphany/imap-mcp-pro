@@ -17,6 +17,7 @@ import {
 import { getToolContext } from './tool-context.js';
 import { ContextReductionConfig as Cfg } from '../config/context-reduction.js';
 import { getOutboxDir, sanitizeFilename } from '../services/attachment-validator.js';
+import { resolveExportDest } from '../services/export-dest-resolver.js';
 import { MessageExportService } from '../services/message-export-service.js';
 import path from 'path';
 
@@ -231,8 +232,23 @@ interface FolderExportSummary {
 }
 
 /**
+ * Resolve the base directory an export writes into. When `destPath` is given
+ * the files land DIRECTLY there (validated by resolveExportDest — #270),
+ * optionally grouped in a sanitized `subfolder`; otherwise they go under the
+ * managed per-user outbox (`{outbox}/exports/[subfolder]/`).
+ */
+function exportBaseDir(userId: string, subfolder?: string, destPath?: string): string {
+  const seg = subfolder ? sanitizeFilename(subfolder).replace(/[\\/]/g, '') : '';
+  if (destPath) {
+    const base = resolveExportDest(destPath);
+    return seg ? path.join(base, seg) : base;
+  }
+  return path.join(getOutboxDir(userId), 'exports', seg);
+}
+
+/**
  * Export up to `limit` messages of one folder to .eml on disk, mirroring the
- * folder hierarchy under `{outbox}/exports/[subfolder]/{folder path}/`. Raw
+ * folder hierarchy under the resolved base (`{base}/{folder path}/`). Raw
  * sources are fetched in chunks of 100 to keep memory and the IMAP fetch bounded.
  */
 async function exportFolderToDisk(
@@ -243,6 +259,7 @@ async function exportFolderToDisk(
   folder: string,
   limit: number,
   subfolder?: string,
+  destPath?: string,
   // Return type is inferred (FolderExportSummary) — an explicit Promise<…>
   // annotation here trips the angle-bracket description lint's approximate scanner.
 ) {
@@ -250,8 +267,7 @@ async function exportFolderToDisk(
   const uids = all.map((m) => m.uid);
   const selected = uids.slice(0, limit);
 
-  const seg = subfolder ? sanitizeFilename(subfolder).replace(/[\\/]/g, '') : '';
-  const outputDir = path.join(getOutboxDir(userId), 'exports', seg, exporter.folderToDiskPath(folder));
+  const outputDir = path.join(exportBaseDir(userId, subfolder, destPath), exporter.folderToDiskPath(folder));
 
   let exported = 0;
   let totalBytes = 0;
@@ -618,25 +634,26 @@ export function emailTools(
       'Export one or more messages to standard .eml files on the server host (download & save). ' +
       '.eml is the raw RFC822 source — lossless, opens in Outlook/Thunderbird/Apple Mail, with attachments ' +
       'and inline images preserved. Files are written under the per-user outbox ' +
-      '(~/.imap-mcp/users/{userId}/outbox/exports/), optionally grouped in a named subfolder. All processing is local.',
+      '(~/.imap-mcp/users/{userId}/outbox/exports/), optionally grouped in a named subfolder. Pass destPath ' +
+      'to write directly to a path outside the MCP (e.g. ~/Downloads/sent-mail). All processing is local.',
     inputSchema: {
       accountId: z.string().describe('Account ID'),
       folder: z.string().default('INBOX').describe('Folder containing the messages (default: INBOX)'),
       uids: z.array(z.number()).min(1).describe('UIDs of the messages to export'),
-      subfolder: z.string().optional().describe('Optional subfolder name under exports/ to group the files (sanitized to a single path segment)'),
+      subfolder: z.string().optional().describe('Optional subfolder name to group the files (sanitized to a single path segment)'),
+      destPath: z.string().optional().describe('Absolute path to write .eml files DIRECTLY into (e.g. /Users/you/Downloads/sent-mail). Must be inside an allowed export root (default: your home dir; set IMAP_MCP_ALLOWED_EXPORT_DIRS to restrict) and outside ~/.imap-mcp. Omit to use the managed outbox.'),
     }
-  }, withErrorHandling(async ({ accountId, folder, uids, subfolder }) => {
+  }, withErrorHandling(async ({ accountId, folder, uids, subfolder, destPath }) => {
     const userId = resolveUserId(db) ?? 'default';
     const messages = await imapService.getRawMessages(accountId, folder, uids);
     if (messages.length === 0) {
       return jsonResult({ success: false, message: 'No messages found for the given UIDs', folder, requestedUids: uids });
     }
 
-    // Output dir lives under the per-user outbox (always allow-listed). The
-    // optional subfolder is reduced to a single sanitized segment so it cannot
-    // escape the outbox via path traversal.
-    const seg = subfolder ? sanitizeFilename(subfolder).replace(/[\\/]/g, '') : '';
-    const outputDir = path.join(getOutboxDir(userId), 'exports', seg);
+    // Output dir is either the managed outbox (default) or a validated
+    // caller-supplied destPath (#270). The optional subfolder is reduced to a
+    // single sanitized segment so it cannot escape via path traversal.
+    const outputDir = exportBaseDir(userId, subfolder, destPath);
 
     const result = await new MessageExportService().exportEml(outputDir, messages);
 
@@ -658,18 +675,19 @@ export function emailTools(
   server.registerTool('imap_export_folder', {
     description:
       'Export all messages in a folder to standard .eml files on the server host, mirroring the folder ' +
-      'hierarchy under the per-user outbox (exports/[subfolder]/{folder path}/). Capped by `limit` ' +
-      '(default 1000; `truncated` flags when the folder held more). Lossless raw-source write. Local only.',
+      'hierarchy under the per-user outbox (exports/[subfolder]/{folder path}/), or directly under destPath. ' +
+      'Capped by `limit` (default 1000; `truncated` flags when the folder held more). Lossless raw-source write. Local only.',
     inputSchema: {
       accountId: z.string().describe('Account ID'),
       folder: z.string().default('INBOX').describe('Folder to export (default: INBOX)'),
       limit: z.number().optional().default(1000).describe('Maximum messages to export (default 1000)'),
-      subfolder: z.string().optional().describe('Optional top-level subfolder under exports/ to group this export'),
+      subfolder: z.string().optional().describe('Optional top-level subfolder to group this export'),
+      destPath: z.string().optional().describe('Absolute path to write DIRECTLY into (folder hierarchy mirrored under it). Must be inside an allowed export root and outside ~/.imap-mcp. Omit to use the managed outbox.'),
     }
-  }, withErrorHandling(async ({ accountId, folder, limit, subfolder }) => {
+  }, withErrorHandling(async ({ accountId, folder, limit, subfolder, destPath }) => {
     const userId = resolveUserId(db) ?? 'default';
     const summary = await exportFolderToDisk(
-      imapService, new MessageExportService(), userId, accountId, folder, limit ?? 1000, subfolder,
+      imapService, new MessageExportService(), userId, accountId, folder, limit ?? 1000, subfolder, destPath,
     );
     return jsonResult({ success: true, format: 'eml', ...summary });
   }));
@@ -678,14 +696,15 @@ export function emailTools(
   server.registerTool('imap_export_account', {
     description:
       'Export the entire account to .eml files, mirroring the full mailbox folder structure under ' +
-      'exports/[subfolder]/. Skips non-selectable folders (\\Noselect). Each folder is capped by ' +
+      'exports/[subfolder]/ (or directly under destPath). Skips non-selectable folders (\\Noselect). Each folder is capped by ' +
       '`perFolderLimit` (default 1000). Fetched in chunks. Local only — can be large.',
     inputSchema: {
       accountId: z.string().describe('Account ID'),
       perFolderLimit: z.number().optional().default(1000).describe('Max messages to export per folder (default 1000)'),
-      subfolder: z.string().optional().describe('Optional top-level subfolder under exports/ to group this export'),
+      subfolder: z.string().optional().describe('Optional top-level subfolder to group this export'),
+      destPath: z.string().optional().describe('Absolute path to write DIRECTLY into (full mailbox structure mirrored under it). Must be inside an allowed export root and outside ~/.imap-mcp. Omit to use the managed outbox.'),
     }
-  }, withErrorHandling(async ({ accountId, perFolderLimit, subfolder }) => {
+  }, withErrorHandling(async ({ accountId, perFolderLimit, subfolder, destPath }) => {
     const userId = resolveUserId(db) ?? 'default';
     const exporter = new MessageExportService();
     const folders = await imapService.listFolders(accountId);
@@ -696,7 +715,7 @@ export function emailTools(
     const perFolder: FolderExportSummary[] = [];
     for (const f of selectable) {
       try {
-        perFolder.push(await exportFolderToDisk(imapService, exporter, userId, accountId, f.name, perFolderLimit ?? 1000, subfolder));
+        perFolder.push(await exportFolderToDisk(imapService, exporter, userId, accountId, f.name, perFolderLimit ?? 1000, subfolder, destPath));
       } catch (e: any) {
         perFolder.push({ folder: f.name, outputDir: '', totalInFolder: 0, exported: 0, truncated: false, totalBytes: 0, totalSize: e?.message ?? 'export failed' });
       }
