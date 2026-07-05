@@ -5,9 +5,10 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.32.0] - 2026-07-05
 
 ### Added
+- **Export destination config** (#270) — `IMAP_MCP_ALLOWED_EXPORT_DIRS` is now surfaced as a Claude Desktop `user_config` field ("Allowed Export Directories"), so the `destPath` allow-list is configurable from the extension UI (leave empty = anywhere in home; set dirs to restrict; a nonexistent path disables direct export). The env var is now **comma-separated** (matching the attachment-dirs convention and the Desktop directory/multiple serialization, and correct on Windows where `:` appears in drive paths) and expands `~`. `env-resolver` recovers it from the settings JSON the same way it does the attachment allow-list.
 - **`make update-extension`** (#272) — one-command update of the installed Claude Desktop `.mcpb` to the latest release. The extension is a *local* `.mcpb` that Claude Desktop never auto-updates (only directory-sourced extensions get auto-updates), so it silently drifts behind the Web UI / registry; `make install` / `make update` only manage the launchd Web UI service. `scripts/update-extension.sh` resolves the latest release (or `VERSION=`), downloads + SHA-256-verifies the `.mcpb`, stage-extracts and asserts the version + skills manifest, then backs up the current install to `.bak` and swaps atomically. macOS default path; `EXT_DIR=` override. Spec: `docs/update-extension_specification.md`.
 
 ## [2.31.0] - 2026-07-05

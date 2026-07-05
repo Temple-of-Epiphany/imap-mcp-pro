@@ -37,6 +37,7 @@
         "IMAP_MCP_DATABASE_PATH": "${user_config.database_path}/data.db",
         "IMAP_MCP_LOG_LEVEL": "${user_config.log_level}",
         "IMAP_MCP_ALLOWED_ATTACHMENT_DIRS": "${user_config.allowed_attachment_dirs}",
+        "IMAP_MCP_ALLOWED_EXPORT_DIRS": "${user_config.allowed_export_dirs}",
         "IMAP_MCP_ENCRYPTION_KEY": "${user_config.encryption_key}",
         "IMAP_MCP_MAX_ATTACHMENT_SIZE_BYTES": "${user_config.max_attachment_size_bytes}",
         "IMAP_MCP_MAX_TOTAL_ATTACHMENT_SIZE_BYTES": "${user_config.max_total_attachment_size_bytes}",
@@ -67,6 +68,14 @@
       "type": "directory",
       "title": "Allowed Attachment Directories",
       "description": "Directories the server may read attachments from for path-based attachment sends. Add only directories that contain files you want to send. Empty list disables the feature.",
+      "multiple": true,
+      "default": [],
+      "required": false
+    },
+    "allowed_export_dirs": {
+      "type": "directory",
+      "title": "Allowed Export Directories",
+      "description": "Directories the export tools may write .eml files DIRECTLY into via destPath (e.g. your Downloads folder). Leave empty to allow anywhere in your home directory (never inside the server's own data dir). Set specific directories to restrict, or a nonexistent path to disable direct export entirely.",
       "multiple": true,
       "default": [],
       "required": false

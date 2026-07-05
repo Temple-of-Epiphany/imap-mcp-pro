@@ -31,17 +31,22 @@ import path from 'path';
 /**
  * Allowed roots an export `destPath` may resolve within. Defaults to the
  * user's home directory. Operators narrow or widen this with
- * IMAP_MCP_ALLOWED_EXPORT_DIRS (a path.delimiter-separated list of absolute
- * dirs); set it to a path that doesn't exist to effectively disable destPath.
+ * IMAP_MCP_ALLOWED_EXPORT_DIRS — a comma-separated list of absolute dirs
+ * (comma, not path.delimiter, so it matches the Claude Desktop
+ * directory/multiple config serialization and stays correct on Windows where
+ * `:` appears in drive paths). Set it to a path that doesn't exist to
+ * effectively disable destPath. `~` / `~/…` entries expand to the home dir.
  */
 export function allowedExportRoots(): string[] {
   const env = process.env.IMAP_MCP_ALLOWED_EXPORT_DIRS;
   if (env && env.trim()) {
-    return env
-      .split(path.delimiter)
+    const roots = env
+      .split(',')
       .map((s) => s.trim())
       .filter(Boolean)
+      .map((p) => (p === '~' || p.startsWith('~/') ? path.join(os.homedir(), p.slice(1)) : p))
       .map((p) => path.resolve(p));
+    if (roots.length > 0) return roots;
   }
   return [os.homedir()];
 }

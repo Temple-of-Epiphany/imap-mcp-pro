@@ -203,24 +203,31 @@ export function resolveEnvPlaceholders(): {
     }
   }
 
-  // Targeted recovery for the array case: if the allow-list env var got
-  // cleared (or was never set), pull it from the saved settings JSON.
-  if (!process.env.IMAP_MCP_ALLOWED_ATTACHMENT_DIRS) {
+  // Targeted recovery for the array case: if an allow-list env var got
+  // cleared (or was never set), pull it from the saved settings JSON. Both
+  // IMAP_MCP_ALLOWED_ATTACHMENT_DIRS and IMAP_MCP_ALLOWED_EXPORT_DIRS are
+  // directory/multiple user_config fields and hit the same unsubstituted-
+  // placeholder problem, so they recover identically.
+  const arrayRecoveries: Array<{ env: string; key: string }> = [
+    { env: 'IMAP_MCP_ALLOWED_ATTACHMENT_DIRS', key: 'allowed_attachment_dirs' },
+    { env: 'IMAP_MCP_ALLOWED_EXPORT_DIRS', key: 'allowed_export_dirs' },
+  ];
+  for (const { env, key } of arrayRecoveries) {
+    if (process.env[env]) continue;
     const file = findSettingsFile();
-    if (file) {
-      const settings = readSettings(file);
-      const dirs = settings?.userConfig?.allowed_attachment_dirs;
-      if (Array.isArray(dirs) && dirs.length > 0) {
-        // Each entry may itself contain ${HOME} / ~. Expand both.
-        const expandedDirs = dirs
-          .map(d => typeof d === 'string' ? d : '')
-          .filter(d => d.length > 0)
-          .map(d => expandShellVars(d))
-          .map(d => d.startsWith('~/') ? path.join(os.homedir(), d.slice(2)) : d);
-        if (expandedDirs.length > 0) {
-          process.env.IMAP_MCP_ALLOWED_ATTACHMENT_DIRS = expandedDirs.join(',');
-          recoveredFromSettings.push('IMAP_MCP_ALLOWED_ATTACHMENT_DIRS');
-        }
+    if (!file) break; // no settings file — nothing to recover for either
+    const settings = readSettings(file);
+    const dirs = settings?.userConfig?.[key];
+    if (Array.isArray(dirs) && dirs.length > 0) {
+      // Each entry may itself contain ${HOME} / ~. Expand both.
+      const expandedDirs = dirs
+        .map(d => typeof d === 'string' ? d : '')
+        .filter(d => d.length > 0)
+        .map(d => expandShellVars(d))
+        .map(d => d.startsWith('~/') ? path.join(os.homedir(), d.slice(2)) : d);
+      if (expandedDirs.length > 0) {
+        process.env[env] = expandedDirs.join(',');
+        recoveredFromSettings.push(env);
       }
     }
   }
