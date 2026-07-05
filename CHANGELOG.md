@@ -5,6 +5,11 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **`make update-extension`** (#272) — one-command update of the installed Claude Desktop `.mcpb` to the latest release. The extension is a *local* `.mcpb` that Claude Desktop never auto-updates (only directory-sourced extensions get auto-updates), so it silently drifts behind the Web UI / registry; `make install` / `make update` only manage the launchd Web UI service. `scripts/update-extension.sh` resolves the latest release (or `VERSION=`), downloads + SHA-256-verifies the `.mcpb`, stage-extracts and asserts the version + skills manifest, then backs up the current install to `.bak` and swaps atomically. macOS default path; `EXT_DIR=` override. Spec: `docs/update-extension_specification.md`.
+
 ## [2.31.0] - 2026-07-05
 
 ### Added
