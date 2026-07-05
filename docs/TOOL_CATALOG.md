@@ -79,9 +79,9 @@
 
 | Tool | Description |
 | --- | --- |
-| `imap_export_account` | Export the entire account to .eml files, mirroring the full mailbox folder structure under exports/[subfolder]/. |
+| `imap_export_account` | Export the entire account to .eml files, mirroring the full mailbox folder structure under exports/[subfolder]/ (or directly under destPath). |
 | `imap_export_email` | Export one or more messages to standard .eml files on the server host (download & save). |
-| `imap_export_folder` | Export all messages in a folder to standard .eml files on the server host, mirroring the folder hierarchy under the per-user outbox (exports/[subfolder]/{folder path}/). |
+| `imap_export_folder` | Export all messages in a folder to standard .eml files on the server host, mirroring the folder hierarchy under the per-user outbox (exports/[subfolder]/{folder path}/), or directly under destPath. |
 | `imap_extract_attachments` | Extract file attachments from a block of messages and save them to disk under the per-user outbox (exports/attachments/[subfolder]/). |
 | `imap_get_attachment` | Fetch a single attachment from a message for preview or download. |
 | `imap_get_email_sizes` | List messages by size to find large emails — uses RFC822.SIZE (no body download, cheap even on big folders). |
