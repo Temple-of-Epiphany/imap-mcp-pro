@@ -40,7 +40,7 @@ jobs:
         run: npm ci
 
       - name: Build universal .mcpb
-        run: node dxt/build.mjs --universal
+        run: node dxt/build.mjs
 
       - name: Verify artifact exists
         shell: bash
