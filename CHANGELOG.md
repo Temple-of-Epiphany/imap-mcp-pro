@@ -5,6 +5,12 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.32.1] - 2026-07-08
+
+### Fixed
+- **Fresh installs were missing three tables** (#279) — `schema.sql` seeds the `schema_version` ledger up through 1.7.0, so on a fresh DB the migrator treats migrations 1.4.0/1.5.0/1.6.0 as already-applied and skips them; but those tables were never mirrored into `schema.sql`. Result: every fresh install lacked `categories` (→ `imap_list_categories` / `imap_test_categories`: "no such table: categories") **and** the DNS-firewall tables `dns_firewall_cache` / `dns_firewall_providers`. Backfilled all three (idempotent `IF NOT EXISTS` / `INSERT OR IGNORE`) so `schema.sql` is a complete snapshot; since it runs on every startup, existing broken DBs self-heal on next launch. Added a regression test asserting `schema.sql` carries every table from every seeded migration.
+- **`imap_folder_status` crashed with `TypeError: Do not know how to serialize a BigInt`** (#278) — `selectFolder` returned ImapFlow's `uidValidity`/`uidNext` as `BigInt`, which `JSON.stringify` can't serialize. Now cast to `Number` at the source (matching `imap_get_mailbox_status`).
+
 ## [2.32.0] - 2026-07-05
 
 ### Added

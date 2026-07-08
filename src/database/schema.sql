@@ -329,3 +329,87 @@ CREATE TABLE IF NOT EXISTS result_attachments (
 
 CREATE INDEX IF NOT EXISTS idx_result_attachments_result   ON result_attachments(result_id);
 CREATE INDEX IF NOT EXISTS idx_result_attachments_msg_uid  ON result_attachments(result_id, message_uid);
+
+-- ---------------------------------------------------------------------------
+-- Backfill of tables that were introduced ONLY in migrations 1.4.0/1.5.0/1.6.0
+-- but never mirrored here (#279). Because schema.sql seeds schema_version up
+-- through 1.7.0 (above), the migrator treats those migrations as already
+-- applied on a fresh DB and skips them — so without these definitions a fresh
+-- install is missing the categories + DNS firewall tables entirely. schema.sql
+-- runs on every startup with IF NOT EXISTS / INSERT OR IGNORE, so this is
+-- idempotent and also self-heals already-created DBs on next launch.
+-- ---------------------------------------------------------------------------
+
+-- DNS Firewall cache (from schema_update_1.3.0_TO_1.4.0.sql, Issue #59)
+CREATE TABLE IF NOT EXISTS dns_firewall_cache (
+  domain TEXT PRIMARY KEY,
+  is_safe BOOLEAN NOT NULL,
+  is_blocked BOOLEAN NOT NULL,
+  provider TEXT NOT NULL DEFAULT 'quad9',
+  checked_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  metadata TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_dns_cache_expires ON dns_firewall_cache(expires_at);
+CREATE INDEX IF NOT EXISTS idx_dns_cache_domain ON dns_firewall_cache(domain);
+
+-- DNS Firewall providers (from schema_update_1.4.0_TO_1.5.0.sql, Issue #60)
+CREATE TABLE IF NOT EXISTS dns_firewall_providers (
+  provider_id TEXT PRIMARY KEY,
+  provider_name TEXT NOT NULL,
+  provider_type TEXT NOT NULL CHECK(provider_type IN ('dns-over-https', 'dns-lookup')),
+  api_endpoint TEXT,
+  api_key TEXT,
+  is_enabled BOOLEAN NOT NULL DEFAULT 1,
+  is_default BOOLEAN NOT NULL DEFAULT 0,
+  timeout_ms INTEGER NOT NULL DEFAULT 5000,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  metadata TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_dns_providers_enabled ON dns_firewall_providers(is_enabled);
+CREATE INDEX IF NOT EXISTS idx_dns_providers_default ON dns_firewall_providers(is_default);
+
+-- Seed Quad9 as the default provider. INSERT OR IGNORE (not the migration's
+-- plain INSERT) because schema.sql re-runs on every startup.
+INSERT OR IGNORE INTO dns_firewall_providers (
+  provider_id, provider_name, provider_type, api_endpoint, api_key,
+  is_enabled, is_default, timeout_ms, created_at, updated_at, metadata
+) VALUES (
+  'quad9', 'Quad9', 'dns-over-https', 'dns.quad9.net', NULL,
+  1, 1, 5000,
+  strftime('%s', 'now') * 1000, strftime('%s', 'now') * 1000,
+  '{"description":"Quad9 DNS-over-HTTPS threat intelligence service"}'
+);
+
+CREATE TRIGGER IF NOT EXISTS ensure_single_default_provider
+BEFORE UPDATE ON dns_firewall_providers
+WHEN NEW.is_default = 1 AND OLD.is_default = 0
+BEGIN
+  UPDATE dns_firewall_providers SET is_default = 0 WHERE provider_id != NEW.provider_id;
+END;
+
+-- Quick Categories (from schema_update_1.5.0_TO_1.6.0.sql, Issue #71)
+CREATE TABLE IF NOT EXISTS categories (
+  category_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  category_name TEXT NOT NULL,
+  keywords TEXT NOT NULL,
+  target_folder TEXT NOT NULL,
+  enabled BOOLEAN DEFAULT 1,
+  match_count INTEGER DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  last_matched TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+  FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE,
+  UNIQUE(user_id, account_id, category_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id);
+CREATE INDEX IF NOT EXISTS idx_categories_account ON categories(account_id);
+CREATE INDEX IF NOT EXISTS idx_categories_enabled ON categories(enabled);
+CREATE INDEX IF NOT EXISTS idx_categories_name ON categories(category_name);
