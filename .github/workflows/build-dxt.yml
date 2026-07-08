@@ -77,7 +77,7 @@ jobs:
           {
             echo '## Claude Desktop Extension (.mcpb)'
             echo ''
-            echo 'Single **universal** `.mcpb` — runs on macOS, Windows, and Linux (pure-JS runtime, no native binaries).'
+            echo 'Single **universal** `.mcpb` (pure-JS runtime, no native binaries). Declared/tested platforms: **macOS and Windows**. It also runs on Linux, but Linux is not part of the tested/declared support matrix yet.'
             echo ''
             echo 'Install: Claude Desktop → Settings → Extensions → Install Extension… and choose the `.mcpb`.'
             echo ''

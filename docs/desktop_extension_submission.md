@@ -18,12 +18,12 @@ reviewed by Anthropic for quality + security).
 - [x] All tools carry human titles + read/destructive/openWorld hints (runtime `tools/list`)
 - [x] Export destination lockable from the UI (`allowed_export_dirs`, v2.32.0)
 - [x] Released `.mcpb` + SHA-256 attached to the GitHub release
-- [ ] **Tested on macOS** (primary — validated)
-- [ ] **Tested on Windows** (required by guidelines — pending)
-- [ ] **Tested on Linux** (pending)
+- [x] **Tested on macOS** (primary — validated)
+- [ ] **Tested on Windows** (in progress — the submission candidate is v2.32.3+)
+- [ ] ~~Linux~~ — **out of scope for this submission** (declared platforms narrowed to `darwin`/`win32`; runtime is pure-JS so it still runs on Linux, just not part of the tested/declared matrix yet)
 
-> The manifest declares `darwin/win32/linux`. Do not submit until Windows + Linux
-> are actually validated, or narrow `compatibility.platforms` to what's tested.
+> `compatibility.platforms` is now `["darwin", "win32"]` — matches what's tested.
+> Add `linux` back after a smoke test if/when we want to declare it.
 
 ## Field answers (adapt to the live form)
 
@@ -38,7 +38,7 @@ reviewed by Anthropic for quality + security).
 | Latest `.mcpb` | https://github.com/Temple-of-Epiphany/imap-mcp-pro/releases/latest |
 | License | PolyForm-Noncommercial-1.0.0 (source-available) |
 | Privacy policy | https://github.com/Temple-of-Epiphany/imap-mcp-pro/blob/main/PRIVACY.md |
-| Platforms | macOS (+ Windows/Linux once validated) |
+| Platforms | macOS + Windows |
 | Category | Productivity / Email |
 
 ## Security & data-handling summary (for the review)

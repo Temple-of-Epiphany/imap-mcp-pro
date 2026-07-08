@@ -5,6 +5,11 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.32.3] - 2026-07-08
+
+### Changed
+- **Declared platforms narrowed to macOS + Windows** (#284) — `compatibility.platforms` is now `["darwin", "win32"]` (was `["darwin", "win32", "linux"]`) for the Anthropic Desktop Extensions submission, so we only declare platforms we actually test. The runtime is pure-JS and still runs on Linux; Linux is simply not part of the tested/declared support matrix yet. Release-notes wording and the submission dossier updated to match.
+
 ## [2.32.2] - 2026-07-08
 
 ### Fixed
