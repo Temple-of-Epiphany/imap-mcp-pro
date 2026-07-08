@@ -39,6 +39,7 @@ import {
 } from '../types/index.js';
 import { LRUCache } from '../utils/memory-manager.js';
 import { WorkerPool } from '../utils/worker-pool.js';
+import { AccountSerializer } from '../utils/account-serial.js';
 import { ContextReductionConfig as Cfg } from '../config/context-reduction.js';
 
 /** Per-message size + light envelope info from a RFC822.SIZE fetch (no body). */
@@ -95,6 +96,12 @@ export class ImapService {
   private capabilitiesCache: Map<string, { capabilities: ServerCapabilities; timestamp: number }> = new Map();
   private db?: any; // Optional DatabaseService for auto-capability storage (Issue #58)
   private workerPool?: WorkerPool;
+
+  // Per-account command serializer (#280): folder-scoped operations on one
+  // account share a single stateful IMAP connection, so they must run one at a
+  // time or a concurrent SELECT corrupts another op's mailbox context. Wraps
+  // withRetry; re-entrant so nested ops on the same account don't deadlock.
+  private readonly serializer = new AccountSerializer();
 
   // Level 3: Operation queue with size limit (Issue #22 - prevent unbounded growth)
   private operationQueue: QueuedOperation[] = [];
@@ -520,6 +527,21 @@ export class ImapService {
    * Level 2: Retry wrapper for all operations
    */
   private async withRetry<T>(
+    accountId: string,
+    operation: () => Promise<T>,
+    operationName: string
+  ): Promise<T> {
+    // Serialize per account so a folder-scoped SELECT+operation completes before
+    // the next begins on the shared connection (#280). Re-entrant: nested
+    // withRetry calls on the same account (e.g. getMultipleMailboxStatus ->
+    // getMailboxStatus) run inline instead of deadlocking. The whole retry loop
+    // is held so a retry never yields the connection mid-sequence.
+    return this.serializer.run(accountId, () =>
+      this.runWithRetry(accountId, operation, operationName),
+    );
+  }
+
+  private async runWithRetry<T>(
     accountId: string,
     operation: () => Promise<T>,
     operationName: string

@@ -5,6 +5,11 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.32.2] - 2026-07-08
+
+### Fixed
+- **Concurrency race: parallel folder-scoped calls returned cross-contaminated data** (#280) — a single account's IMAP connection is one stateful channel (exactly one mailbox SELECTed at a time), so running folder-scoped tools concurrently (e.g. a batch of `imap_get_unread_count` / `imap_get_largest_emails` / `imap_search_emails`) let one operation's `SELECT` redefine another's mailbox mid-flight — yielding silently wrong counts and search results (no error raised). Introduced a **re-entrant per-account serializer** (`AccountSerializer`, `AsyncLocalStorage`-based) wired at the `withRetry` choke point: each SELECT+operation now runs to completion before the next begins on that connection, while different accounts still run in parallel. Re-entrancy prevents deadlock where a serialized op calls another on the same account (e.g. `getMultipleMailboxStatus` → `getMailboxStatus`). (Per-account serialization matches IMAP's inherently serial single connection — no legitimate throughput is lost.)
+
 ## [2.32.1] - 2026-07-08
 
 ### Fixed
