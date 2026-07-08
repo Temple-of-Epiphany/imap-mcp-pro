@@ -712,8 +712,11 @@ export class ImapService {
           new: 0, // ImapFlow doesn't provide this directly
           unseen: 0 // Not available in MailboxObject
         },
-        uidvalidity: mailbox.uidValidity,
-        uidnext: mailbox.uidNext,
+        // ImapFlow returns uidValidity (and sometimes uidNext) as BigInt, which
+        // JSON.stringify cannot serialize (#278). Cast to Number — both fit
+        // safely in a 53-bit float. Mirrors getMailboxStatus's handling.
+        uidvalidity: Number(mailbox.uidValidity ?? 0),
+        uidnext: Number(mailbox.uidNext ?? 0),
         flags: mailbox.flags,
         permanentFlags: mailbox.permanentFlags
       };
