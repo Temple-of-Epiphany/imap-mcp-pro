@@ -404,6 +404,12 @@ export class MessageCacheService {
     query: string,
     options: SearchOptions = {},
   ): Promise<CachedMessageRow[]> {
+    if (!this.db.isFtsAvailable()) {
+      throw new Error(
+        'Full-text search is unavailable: this SQLite build was compiled without FTS5. ' +
+        'Use search mode by_domain or by_address instead, or run on a build that includes FTS5.',
+      );
+    }
     this.assertSynced(accountId, folder);
 
     const ftsQuery = String(query ?? '')
