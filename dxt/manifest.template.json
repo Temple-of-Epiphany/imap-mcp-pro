@@ -53,8 +53,8 @@
     "database_path": {
       "type": "directory",
       "title": "Data Directory",
-      "description": "Where IMAP MCP Pro stores its SQLite database, staged uploads, and result cache. Choose a writable location.",
-      "default": "${HOME}/.imap-mcp-pro",
+      "description": "Where IMAP MCP Pro stores its SQLite database, staged uploads, and result cache. Choose a writable location. Default is ~/.imap-mcp — the same store the CLI and Web UI service use, so accounts are shared across all entry points.",
+      "default": "${HOME}/.imap-mcp",
       "required": true
     },
     "encryption_key": {

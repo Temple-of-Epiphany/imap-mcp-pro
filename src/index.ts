@@ -24,6 +24,7 @@ import { dispatchCli, EXIT_CODES } from './config/cli.js';
 import { loadConfig, ConfigError } from './config/loader.js';
 import { logEvent, timeStage, SERVER_CAPABILITIES } from './startup.js';
 import { PACKAGE_VERSION } from './utils/package-info.js';
+import { registerInstance } from './utils/instance-lock.js';
 
 // Resolve the bundled-skills directory across every runtime layout (#268).
 // postbuild copies skills/ -> dist/skills/, and the .mcpb ships only dist/
@@ -130,6 +131,20 @@ const {
       logEvent('[startup]', { stage: 'pre-handshake', outcome: 'error', component: 'DatabaseService', error: e?.message });
       process.exit(EXIT_CODES.DATABASE_ERROR);
     }
+
+    // Duplicate-instance guard (#288): warn if another IMAP MCP Pro is already
+    // running against this data dir (e.g. the extension installed twice). Two
+    // servers on one store is confusing and split-brain-prone; surface it.
+    try {
+      const dataDir = path.dirname(config.database.path);
+      const other = registerInstance(dataDir, { version: PACKAGE_VERSION });
+      if (other) {
+        logEvent('[startup]', {
+          stage: 'pre-handshake', outcome: 'warning', component: 'InstanceLock',
+          message: `Another IMAP MCP Pro instance (pid ${other.pid}, started ${new Date(other.startedAt).toISOString()}) is already running against ${dataDir}. Running two instances is unsupported — remove the duplicate extension install to avoid confusing/split state.`,
+        });
+      }
+    } catch { /* guard is best-effort */ }
 
     // 4. Downstream services
     const fileExport = new FileExportService(db);

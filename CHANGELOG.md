@@ -5,6 +5,14 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.33.0] - 2026-07-12
+
+### Fixed
+- **Extension used a different data store than the CLI/service — accounts added elsewhere were invisible** (#288) — the Claude Desktop extension defaulted its **Data Directory** to `~/.imap-mcp-pro`, while `server-config`, the CLI, the launchd Web UI service, the outbox, and the encryption key all use `~/.imap-mcp`. So an account added via one entry point lived in a *different* SQLite DB (and even a different `colin` user_id) than the MCP session read. The manifest `database_path` default is now `${HOME}/.imap-mcp`, unifying the store across every entry point. **Existing installs:** set Data Directory to `~/.imap-mcp` in Settings → Extensions and restart Claude Desktop to see accounts added via the CLI/Web-UI service.
+
+### Added
+- **Duplicate-instance guard** (#288) — installing the extension twice starts two MCP servers against one data dir. `registerInstance()` writes a pidfile in the data dir at startup and logs a clear warning when another live instance already holds it (non-blocking), so a duplicate install doesn't silently create confusing/split state.
+
 ## [2.32.4] - 2026-07-12
 
 ### Fixed
