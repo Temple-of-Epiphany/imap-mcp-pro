@@ -274,6 +274,52 @@ export class DatabaseService {
         console.error(`[DatabaseService] Applied ${result.applied.length} migration(s)`);
       }
     }
+
+    // Reconcile FTS5 availability. node:sqlite on some platforms (e.g. certain
+    // Windows Node builds) is compiled without FTS5. The messages_cache
+    // AI/AU/AD triggers reference the fts5 virtual table, so on such builds ANY
+    // cache write — and the account-delete cascade into messages_cache — throws
+    // "no such module: fts5" (#286). This drops those triggers when FTS5 is
+    // absent so the rest works; full-text search is then guarded off.
+    this.reconcileFts5();
+  }
+
+  /** Whether this SQLite build has the FTS5 module. Set at init. */
+  private ftsAvailable = true;
+
+  /** True if full-text cache search (messages_cache_fts) is usable here. */
+  isFtsAvailable(): boolean {
+    return this.ftsAvailable;
+  }
+
+  /**
+   * Detect FTS5 support and, if absent, drop the messages_cache FTS sync
+   * triggers so cache writes / account deletes don't hit "no such module: fts5".
+   * Dropping a trigger doesn't load the module, so it's safe on FTS5-less
+   * builds. The inert virtual table can't be dropped without the module and is
+   * simply never queried (searchFullText guards on isFtsAvailable()).
+   */
+  private reconcileFts5(): void {
+    try {
+      this.db.exec('CREATE VIRTUAL TABLE IF NOT EXISTS __fts5_probe__ USING fts5(x)');
+      try { this.db.exec('DROP TABLE IF EXISTS __fts5_probe__'); } catch { /* ignore */ }
+      this.ftsAvailable = true;
+      return;
+    } catch {
+      this.ftsAvailable = false;
+    }
+
+    for (const trg of ['messages_cache_fts_ai', 'messages_cache_fts_au', 'messages_cache_fts_ad']) {
+      try {
+        this.db.exec(`DROP TRIGGER IF EXISTS ${trg}`);
+      } catch (e: any) {
+        console.error(`[DatabaseService] FTS trigger cleanup warning (${trg}):`, e?.message);
+      }
+    }
+    console.error(
+      '[DatabaseService] FTS5 not available in this SQLite build — full-text cache search disabled; ' +
+      'dropped messages_cache FTS triggers so sync and account deletion work without it.',
+    );
   }
 
   /**
@@ -384,7 +430,31 @@ export class DatabaseService {
   // Account Management
   // ===================
 
+  /**
+   * Find an existing account with the same IMAP identity (same user, host and
+   * username, compared case-insensitively) — used to prevent duplicates.
+   */
+  findAccountByImapIdentity(userId: string, host: string, username: string): Account | null {
+    const stmt = this.db.prepare(
+      `SELECT * FROM accounts
+       WHERE user_id = ? AND LOWER(host) = LOWER(?) AND LOWER(username) = LOWER(?)
+       LIMIT 1`,
+    );
+    return (stmt.get(userId, host, username) as Account | undefined) ?? null;
+  }
+
   createAccount(account: Omit<DecryptedAccount, 'account_id' | 'created_at' | 'updated_at' | 'last_connected'>): Account {
+    // Reject duplicates up front — the accounts table has no unique constraint
+    // on the IMAP identity, so without this a second add silently creates a
+    // second account for the same mailbox.
+    const existing = this.findAccountByImapIdentity(account.user_id, account.host, account.username);
+    if (existing) {
+      throw new Error(
+        `An account for ${account.username}@${account.host} already exists (account_id: ${existing.account_id}). ` +
+        `Remove it first with imap_remove_account, or use the existing account.`,
+      );
+    }
+
     const accountId = crypto.randomUUID();
 
     // Encrypt password

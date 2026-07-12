@@ -5,6 +5,12 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.32.4] - 2026-07-12
+
+### Fixed
+- **Account deletion failed with `no such module: fts5` on SQLite builds without FTS5** (#286) — `node:sqlite` enables foreign keys by default, so deleting an account cascades into `messages_cache`, firing the FTS sync trigger that touches the `messages_cache_fts` FTS5 table; on builds compiled without FTS5 (seen on some Windows Node builds) that throws. `DatabaseService` now probes FTS5 at startup and, when absent, drops the `messages_cache` FTS triggers so cache sync and account deletion work without full-text search. `imap_search_cache` fulltext mode now returns a clear "FTS5 unavailable" message instead of the raw module error. FTS5-capable builds are unchanged.
+- **Adding an account didn't check for duplicates** (#286) — `accounts` has no unique constraint on the IMAP identity, so re-adding the same mailbox silently created a second account. `createAccount` now rejects a duplicate `(user_id, host, username)` (case-insensitive) with a clear error (new `findAccountByImapIdentity`); a different mailbox on the same host, or the same identity under a different user, are still allowed.
+
 ## [2.32.3] - 2026-07-08
 
 ### Changed
