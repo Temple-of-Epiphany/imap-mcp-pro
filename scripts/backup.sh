@@ -4,11 +4,16 @@
 # Author: Colin Bitterfield
 # Email: colin.bitterfield@templeofepiphany.com
 # Date Created: 2026-04-10
-# Date Updated: 2026-04-17
-# Version: 1.1.0
+# Date Updated: 2026-09-12
+# Version: 1.2.0
 #
 # Backs up ~/.imap-mcp/ (database + encryption key) to a timestamped
 # password-protected zip file.  Both files are required for restore.
+#
+# Changelog:
+#   1.2.0 (2026-09-12): Snapshot the WAL-mode database with sqlite3 .backup
+#                       instead of zipping the live file (#290).
+#   1.1.0 (2026-04-17): Optional password-protected zip.
 #
 # Usage:
 #   ./scripts/backup.sh                             # unencrypted, ~/imap-mcp-pro-backup-YYYY-MM-DD.zip
@@ -89,15 +94,24 @@ echo ""
 # Remove existing file at destination if present
 rm -f "$DEST"
 
+# The database runs in WAL mode (#290): recent writes can sit in data.db-wal
+# until checkpointed, so zipping data.db alone could miss them. Take a
+# consistent online snapshot with SQLite's backup API — safe while servers run.
+command -v sqlite3 >/dev/null 2>&1 || { echo "ERROR: sqlite3 not found (needed for a consistent database snapshot)" >&2; exit 1; }
+SNAP_DIR=$(mktemp -d)
+trap 'rm -rf "$SNAP_DIR"' EXIT
+sqlite3 "$DATA_DIR/data.db" ".timeout 5000" ".backup '$SNAP_DIR/data.db'"
+chmod 600 "$SNAP_DIR/data.db"
+
 # zip -j = junk paths (store files without directory prefix)
 # Note: -P passes password on command line; acceptable for local backup on a personal machine.
 if [ -n "$BACKUP_PASSWORD" ]; then
   zip -j -P "$BACKUP_PASSWORD" "$DEST" \
-    "$DATA_DIR/data.db" \
+    "$SNAP_DIR/data.db" \
     "$DATA_DIR/.encryption-key"
 else
   zip -j "$DEST" \
-    "$DATA_DIR/data.db" \
+    "$SNAP_DIR/data.db" \
     "$DATA_DIR/.encryption-key"
 fi
 

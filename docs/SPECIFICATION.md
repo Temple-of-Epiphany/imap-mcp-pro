@@ -50,7 +50,7 @@ IMAP MCP Pro is a Model Context Protocol (MCP) server that provides comprehensiv
 - **Language**: TypeScript 5.x
 - **IMAP Library**: ImapFlow
 - **SMTP Library**: Nodemailer
-- **Database**: SQLite3 (better-sqlite3)
+- **Database**: SQLite (`node:sqlite`), WAL journal mode with a 5 s busy timeout for multi-process access (#290)
 - **MCP SDK**: @modelcontextprotocol/sdk v1.0+
 - **Encryption**: crypto (AES-256-GCM)
 
@@ -577,6 +577,7 @@ interface SmtpConfig {
 
 **Responsibilities**:
 - SQLite database management
+- Multi-process access (#290): every open sets `busy_timeout = 5000`, `journal_mode = WAL` (upgrades existing databases in place) and `synchronous = NORMAL`; `-wal`/`-shm` sidecars are 0600. Claude Desktop runs one server per host (chat + Cowork bridge) on the same file.
 - User authentication and authorization
 - Account CRUD with encryption
 - Multi-user isolation via MCP_USER_ID
@@ -1041,8 +1042,9 @@ node dist/scripts/generate-credentials.js
 ### Rollback Procedure
 
 ```bash
-# Backup current database
-cp ~/.imap-mcp/data.db ~/.imap-mcp/data.db.backup
+# Backup current database. WAL mode (#290): recent writes may still be in
+# data.db-wal, so snapshot with sqlite3 .backup rather than cp.
+sqlite3 ~/.imap-mcp/data.db ".backup '$HOME/.imap-mcp/data.db.backup'"
 
 # Uninstall current version
 make uninstall
@@ -1053,7 +1055,9 @@ git checkout v2.11.0
 # Reinstall
 make install
 
-# Restore database if needed
+# Restore database if needed (with every server stopped). Remove the WAL
+# sidecars first so an old WAL is never replayed onto the restored file.
+rm -f ~/.imap-mcp/data.db-wal ~/.imap-mcp/data.db-shm
 cp ~/.imap-mcp/data.db.backup ~/.imap-mcp/data.db
 ```
 
@@ -1082,8 +1086,8 @@ cp ~/.imap-mcp/data.db.backup ~/.imap-mcp/data.db
 
 **Critical Files**:
 ```bash
-# Database backup
-cp ~/.imap-mcp/data.db ~/Backups/imap-mcp/data-$(date +%Y%m%d).db
+# Database backup (consistent WAL snapshot, safe while servers run — #290)
+sqlite3 ~/.imap-mcp/data.db ".backup '$HOME/Backups/imap-mcp/data-$(date +%Y%m%d).db'"
 
 # Master key backup (SECURE LOCATION ONLY)
 cp ~/.config/imap-mcp/master.key ~/Backups/imap-mcp/master-key-$(date +%Y%m%d).key
