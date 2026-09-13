@@ -3,11 +3,17 @@
 // Author: Colin Bitterfield
 // Email: colin.bitterfield@templeofepiphany.com
 // Date Created: 2026-04-10
-// Date Updated: 2026-04-10
-// Version: 1.1.0
+// Date Updated: 2026-09-12
+// Version: 1.2.0
 //
 // Programmatic NSPanel preferences window.
 // Sections: Web UI port, Claude Desktop integration, Service behaviour, Database backup/restore.
+//
+// Changelog:
+//   1.2.0 (2026-09-12): WAL-safe backup/restore (#290) — snapshot data.db with
+//                       sqlite3 .backup, skip -wal/-shm/lock files, and clear
+//                       stale sidecars before restoring.
+//   1.1.0 (2026-04-10): Database backup/restore section.
 
 import AppKit
 import Foundation
@@ -380,11 +386,26 @@ class PreferencesWindowController: NSObject, NSWindowDelegate {
             let fm = FileManager.default
             do {
                 try fm.createDirectory(at: tmp, withIntermediateDirectories: true)
-                // Copy all files in ~/.imap-mcp (db + key files)
+                // Copy the key files and other data; the database is handled below.
+                // WAL mode (#290): data.db alone can miss writes still in
+                // data.db-wal, and copying a live -wal/-shm is inconsistent.
                 let src = URL(fileURLWithPath: self.dataDir)
+                let skipped: Set<String> = ["data.db", "data.db-wal", "data.db-shm", "data.db-journal", ".instance.lock"]
                 for file in (try? fm.contentsOfDirectory(at: src, includingPropertiesForKeys: nil)) ?? [] {
+                    if skipped.contains(file.lastPathComponent) { continue }
                     try fm.copyItem(at: file, to: tmp.appendingPathComponent(file.lastPathComponent))
                 }
+                // Consistent online snapshot via SQLite's backup API (safe while servers run).
+                let snapshot = tmp.appendingPathComponent("data.db")
+                let sqlite = Process()
+                sqlite.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+                sqlite.arguments = [src.appendingPathComponent("data.db").path, ".timeout 5000", ".backup '\(snapshot.path)'"]
+                try sqlite.run(); sqlite.waitUntilExit()
+                guard sqlite.terminationStatus == 0, fm.fileExists(atPath: snapshot.path) else {
+                    throw NSError(domain: "ImapMCPControl", code: 1,
+                                  userInfo: [NSLocalizedDescriptionKey: "Database snapshot failed (sqlite3 exit \(sqlite.terminationStatus))"])
+                }
+                try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: snapshot.path)
                 // Zip via ditto (built-in macOS, preserves permissions)
                 let p = Process()
                 p.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
@@ -439,6 +460,11 @@ class PreferencesWindowController: NSObject, NSWindowDelegate {
                 // Replace ~/.imap-mcp contents
                 let dest = URL(fileURLWithPath: self.dataDir)
                 try? fm.createDirectory(at: dest, withIntermediateDirectories: true)
+                // WAL mode (#290): a leftover -wal/-shm from the old database would
+                // be replayed onto the restored file, so remove them first.
+                for sidecar in ["data.db-wal", "data.db-shm"] {
+                    try? fm.removeItem(at: dest.appendingPathComponent(sidecar))
+                }
                 for file in (try? fm.contentsOfDirectory(at: tmp, includingPropertiesForKeys: nil)) ?? [] {
                     let target = dest.appendingPathComponent(file.lastPathComponent)
                     try? fm.removeItem(at: target)

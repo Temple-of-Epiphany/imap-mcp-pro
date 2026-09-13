@@ -575,6 +575,8 @@ Your data lives in `~/.imap-mcp/` and consists of:
 
 > **Important:** A backup without the key files cannot decrypt stored passwords. Always back up the entire `~/.imap-mcp/` directory together.
 
+> **WAL mode (v2.34.0+):** the database uses SQLite WAL journaling so several servers can share it (Claude Desktop runs one per host). Recent writes can sit in `data.db-wal` until checkpointed, so don't back up by copying `data.db` with `cp`. Use the backup below, or `sqlite3 ~/.imap-mcp/data.db ".backup '/path/to/copy.db'"`.
+
 ### Backup
 
 **Menu bar app:** Preferences… → Database → **Backup**  
@@ -588,6 +590,8 @@ make backup
 # Save to a specific path
 scripts/backup.sh /path/to/backup.zip
 ```
+
+The script takes a consistent snapshot with `sqlite3 .backup` (safe while servers are running), so the `sqlite3` command-line tool must be installed.
 
 ### Restore
 

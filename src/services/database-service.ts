@@ -6,8 +6,13 @@
  *
  * Author: Colin Bitterfield
  * Email: colin.bitterfield@templeofepiphany.com
- * Version: 1.0.0
+ * Version: 1.1.0
  * Date: 2025-11-05
+ * Date Updated: 2026-09-12
+ *
+ * Changelog:
+ *   1.1.0 (2026-09-12): WAL journal mode + busy timeout for multi-process access (#290).
+ *   1.0.0 (2025-11-05): Initial version.
  */
 
 import { DatabaseSync } from 'node:sqlite';
@@ -59,6 +64,13 @@ export class DatabaseService {
     // .node binaries get rejected by library-validation.
     this.db = new DatabaseSync(dbPath);
 
+    // #290: Claude Desktop runs one server per host (the Desktop chat client and
+    // the Cowork bridge) against this same file. Configure the connection for
+    // multiple processes before anything else touches it. WAL is persisted in
+    // the file, so this also upgrades existing rollback-journal databases in
+    // place. Runs before secureStorage so the new -wal/-shm sidecars get 0600.
+    this.configureConcurrency(dbPath);
+
     // SECURITY (#235): the data directory and DB file hold plaintext metadata
     // (cached subjects/senders) and the encryption key — all owner-only data at
     // rest. The DB file is created at the process umask (often 0644), so tighten
@@ -73,6 +85,32 @@ export class DatabaseService {
     this.initializeSchema();
 
     console.error('[DatabaseService] Initialized at:', dbPath);
+  }
+
+  /** How long a write waits on a lock held by another process (#290). */
+  private static readonly BUSY_TIMEOUT_MS = 5000;
+
+  /**
+   * #290: make the connection safe for several processes sharing one file.
+   * busy_timeout goes first so the WAL switch itself waits out a briefly held
+   * lock. WAL lets readers and a writer proceed together; synchronous=NORMAL is
+   * SQLite's recommended durability level under WAL. The switch needs a moment
+   * of exclusive access — if another process refuses it, keep running on the
+   * current journal mode and try again on the next startup.
+   */
+  private configureConcurrency(dbPath: string): void {
+    this.db.exec(`PRAGMA busy_timeout = ${DatabaseService.BUSY_TIMEOUT_MS}`);
+    try {
+      const row = this.db.prepare('PRAGMA journal_mode = WAL').get() as { journal_mode?: string } | undefined;
+      const mode = row?.journal_mode;
+      if (mode === 'wal') {
+        this.db.exec('PRAGMA synchronous = NORMAL');
+      } else if (mode !== 'memory') {
+        console.error(`[DatabaseService] WAL not enabled (journal_mode=${mode}) for ${dbPath}; will retry next startup`);
+      }
+    } catch (e: any) {
+      console.error(`[DatabaseService] WAL switch deferred for ${dbPath}: ${e?.message ?? e}`);
+    }
   }
 
   /**

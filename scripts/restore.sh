@@ -4,11 +4,16 @@
 # Author: Colin Bitterfield
 # Email: colin.bitterfield@templeofepiphany.com
 # Date Created: 2026-04-10
-# Date Updated: 2026-04-17
-# Version: 1.1.0
+# Date Updated: 2026-09-12
+# Version: 1.2.0
 #
 # Restores ~/.imap-mcp/ from a backup zip created by backup.sh.
 # Stops the service before restore and restarts it after.
+#
+# Changelog:
+#   1.2.0 (2026-09-12): Remove stale data.db-wal / data.db-shm before restoring
+#                       so an old WAL is never replayed onto the backup (#290).
+#   1.1.0 (2026-04-17): Encrypted-zip password prompt.
 #
 # Usage:
 #   ./scripts/restore.sh /path/to/backup.zip
@@ -85,7 +90,9 @@ fi
 echo "Restoring files..."
 mkdir -p "$DATA_DIR"
 
-rm -f "$DATA_DIR/data.db" "$DATA_DIR/.encryption-key"
+# WAL mode (#290): a leftover -wal/-shm from the old database would be replayed
+# onto the restored file and corrupt it, so remove the sidecars with it.
+rm -f "$DATA_DIR/data.db" "$DATA_DIR/data.db-wal" "$DATA_DIR/data.db-shm" "$DATA_DIR/.encryption-key"
 
 [ -f "$TMP/data.db" ]          && cp -p "$TMP/data.db"          "$DATA_DIR/data.db"          && chmod 600 "$DATA_DIR/data.db"
 [ -f "$TMP/.encryption-key" ]  && cp -p "$TMP/.encryption-key"  "$DATA_DIR/.encryption-key"  && chmod 600 "$DATA_DIR/.encryption-key"

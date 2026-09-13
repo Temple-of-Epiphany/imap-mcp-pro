@@ -5,6 +5,17 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.34.0] - 2026-09-12
+
+### Fixed
+- **Two servers on one database could fail writes with `database is locked`** (#290) — Claude Desktop starts a separate IMAP MCP Pro process for each host that uses the extension (the Desktop chat client and the Cowork bridge), all against `~/.imap-mcp/data.db`. The database was opened with SQLite defaults (rollback journal, no busy timeout), so a write from one process failed immediately while the other held a lock. `DatabaseService` now sets `busy_timeout = 5000`, `journal_mode = WAL`, and `synchronous = NORMAL` on every open. WAL is stored in the file, so **existing databases are upgraded in place on first start** and new databases are created in WAL mode. If another process refuses the switch, startup logs it and retries next time. The `-wal` / `-shm` sidecars are created owner-only (0600, #235 parity).
+
+### Changed
+- **`scripts/backup.sh` 1.2.0** takes a consistent snapshot with `sqlite3 .backup` instead of zipping the live `data.db`, so writes still in the WAL are included. Requires the `sqlite3` CLI.
+- **`scripts/restore.sh` 1.2.0** removes stale `data.db-wal` / `data.db-shm` before restoring so an old WAL is never replayed onto the backup.
+- **macOS menu bar app (Preferences → Database) Backup/Restore** made WAL-safe the same way: Backup snapshots `data.db` with `/usr/bin/sqlite3 .backup` and no longer copies the live `-wal` / `-shm` / `.instance.lock`; Restore clears stale sidecars first.
+- **Docs:** README backup section and `docs/SPECIFICATION.md` (rollback and backup-strategy commands) now use `sqlite3 .backup` instead of `cp data.db`.
+
 ## [2.33.0] - 2026-07-12
 
 ### Fixed
