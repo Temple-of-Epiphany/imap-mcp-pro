@@ -1,6 +1,194 @@
-# CLAUDE.md
+# CLAUDE.md — Project Instructions
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+> **Auto-generated** by the `github-operations` skill on 2026-10-19.
+> Regenerate with: `gh-skill generate-project-instructions --refresh`
+> Source: `~/.claude/skills/github-operations/scripts/generate-project-instructions.sh`
+
+**Project:** Temple-of-Epiphany/imap-mcp-pro
+**Skill version:** github-operations v3.11.0
+**Target client:** both
+
+---
+
+## Skill bindings
+
+This project delegates GitHub-related operations to the `github-operations`
+skill. Trigger phrases that invoke it: any mention of "github" (any case),
+any `git` subcommand, any `gh` subcommand. The skill enforces 26 Hard
+Rules — see `~/.claude/skills/github-operations/SKILL.md` for the full
+list. The most load-bearing for daily work:
+
+- **Hard Rule 7** — PR-first by default; commits go through worktrees + branches
+- **Hard Rule 11** — 3rd-party GitHub Actions must be SHA-pinned
+- **Hard Rule 12** — no `.env` in CI; secrets via `${{ secrets.* }}`
+- **Hard Rule 18** — never `git push --force`; use `--force-with-lease`
+- **Hard Rule 26** — every code change starts with a GitHub issue (see below)
+
+---
+
+## Hard Rule 26: Issue-required workflow
+
+**Issue mode:** every code change
+
+**Every code change starts with a GitHub issue.** No exceptions for
+size or scope. The workflow:
+
+1. User asks for a code change.
+2. Claude creates a GitHub issue describing the request (`gh issue create
+   --body-file` per Hard Rule 1).
+3. Claude opens a worktree + branch via
+   `~/.claude/skills/github-operations/scripts/worktree-new.sh <issue#>`.
+4. While work proceeds, Claude posts progress comments on the issue
+   (Started → Progress → Resolution per the skill's Issue Lifecycle pattern).
+5. PR title and body reference the issue (`Closes #N`).
+6. After merge, the issue auto-closes; Claude posts the final Resolution
+   comment with file list and verification.
+
+If the user asks for code without an issue, Claude **creates the issue
+first** rather than starting work directly.
+
+---
+
+## NIST 800-53r5 Moderate baseline
+
+**Status:** applied
+
+This repo is audited against the NIST 800-53r5 Moderate baseline. The
+audit is in `~/.claude/skills/github-operations/scripts/nist-audit.sh`
+and runs automatically on first-access per session. Controls covered:
+
+| Control | Description |
+|---|---|
+| AC-3, AC-6 | Access enforcement, least privilege (branch protection, admin count) |
+| CM-2, CM-3, CM-6 | CODEOWNERS / SECURITY.md / CHANGELOG.md present, PR review required, secret scanning enabled |
+| IA-2 | Org-wide 2FA |
+| RA-5, SI-2 | Dependabot alerts + security updates |
+| SC-8, SC-12 | HTTPS-only, optional signed commits |
+| SI-3 | CodeQL/Semgrep/Snyk SAST workflow present |
+| SI-7 | All workflow actions SHA-pinned |
+| SA-15 | CHANGELOG.md with release entries |
+
+Failing controls must be remediated via `nist-remediate.sh` or
+explicitly waived in `~/.claude/github-operations/config.yaml` under
+`repos."Temple-of-Epiphany/imap-mcp-pro".nist_audit.waived_controls` with a reason.
+
+**Credential exposure (CM-6):** local gitleaks pre-commit hook + history scan (gitleaks-scan.sh); native secret scanning where the plan allows
+
+---
+
+## Engineering wiki
+
+**Status:** maintained
+
+**Wiki:** https://github.com/Temple-of-Epiphany/imap-mcp-pro/wiki
+
+The `engineering-wiki` skill governs documentation for this project. On
+every PR that changes documented surface area (API contracts, schema,
+naming, runbooks, architecture), Claude opens a companion wiki-update
+issue before merge per Hard Rule 24. Wiki check scope:
+
+- Data formats / identifiers — IDs, slugs, status enums
+- API contracts — endpoints, request/response fields
+- Schema / database — tables, columns, indexes, constraints
+- Auth / security — roles, groups, permissions, token behavior
+- Infrastructure / deploy — config, monitoring, deploy steps
+- Naming conventions — new names/labels/patterns
+- Architecture decisions — choices others should know
+
+Use `wiki-check.sh --create-update-issue --pr <N>` to open the companion
+issue.
+
+---
+
+## Static analysis & secret scanning (SAST)
+
+**Tool in use:** Aikido
+
+**Aikido** is the SAST tool of record for this project. It runs via the
+Aikido MCP server (`mcp__plugin_aikido-mcp__aikido_full_scan`).
+
+Workflow:
+1. After Claude generates, adds, or modifies any code file, it MUST run
+   `aikido_full_scan` on the changed paths before committing.
+2. If Aikido reports SAST or secret findings, Claude fixes them and
+   re-scans before opening the PR.
+3. The scan result is posted as a comment on the issue.
+
+If the MCP server is unavailable, fall back to:
+- `gitleaks-scan.sh --mode staged` for credentials
+- Aikido CLI: `aikido scan` (if installed)
+
+See the `aikido:scan` skill for invocation patterns.
+
+---
+
+## Library maintenance
+
+**Cadence:** monthly outdated sweep + Dependabot
+
+On the first session of each calendar month, Claude runs the
+language-appropriate outdated check before any new work:
+
+| Language | Command |
+|---|---|
+| Node.js | `npm outdated && npm audit` |
+| Python | `pip list --outdated && pip-audit` |
+| Rust | `cargo outdated && cargo audit` |
+| Ruby | `bundle outdated && bundle-audit check` |
+| Go | `go list -m -u all && govulncheck ./...` |
+
+Findings produce one issue per major version drift, labeled
+`dependencies` and `p2`. Dependabot handles automated security bumps
+(NIST SI-2); this manual sweep catches abandoned/unmaintained libraries.
+
+**Maintenance signals to flag:** last commit >12 months ago, no
+releases >18 months, archived repo, deprecated notice in README.
+
+---
+
+## Secrets
+
+- All secrets via GitHub org/repo/environment secrets (Hard Rule 12)
+- Segregated by environment: `development` / `staging` / `production` (Hard Rule 13)
+- No `.env` files committed; only `.env.example` with placeholders
+- For meta-repos, secrets must be **org-level** (Hard Rule 23)
+
+---
+
+## Trigger phrases recap
+
+The skill activates on any of these — Claude does not need to be told
+explicitly to use it:
+
+- Any mention of `github` (any casing)
+- Any `git` subcommand: `clone`, `push`, `pull`, `commit`, `checkout`,
+  `status`, `log`, `merge`, `rebase`, `diff`, `stash`, `branch`,
+  `worktree`, `reflog`
+- Any `gh` subcommand: `issue`, `pr`, `repo`, `release`, `secret`,
+  `workflow`, `run`, `auth`, `label`, `project`, `api`
+
+For interactive logins (e.g. `gh auth login`, `gcloud auth login`),
+type `! <command>` in the prompt — output lands in the conversation.
+
+---
+
+## Re-run the project setup
+
+If any answer changes (wiki added, NIST opt-in flipped, SAST tool
+swapped):
+
+```bash
+~/.claude/skills/github-operations/scripts/generate-project-instructions.sh --refresh
+```
+
+This re-prompts and rewrites this file. The previous version is backed
+up to `CLAUDE.md.bak` (one backup retained per project preferences).
+
+---
+
+# Project Guidance (IMAP MCP Pro)
+
+This section provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 

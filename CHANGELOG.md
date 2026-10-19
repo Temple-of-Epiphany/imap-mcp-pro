@@ -5,6 +5,11 @@ All notable changes to IMAP MCP Pro will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **`CLAUDE.md` now carries the `github-operations` skill binding** (#295) — first-access cascade answers recorded (issue mode `all`, NIST Moderate audit, engineering wiki tracked, Aikido SAST, monthly library check). The existing project guidance (architecture, RFC 9051 compliance status, constraints) is unchanged below the new section. Added `CLAUDE_DESKTOP_INSTRUCTIONS.md` as the paste excerpt for Claude Desktop projects.
+
 ## [2.34.0] - 2026-09-12
 
 ### Fixed
