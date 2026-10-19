@@ -36,6 +36,7 @@
         "CLAUDE_DESKTOP_EXTENSION": "true",
         "IMAP_MCP_DATABASE_PATH": "${user_config.database_path}/data.db",
         "IMAP_MCP_LOG_LEVEL": "${user_config.log_level}",
+        "IMAP_MCP_TOOL_PROFILE": "${user_config.tool_profile}",
         "IMAP_MCP_ALLOWED_ATTACHMENT_DIRS": "${user_config.allowed_attachment_dirs}",
         "IMAP_MCP_ALLOWED_EXPORT_DIRS": "${user_config.allowed_export_dirs}",
         "IMAP_MCP_ENCRYPTION_KEY": "${user_config.encryption_key}",
@@ -86,6 +87,13 @@
       "description": "Server log verbosity. One of: DEBUG, INFO, WARNING, ERROR. Logs are captured by Claude Desktop at ~/Library/Logs/Claude/mcp-server-imap-mcp-pro.log (macOS) or %APPDATA%\\Claude\\logs\\ (Windows).",
       "default": "INFO",
       "required": true
+    },
+    "tool_profile": {
+      "type": "string",
+      "title": "Tool Profile",
+      "description": "Which MCP tools the server exposes. \"full\" (default) registers every tool (~130). \"core\" registers only the everyday subset (~29: list accounts, search/read, send/reply/forward, folders, mark/move/delete, discovery) for hosts that cannot handle a large tool surface, such as a Cowork session. imap_list_tools reports the active profile and the hidden tools. Restart Claude Desktop after changing.",
+      "default": "full",
+      "required": false
     },
     "max_attachment_size_bytes": {
       "type": "number",
