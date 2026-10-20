@@ -17,13 +17,14 @@
  */
 
 import nodemailer from 'nodemailer';
+import type { Transporter, SendMailOptions } from 'nodemailer';
 // MailComposer compiles the full MIME we hand to IMAP APPEND. The default
 // `transporter.sendMail` path strips Bcc from the DATA payload per RFC 5322
 // §3.6.3 — we want Bcc preserved in the Sent folder copy.
-import MailComposer from 'nodemailer/lib/mail-composer/index.js';
+import MailComposer from 'nodemailer/lib/mail-composer';
 // Low-level SMTP for the diagnostic tool — gives us greeting, capabilities,
 // and TLS info that the high-level Transport hides.
-import SMTPConnection from 'nodemailer/lib/smtp-connection/index.js';
+import SMTPConnection from 'nodemailer/lib/smtp-connection';
 import { ImapAccount, EmailComposer, SmtpConfig } from '../types/index.js';
 import { humanBytes } from '../utils/human-bytes.js';
 import {
@@ -125,7 +126,7 @@ const DEFAULT_RETRY: Required<RetryOptions> = {
 };
 
 export class SmtpService {
-  private transporters: Map<string, nodemailer.Transporter> = new Map();
+  private transporters: Map<string, Transporter> = new Map();
   private metrics: Map<string, SmtpAccountMetrics> = new Map();
   // Per-account EHLO SIZE limit (bytes, RFC 1870), captured by testSmtp. Used by
   // the SIZE-aware pre-send guard (#191) to fail fast on oversized messages.
@@ -140,7 +141,7 @@ export class SmtpService {
 
   // ---------- transport / pool ----------
 
-  async createTransporter(account: ImapAccount): Promise<nodemailer.Transporter> {
+  async createTransporter(account: ImapAccount): Promise<Transporter> {
     const cached = this.transporters.get(account.id);
     if (cached) return cached;
 
@@ -300,7 +301,7 @@ export class SmtpService {
       throw e;
     }
 
-    const mailOptions: nodemailer.SendMailOptions = {
+    const mailOptions: SendMailOptions = {
       from: email.from || account.user,
       to: email.to,
       cc: email.cc,
