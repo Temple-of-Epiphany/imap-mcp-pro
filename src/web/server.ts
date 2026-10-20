@@ -359,6 +359,71 @@ export class WebUIServer {
     });
 
     // Remove account
+    // Account login status. Registered BEFORE the /api/accounts/:id routes:
+    // Express would otherwise match this URL with id = "status" (#329).
+    this.app.get('/api/accounts/status', async (req, res) => {
+      try {
+        // #329: this.defaultUserId is the user's UUID; MCP_USER_ID is a username.
+        const accounts = this.db.listDecryptedAccountsForUser(this.defaultUserId);
+        const statusResults = [];
+
+        for (const dbAccount of accounts) {
+          const imapAccount: ImapAccount = {
+            id: dbAccount.account_id,
+            name: dbAccount.name,
+            host: dbAccount.host,
+            port: dbAccount.port,
+            user: dbAccount.username,
+            password: dbAccount.password,
+            tls: dbAccount.tls
+          };
+
+          let status = 'disconnected';
+          let error = null;
+          let connectionState = null;
+
+          // Check if account has an active connection
+          const metadata = (this.imapService as any).connectionMetadata.get(dbAccount.account_id);
+          if (metadata) {
+            connectionState = metadata.state;
+
+            // Check circuit breaker status
+            if (metadata.circuitBreaker) {
+              const cb = metadata.circuitBreaker;
+              if (cb.state === 'OPEN') {
+                status = 'circuit_breaker_open';
+                error = (cb as any).lastFailureReason || 'Too many failures - circuit breaker opened';
+              } else if (cb.state === 'HALF_OPEN') {
+                status = 'recovering';
+              } else if (metadata.state === 'connected') {
+                status = 'connected';
+              } else if (metadata.state === 'error') {
+                status = 'error';
+                error = (cb as any).lastFailureReason || 'Connection error';
+              }
+            }
+          }
+
+          statusResults.push({
+            id: dbAccount.account_id,
+            name: dbAccount.name,
+            email: dbAccount.username,
+            host: dbAccount.host,
+            status: status,
+            connectionState: connectionState,
+            error: error
+          });
+        }
+
+        res.json({ success: true, accounts: statusResults });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to check account status'
+        });
+      }
+    });
+
     this.app.delete('/api/accounts/:id', async (req, res) => {
       try {
         await this.imapService.disconnect(req.params.id);
@@ -569,69 +634,6 @@ export class WebUIServer {
     });
 
     // Check login status for all accounts
-    this.app.get('/api/accounts/status', async (req, res) => {
-      try {
-        const userId = process.env.MCP_USER_ID || 'default';
-        const accounts = this.db.listDecryptedAccountsForUser(userId);
-        const statusResults = [];
-
-        for (const dbAccount of accounts) {
-          const imapAccount: ImapAccount = {
-            id: dbAccount.account_id,
-            name: dbAccount.name,
-            host: dbAccount.host,
-            port: dbAccount.port,
-            user: dbAccount.username,
-            password: dbAccount.password,
-            tls: dbAccount.tls
-          };
-
-          let status = 'disconnected';
-          let error = null;
-          let connectionState = null;
-
-          // Check if account has an active connection
-          const metadata = (this.imapService as any).connectionMetadata.get(dbAccount.account_id);
-          if (metadata) {
-            connectionState = metadata.state;
-
-            // Check circuit breaker status
-            if (metadata.circuitBreaker) {
-              const cb = metadata.circuitBreaker;
-              if (cb.state === 'OPEN') {
-                status = 'circuit_breaker_open';
-                error = (cb as any).lastFailureReason || 'Too many failures - circuit breaker opened';
-              } else if (cb.state === 'HALF_OPEN') {
-                status = 'recovering';
-              } else if (metadata.state === 'connected') {
-                status = 'connected';
-              } else if (metadata.state === 'error') {
-                status = 'error';
-                error = (cb as any).lastFailureReason || 'Connection error';
-              }
-            }
-          }
-
-          statusResults.push({
-            id: dbAccount.account_id,
-            name: dbAccount.name,
-            email: dbAccount.username,
-            host: dbAccount.host,
-            status: status,
-            connectionState: connectionState,
-            error: error
-          });
-        }
-
-        res.json({ success: true, accounts: statusResults });
-      } catch (error) {
-        res.status(500).json({
-          success: false,
-          error: error instanceof Error ? error.message : 'Failed to check account status'
-        });
-      }
-    });
-
     // Get UserCheck API keys for user
     this.app.get('/api/usercheck/keys', (req, res) => {
       try {
@@ -919,11 +921,10 @@ export class WebUIServer {
     // Get categories for user (optionally filtered by account)
     this.app.get('/api/categories', (req, res) => {
       try {
-        const userId = process.env.MCP_USER_ID || 'default';
         const { accountId } = req.query;
 
         const categories = this.db.listCategoriesForUser(
-          userId,
+          this.defaultUserId, // #329: UUID, not the MCP_USER_ID username
           accountId as string | undefined
         );
 
