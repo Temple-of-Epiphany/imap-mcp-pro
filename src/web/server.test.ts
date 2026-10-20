@@ -197,3 +197,34 @@ describe('WebUIServer request hardening (#298)', () => {
     expect(csp).toContain("object-src 'none'");
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// #329 — /api/accounts/status must not be shadowed by /api/accounts/:id
+// ---------------------------------------------------------------------------
+describe('GET /api/accounts/status (#329)', () => {
+  let server: http.Server; let base: string;
+  const imap: any = { connectionMetadata: new Map() };
+  beforeAll(async () => {
+    const ui = new WebUIServer({ port: 0, db: makeDb(), imapService: imap });
+    server = http.createServer((ui as any).app);
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+  afterAll(async () => { await new Promise<void>((r) => server.close(() => r())); });
+
+  it('returns 200 with an accounts array instead of the :id route\'s 404', async () => {
+    const r = await fetch(`${base}/api/accounts/status`);
+    expect(r.status).toBe(200);
+    const body = await r.json();
+    expect(body.success).toBe(true);
+    expect(Array.isArray(body.accounts)).toBe(true);
+  });
+
+  it('lists the accounts owned by the Web UI user (looked up by user id, not username)', async () => {
+    const body = await (await fetch(`${base}/api/accounts/status`)).json();
+    const emails = body.accounts.map((a: any) => a.email);
+    expect(emails).toContain('me@x.com'); // seeded by makeDb for the default user
+    expect(body.accounts.every((a: any) => a.status === 'disconnected')).toBe(true);
+  });
+});
