@@ -42,28 +42,30 @@ on:
         default: 'false'
         type: boolean
 
-permissions:
-  contents: write  # needed to upload release assets
+permissions: {}   # least privilege (#301); the job grants contents: write for release upload
 
 jobs:
   build-pkg:
     name: Build, Sign, Notarize, DMG
     runs-on: macos-latest
+    permissions:
+      contents: write  # upload release assets
 
     steps:
       # ---------------------------------------------------------------
       # Checkout repository
       # ---------------------------------------------------------------
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
         with:
           fetch-depth: 0  # Full history for version tags
+          persist-credentials: false
 
       # ---------------------------------------------------------------
       # Install Node.js (for TypeScript build step)
       # ---------------------------------------------------------------
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
         with:
           node-version: '22'
           cache: 'npm'
@@ -159,7 +161,7 @@ jobs:
       # Upload artifacts for download
       # ---------------------------------------------------------------
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: imap-mcp-pro-macos
           path: |
