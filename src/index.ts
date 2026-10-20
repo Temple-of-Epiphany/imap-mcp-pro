@@ -325,8 +325,9 @@ logEvent('[startup]', { msg: 'IMAP MCP Server ready' });
 // ============================================================================
 
 async function buildToolsManifest(): Promise<unknown> {
-  // Lazily import zod-to-json-schema to avoid pulling it into hot startup.
-  const { zodToJsonSchema } = await import('zod-to-json-schema');
+  // Zod 4 ships its own JSON Schema emitter (#115); lazily import zod here
+  // so the manifest path stays off the hot startup path.
+  const { z } = await import('zod');
 
   // Construct the same server object but never call server.connect().
   const tmpServer = new McpServer(
@@ -381,11 +382,9 @@ async function buildToolsManifest(): Promise<unknown> {
       try {
         const shape = t?.inputSchema?.shape;
         if (shape) {
-          const { z } = await import('zod');
-          const wrapped = z.object(shape);
-          inputSchemaJson = (zodToJsonSchema as any)(wrapped, { $refStrategy: 'none' });
+          inputSchemaJson = z.toJSONSchema(z.object(shape), { io: 'input', unrepresentable: 'any' });
         } else if (t?.inputSchema) {
-          inputSchemaJson = (zodToJsonSchema as any)(t.inputSchema, { $refStrategy: 'none' });
+          inputSchemaJson = z.toJSONSchema(t.inputSchema, { io: 'input', unrepresentable: 'any' });
         }
       } catch (e: any) {
         inputSchemaJson = { type: 'object', _conversion_error: e?.message };
