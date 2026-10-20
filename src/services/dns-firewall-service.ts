@@ -10,7 +10,7 @@
  */
 
 import { DatabaseService } from './database-service.js';
-import https from 'https';
+import { dohQuery, isDohError } from '../utils/doh-client.js';
 
 export interface DomainValidationResult {
   domain: string;
@@ -20,6 +20,8 @@ export interface DomainValidationResult {
   timestamp: Date;
   responseTime: number;
   cached: boolean;
+  /** Set when the provider could not be queried; the result then fails open (isSafe=true) and is NOT cached. */
+  error?: string;
 }
 
 export interface MessageScanResult {
@@ -84,13 +86,28 @@ export class DnsFirewallService {
     }
 
     // Query DNS firewall provider
-    const isSafe = await this.queryProvider(provider.endpoint, domain, provider.timeout);
+    const answer = await this.queryProvider(provider.endpoint, domain, provider.timeout);
     const responseTime = Date.now() - startTime;
+
+    if (typeof answer !== 'boolean') {
+      // Provider unreachable: fail open (no false positives) but say so and do
+      // NOT cache, so the next check retries instead of serving "safe" for 24h.
+      return {
+        domain,
+        isSafe: true,
+        isBlocked: false,
+        provider: provider.providerId,
+        timestamp: new Date(),
+        responseTime,
+        cached: false,
+        error: answer.error,
+      };
+    }
 
     const result: DomainValidationResult = {
       domain,
-      isSafe,
-      isBlocked: !isSafe,
+      isSafe: answer,
+      isBlocked: !answer,
       provider: provider.providerId,
       timestamp: new Date(),
       responseTime,
@@ -178,32 +195,12 @@ export class DnsFirewallService {
     timeout = this.DEFAULT_TIMEOUT_MS
   ): Promise<{ status: number; answers: number } | null> {
     const endpoint = this.getProvider().endpoint;
-    return new Promise((resolve) => {
-      const req = https.request({
-        hostname: endpoint,
-        path: `/dns-query?name=${encodeURIComponent(domain)}&type=A`,
-        method: 'GET',
-        headers: { 'Accept': 'application/dns-json' },
-        timeout,
-      }, (res) => {
-        let data = '';
-        res.on('data', (chunk) => { data += chunk; });
-        res.on('end', () => {
-          try {
-            const response = JSON.parse(data);
-            resolve({
-              status: typeof response.Status === 'number' ? response.Status : -1,
-              answers: Array.isArray(response.Answer) ? response.Answer.length : 0,
-            });
-          } catch {
-            resolve(null);
-          }
-        });
-      });
-      req.on('error', () => resolve(null));
-      req.on('timeout', () => { req.destroy(); resolve(null); });
-      req.end();
-    });
+    const r = await dohQuery(domain, { endpoint, timeoutMs: timeout });
+    if (isDohError(r)) {
+      console.error(`[DnsFirewall] DoH lookup of ${domain} via ${endpoint} failed: ${r.error}`);
+      return null;
+    }
+    return r;
   }
 
   /**
@@ -265,60 +262,19 @@ export class DnsFirewallService {
   }
 
   /**
-   * Query DNS-over-HTTPS provider
-   * Returns true if domain is safe, false if blocked
+   * Query the DNS-over-HTTPS provider (RFC 8484 wire format over HTTP/2, #283).
+   * Returns true if the domain resolves (safe), false if the resolver returned
+   * NXDOMAIN / no answers (blocked), or a string describing why the provider
+   * could not be queried. The caller decides the fail-open policy.
    */
-  private async queryProvider(endpoint: string, domain: string, timeout: number): Promise<boolean> {
-    return new Promise((resolve) => {
-      const options = {
-        hostname: endpoint,
-        path: `/dns-query?name=${encodeURIComponent(domain)}&type=A`,
-        method: 'GET',
-        headers: {
-          'Accept': 'application/dns-json'
-        },
-        timeout
-      };
-
-      const req = https.request(options, (res) => {
-        let data = '';
-
-        res.on('data', (chunk) => {
-          data += chunk;
-        });
-
-        res.on('end', () => {
-          try {
-            const response = JSON.parse(data);
-
-            // Quad9 blocks malicious domains by returning NXDOMAIN or empty answers
-            // If we get a valid response with Answer section, domain is safe
-            const isSafe = response.Status === 0 && response.Answer && response.Answer.length > 0;
-
-            resolve(isSafe);
-          } catch (error) {
-            console.error(`[DnsFirewall] Failed to parse Quad9 response for ${domain}:`, error);
-            // On error, assume safe (fail open to avoid false positives)
-            resolve(true);
-          }
-        });
-      });
-
-      req.on('error', (error) => {
-        console.error(`[DnsFirewall] Quad9 query failed for ${domain}:`, error.message);
-        // On error, assume safe (fail open)
-        resolve(true);
-      });
-
-      req.on('timeout', () => {
-        console.error(`[DnsFirewall] Quad9 query timeout for ${domain}`);
-        req.destroy();
-        // On timeout, assume safe
-        resolve(true);
-      });
-
-      req.end();
-    });
+  private async queryProvider(endpoint: string, domain: string, timeout: number): Promise<boolean | { error: string }> {
+    const r = await dohQuery(domain, { endpoint, timeoutMs: timeout });
+    if (isDohError(r)) {
+      console.error(`[DnsFirewall] DoH query failed for ${domain} via ${endpoint}: ${r.error}`);
+      return { error: r.error };
+    }
+    // Quad9 (and Cloudflare/Google malware filters) answer blocked names with NXDOMAIN or an empty answer section.
+    return r.status === 0 && r.answers > 0;
   }
 
   /**
