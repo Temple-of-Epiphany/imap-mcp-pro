@@ -4,6 +4,15 @@
 // Version: 2.13.0
 
 // View Management
+// Escape a server- or user-derived value before it is interpolated into an
+// innerHTML template (#299). Everything the UI shows from the API (error
+// strings from mail servers, account names, hosts, keywords) goes through this.
+function esc(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function hideAllViews() {
   document.getElementById('dashboardView').classList.add('hidden');
   document.getElementById('profileView').classList.add('hidden');
@@ -438,21 +447,21 @@ async function loadDnsProviders() {
               <div class="mb-4">
                 <div class="flex items-center justify-between mb-2">
                   <div class="flex items-center">
-                    <h5 class="font-semibold text-lg">${provider.providerName}</h5>
+                    <h5 class="font-semibold text-lg">${esc(provider.providerName)}</h5>
                     ${statusBadge}
                     ${defaultBadge}
                   </div>
                   <div class="flex gap-2">
-                    <button onclick="testDnsProvider('${provider.providerId}')" class="text-gray-600 hover:text-gray-800 text-sm">
+                    <button onclick="testDnsProvider('${esc(provider.providerId)}')" class="text-gray-600 hover:text-gray-800 text-sm">
                       Test
                     </button>
-                    <button onclick="editDnsProvider('${provider.providerId}')" class="text-blue-600 hover:text-blue-800 text-sm">
+                    <button onclick="editDnsProvider('${esc(provider.providerId)}')" class="text-blue-600 hover:text-blue-800 text-sm">
                       Edit
                     </button>
                   </div>
                 </div>
-                <p class="text-xs text-gray-500">Type: ${provider.providerType}</p>
-                <p class="text-xs text-gray-500">Endpoint: ${provider.apiEndpoint}</p>
+                <p class="text-xs text-gray-500">Type: ${esc(provider.providerType)}</p>
+                <p class="text-xs text-gray-500">Endpoint: ${esc(provider.apiEndpoint)}</p>
                 ${provider.apiKey ? '<p class="text-xs text-gray-500">API Key: ••••••••</p>' : ''}
               </div>
 
@@ -461,7 +470,7 @@ async function loadDnsProviders() {
                   <label class="flex items-center cursor-pointer">
                     <input type="checkbox"
                       ${provider.isEnabled ? 'checked' : ''}
-                      onchange="toggleDnsProvider('${provider.providerId}', this.checked)"
+                      onchange="toggleDnsProvider('${esc(provider.providerId)}', this.checked)"
                       class="mr-2 cursor-pointer">
                     <span class="text-sm font-medium">Enabled</span>
                   </label>
@@ -472,7 +481,7 @@ async function loadDnsProviders() {
                   <label class="flex items-center cursor-pointer">
                     <input type="checkbox"
                       ${provider.isDefault ? 'checked' : ''}
-                      onchange="setDefaultDnsProvider('${provider.providerId}', this.checked)"
+                      onchange="setDefaultDnsProvider('${esc(provider.providerId)}', this.checked)"
                       class="mr-2 cursor-pointer">
                     <span class="text-sm font-medium">Default</span>
                   </label>
@@ -483,8 +492,8 @@ async function loadDnsProviders() {
                   <div class="flex items-center">
                     <label class="text-sm font-medium mr-2">Timeout:</label>
                     <input type="number"
-                      value="${provider.timeoutMs}"
-                      onchange="updateDnsProviderTimeout('${provider.providerId}', this.value)"
+                      value="${esc(provider.timeoutMs)}"
+                      onchange="updateDnsProviderTimeout('${esc(provider.providerId)}', this.value)"
                       class="w-20 px-2 py-1 border border-gray-300 rounded text-sm">
                     <span class="text-xs text-gray-500 ml-1">ms</span>
                   </div>
@@ -492,7 +501,7 @@ async function loadDnsProviders() {
                 </div>
               </div>
 
-              <div id="dns-test-result-${provider.providerId}" class="hidden mt-4 pt-4 border-t border-gray-200"></div>
+              <div id="dns-test-result-${esc(provider.providerId)}" class="hidden mt-4 pt-4 border-t border-gray-200"></div>
             </div>
           `;
         }).join('');
@@ -620,15 +629,15 @@ async function testDnsProvider(providerId) {
           </div>
           <p class="text-gray-700">Test domain: <span class="font-mono">google.com</span></p>
           ${result.blocked !== undefined ? `<p class="text-gray-700">Blocked: <span class="font-semibold ${result.blocked ? 'text-red-600' : 'text-green-600'}">${result.blocked ? 'Yes' : 'No'}</span></p>` : ''}
-          ${result.responseTime ? `<p class="text-gray-600">Response time: ${result.responseTime}ms</p>` : ''}
-          ${result.addresses ? `<p class="text-gray-600 mt-1">Resolved: ${result.addresses.join(', ')}</p>` : ''}
+          ${result.responseTime ? `<p class="text-gray-600">Response time: ${esc(result.responseTime)}ms</p>` : ''}
+          ${result.addresses ? `<p class="text-gray-600 mt-1">Resolved: ${esc(result.addresses.join(', '))}</p>` : ''}
         </div>
       `;
     } else {
       resultDiv.innerHTML = `
         <div class="bg-red-50 border border-red-200 rounded p-3 text-sm">
           <span class="text-red-600 font-semibold">✗ DNS Query Failed</span>
-          <p class="text-red-700 mt-1">${result.error || 'Unknown error'}</p>
+          <p class="text-red-700 mt-1">${esc(result.error || 'Unknown error')}</p>
         </div>
       `;
     }
@@ -636,7 +645,7 @@ async function testDnsProvider(providerId) {
     resultDiv.innerHTML = `
       <div class="bg-red-50 border border-red-200 rounded p-3 text-sm">
         <span class="text-red-600 font-semibold">✗ Test Failed</span>
-        <p class="text-red-700 mt-1">${error.message}</p>
+        <p class="text-red-700 mt-1">${esc(error.message)}</p>
       </div>
     `;
   }
@@ -672,9 +681,9 @@ async function loadUserCheckKeys() {
                     <h5 class="font-semibold">UserCheck API Key</h5>
                     ${statusBadge}
                   </div>
-                  <p class="text-xs text-gray-500 font-mono">Key: ${key.apiKey.substring(0, 10)}...${key.apiKey.substring(key.apiKey.length - 4)}</p>
+                  <p class="text-xs text-gray-500 font-mono">Key: ${esc(key.apiKey.substring(0, 10))}...${esc(key.apiKey.substring(key.apiKey.length - 4))}</p>
                   <div class="mt-2 text-xs text-gray-600">
-                    <p>Daily Usage: ${key.dailyUsage} / ${key.dailyLimit}</p>
+                    <p>Daily Usage: ${esc(key.dailyUsage)} / ${esc(key.dailyLimit)}</p>
                     ${key.lastUsed ? `<p>Last Used: ${new Date(key.lastUsed).toLocaleString()}</p>` : ''}
                   </div>
                 </div>
@@ -778,7 +787,7 @@ async function testUserCheckKey(keyId) {
           <div class="flex items-center mb-2">
             <span class="text-green-600 font-semibold">✓ UserCheck API Working</span>
           </div>
-          <p class="text-gray-700">Test email: <span class="font-mono">${testEmail}</span></p>
+          <p class="text-gray-700">Test email: <span class="font-mono">${esc(testEmail)}</span></p>
           ${result.result?.disposable !== undefined ? `<p class="text-gray-700">Disposable: <span class="font-semibold ${result.result.disposable ? 'text-red-600' : 'text-green-600'}">${result.result.disposable ? 'Yes' : 'No'}</span></p>` : ''}
           ${result.result?.blocklisted !== undefined ? `<p class="text-gray-700">Blocklisted: <span class="font-semibold ${result.result.blocklisted ? 'text-red-600' : 'text-green-600'}">${result.result.blocklisted ? 'Yes' : 'No'}</span></p>` : ''}
           <p class="text-gray-600 text-xs mt-2">API call successful - key is valid</p>
@@ -788,7 +797,7 @@ async function testUserCheckKey(keyId) {
       resultDiv.innerHTML = `
         <div class="bg-red-50 border border-red-200 rounded p-3 text-sm">
           <span class="text-red-600 font-semibold">✗ UserCheck API Failed</span>
-          <p class="text-red-700 mt-1">${result.error || 'Unknown error'}</p>
+          <p class="text-red-700 mt-1">${esc(result.error || 'Unknown error')}</p>
         </div>
       `;
     }
@@ -796,7 +805,7 @@ async function testUserCheckKey(keyId) {
     resultDiv.innerHTML = `
       <div class="bg-red-50 border border-red-200 rounded p-3 text-sm">
         <span class="text-red-600 font-semibold">✗ Test Failed</span>
-        <p class="text-red-700 mt-1">${error.message}</p>
+        <p class="text-red-700 mt-1">${esc(error.message)}</p>
       </div>
     `;
   }
@@ -812,7 +821,7 @@ async function loadCategoryAccounts() {
       const select = document.getElementById('categoryAccountSelect');
       select.innerHTML = '<option value="">Select an account...</option>' +
         result.accounts.map(acc =>
-          `<option value="${acc.id}">${acc.email}</option>`
+          `<option value="${esc(acc.id)}">${esc(acc.email)}</option>`
         ).join('');
     }
   } catch (error) {
@@ -842,7 +851,7 @@ async function loadCategories() {
             <div class="flex justify-between items-start mb-2">
               <div class="flex-1">
                 <div class="flex items-center gap-2 mb-1">
-                  <h5 class="font-semibold text-lg ${cat.enabled ? 'text-purple-900' : 'text-gray-500'}">${cat.categoryName}</h5>
+                  <h5 class="font-semibold text-lg ${cat.enabled ? 'text-purple-900' : 'text-gray-500'}">${esc(cat.categoryName)}</h5>
                   <span class="px-2 py-1 text-xs rounded ${cat.enabled ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'}">
                     ${cat.enabled ? 'Enabled' : 'Disabled'}
                   </span>
@@ -850,11 +859,11 @@ async function loadCategories() {
                 <div class="space-y-1 text-sm">
                   <p class="text-gray-700">
                     <i class="fas fa-tags mr-1"></i><strong>Keywords:</strong>
-                    <span class="text-gray-600">${cat.keywords}</span>
+                    <span class="text-gray-600">${esc(cat.keywords)}</span>
                   </p>
                   <p class="text-gray-700">
                     <i class="fas fa-folder mr-1"></i><strong>Folder:</strong>
-                    <span class="text-gray-600">${cat.targetFolder}</span>
+                    <span class="text-gray-600">${esc(cat.targetFolder)}</span>
                   </p>
                   ${cat.matchCount > 0 ? `
                     <p class="text-gray-600 text-xs">
@@ -1072,36 +1081,36 @@ async function loadAccountsList() {
 
     if (Array.isArray(accounts) && accounts.length > 0) {
       container.innerHTML = '<div class="space-y-2">' + accounts.map(acc => `
-        <div class="border border-gray-200 rounded-lg p-4" id="account-${acc.id}">
+        <div class="border border-gray-200 rounded-lg p-4" id="account-${esc(acc.id)}">
           <div class="flex justify-between items-start">
             <div>
-              <h5 class="font-semibold">${acc.user}</h5>
-              <p class="text-sm text-gray-500">Name: ${acc.name}</p>
-              <p class="text-sm text-gray-500">Host: ${acc.host}:${acc.port}</p>
+              <h5 class="font-semibold">${esc(acc.user)}</h5>
+              <p class="text-sm text-gray-500">Name: ${esc(acc.name)}</p>
+              <p class="text-sm text-gray-500">Host: ${esc(acc.host)}:${esc(acc.port)}</p>
               <p class="text-sm text-gray-500 flex items-center gap-2">
                 <span>Account ID:</span>
-                <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded select-all">${acc.id}</code>
-                <button type="button" onclick="copyWithFeedback(this, '${acc.id}')" title="Copy account ID"
+                <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded select-all">${esc(acc.id)}</code>
+                <button type="button" onclick="copyWithFeedback(this, '${esc(acc.id)}')" title="Copy account ID"
                         class="text-xs text-blue-600 hover:text-blue-800">Copy</button>
               </p>
               <span class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Configured</span>
             </div>
             <div class="flex gap-2">
-              <button onclick="editAccount('${acc.id}')" class="text-blue-600 hover:text-blue-800 text-sm">
+              <button onclick="editAccount('${esc(acc.id)}')" class="text-blue-600 hover:text-blue-800 text-sm">
                 Edit
               </button>
-              <button onclick="testSingleAccount('${acc.id}')" class="text-gray-600 hover:text-gray-800 text-sm">
+              <button onclick="testSingleAccount('${esc(acc.id)}')" class="text-gray-600 hover:text-gray-800 text-sm">
                 Test
               </button>
-              <button onclick="connectAccount('${acc.id}')" class="text-blue-600 hover:text-blue-800 text-sm">
+              <button onclick="connectAccount('${esc(acc.id)}')" class="text-blue-600 hover:text-blue-800 text-sm">
                 Connect
               </button>
-              <button onclick="deleteAccount('${acc.id}')" class="text-red-600 hover:text-red-800 text-sm">
+              <button onclick="deleteAccount('${esc(acc.id)}')" class="text-red-600 hover:text-red-800 text-sm">
                 Delete
               </button>
             </div>
           </div>
-          <div id="test-result-${acc.id}" class="hidden mt-3 text-sm"></div>
+          <div id="test-result-${esc(acc.id)}" class="hidden mt-3 text-sm"></div>
         </div>
       `).join('') + '</div>';
     } else {
@@ -1409,13 +1418,13 @@ async function testSingleAccount(accountId) {
       // Build error details with help text
       let errorDetails = '';
       if (testResults.error) {
-        errorDetails = `<div class="text-xs text-red-600 mt-2 whitespace-pre-line">${testResults.error}</div>`;
+        errorDetails = `<div class="text-xs text-red-600 mt-2 whitespace-pre-line">${esc(testResults.error)}</div>`;
       }
       if (testResults.imap?.error) {
-        errorDetails += `<div class="text-xs text-red-600 mt-2 whitespace-pre-line">IMAP: ${testResults.imap.error}</div>`;
+        errorDetails += `<div class="text-xs text-red-600 mt-2 whitespace-pre-line">IMAP: ${esc(testResults.imap.error)}</div>`;
       }
       if (testResults.smtp?.error) {
-        errorDetails += `<div class="text-xs text-red-600 mt-2 whitespace-pre-line">SMTP: ${testResults.smtp.error}</div>`;
+        errorDetails += `<div class="text-xs text-red-600 mt-2 whitespace-pre-line">SMTP: ${esc(testResults.smtp.error)}</div>`;
       }
 
       resultDiv.innerHTML = `
@@ -1424,9 +1433,9 @@ async function testSingleAccount(accountId) {
             <div>${imapStatus}</div>
             <div>${smtpStatus}</div>
           </div>
-          ${testResults.imap?.unreadCount !== undefined ? `<div class="text-xs text-gray-600 mt-1">📬 ${testResults.imap.unreadCount} unread emails</div>` : ''}
+          ${testResults.imap?.unreadCount !== undefined ? `<div class="text-xs text-gray-600 mt-1">📬 ${esc(testResults.imap.unreadCount)} unread emails</div>` : ''}
           ${errorDetails}
-          <div class="text-xs text-gray-500 mt-1">Test completed in ${testResults.totalTime}ms</div>
+          <div class="text-xs text-gray-500 mt-1">Test completed in ${esc(testResults.totalTime)}ms</div>
         </div>
       `;
     } else {
@@ -1435,10 +1444,10 @@ async function testSingleAccount(accountId) {
       if (result.help) {
         errorMessage += '\n\n' + result.help;
       }
-      resultDiv.innerHTML = `<div class="bg-red-50 text-red-600 rounded p-3 whitespace-pre-line">❌ ${errorMessage}</div>`;
+      resultDiv.innerHTML = `<div class="bg-red-50 text-red-600 rounded p-3 whitespace-pre-line">❌ ${esc(errorMessage)}</div>`;
     }
   } catch (error) {
-    resultDiv.innerHTML = `<div class="bg-red-50 text-red-600 rounded p-3">❌ ${error.message}</div>`;
+    resultDiv.innerHTML = `<div class="bg-red-50 text-red-600 rounded p-3">❌ ${esc(error.message)}</div>`;
   }
 }
 
@@ -1487,12 +1496,12 @@ async function checkAccountStatus() {
 
               return `
                 <div style="border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; margin-bottom: 12px;">
-                  <div style="font-weight: 600; margin-bottom: 4px;">${acc.email}</div>
-                  <div style="font-size: 14px; color: #666; margin-bottom: 4px;">${acc.host}</div>
+                  <div style="font-weight: 600; margin-bottom: 4px;">${esc(acc.email)}</div>
+                  <div style="font-size: 14px; color: #666; margin-bottom: 4px;">${esc(acc.host)}</div>
                   <div style="font-size: 14px; color: ${statusColor}; font-weight: 500;">
                     ${statusIcon} ${statusText}
                   </div>
-                  ${acc.error ? `<div style="font-size: 13px; color: #dc2626; margin-top: 8px; padding: 8px; background: #fef2f2; border-radius: 4px;">${acc.error}</div>` : ''}
+                  ${acc.error ? `<div style="font-size: 13px; color: #dc2626; margin-top: 8px; padding: 8px; background: #fef2f2; border-radius: 4px;">${esc(acc.error)}</div>` : ''}
                 </div>
               `;
             }).join('')}
