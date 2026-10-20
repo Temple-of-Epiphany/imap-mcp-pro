@@ -125,3 +125,75 @@ describe('WebUIServer /api routes', () => {
     expect(deleted).toEqual(['a1']);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// #298 — Host-header allowlist + hardening headers
+// ---------------------------------------------------------------------------
+describe('WebUIServer Host-header allowlist (#298)', () => {
+  it('isAllowedHost accepts loopback names with or without a port', () => {
+    for (const h of ['localhost', 'localhost:4500', '127.0.0.1', '127.0.0.1:65000', '[::1]', '[::1]:4500', 'LOCALHOST:4500']) {
+      expect(WebUIServer.isAllowedHost(h), h).toBe(true);
+    }
+  });
+
+  it('isAllowedHost rejects foreign, spoofed and missing hosts', () => {
+    for (const h of [undefined, '', 'evil.example', 'evil.example:4500', 'localhost.evil.example', '127.0.0.1.evil.example',
+                     '127.0.0.2', '0.0.0.0', '[::ffff:127.0.0.1]', 'localhost:4500:1', 'localhost/']) {
+      expect(WebUIServer.isAllowedHost(h), String(h)).toBe(false);
+    }
+  });
+});
+
+describe('WebUIServer request hardening (#298)', () => {
+  let server: http.Server;
+  let base: string;
+  let port: number;
+
+  beforeAll(async () => {
+    const imap: any = {};
+    const ui = new WebUIServer({ port: 0, db: makeDb(), imapService: imap });
+    server = http.createServer((ui as any).app);
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    port = (server.address() as AddressInfo).port;
+    base = `http://127.0.0.1:${port}`;
+  });
+  afterAll(async () => { await new Promise<void>((r) => server.close(() => r())); });
+
+  function raw(hostHeader: string, path = '/api/providers'): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }> {
+    return new Promise((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port, path, method: 'GET', headers: { Host: hostHeader }, setHost: false }, (res) => {
+        let body = ''; res.on('data', (c) => { body += c; });
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers, body }));
+      });
+      req.on('error', reject); req.end();
+    });
+  }
+
+  it('answers requests addressed to localhost', async () => {
+    const r = await raw(`localhost:${port}`);
+    expect(r.status).toBe(200);
+  });
+
+  it('refuses a foreign Host header with 403 before any route runs', async () => {
+    const r = await raw('attacker.example');
+    expect(r.status).toBe(403);
+    expect(JSON.parse(r.body)).toMatchObject({ success: false });
+    // a mutating route is refused the same way
+    const r2 = await raw('attacker.example:4500', '/api/service/port');
+    expect(r2.status).toBe(403);
+  });
+
+  it('sets hardening headers on every response', async () => {
+    const r = await raw(`127.0.0.1:${port}`);
+    expect(r.headers['x-frame-options']).toBe('DENY');
+    expect(r.headers['x-content-type-options']).toBe('nosniff');
+    expect(r.headers['referrer-policy']).toBe('no-referrer');
+    expect(r.headers['strict-transport-security']).toBeUndefined();
+    const csp = String(r.headers['content-security-policy']);
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).toContain('https://dns.quad9.net');
+    expect(csp).toContain('https://cdn.jsdelivr.net');
+    expect(csp).toContain("object-src 'none'");
+  });
+});

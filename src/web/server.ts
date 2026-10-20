@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import bodyParser from 'body-parser';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -93,7 +94,58 @@ export class WebUIServer {
     this.setupRoutes();
   }
 
+  /**
+   * Hosts a request may be addressed to. The server binds to 127.0.0.1, but a
+   * browser can still reach it with a foreign Host header (DNS rebinding: an
+   * attacker's hostname resolving to 127.0.0.1). Anything else is refused
+   * before any route runs. Exported for tests. (#298)
+   */
+  static isAllowedHost(hostHeader: string | undefined): boolean {
+    if (!hostHeader) return false;
+    const h = hostHeader.trim().toLowerCase();
+    // host[:port] for localhost / 127.0.0.1, or [::1][:port]
+    return /^(localhost|127\.0\.0\.1)(:\d{1,5})?$/.test(h) || /^\[::1\](:\d{1,5})?$/.test(h);
+  }
+
   private setupMiddleware(): void {
+    // SECURITY: Host-header allowlist — defeats DNS rebinding against the
+    // unauthenticated local API (#298). Must run before every other handler.
+    this.app.use((req, res, next) => {
+      if (WebUIServer.isAllowedHost(req.headers.host)) return next();
+      res.status(403).json({
+        success: false,
+        error: 'Forbidden: this server only answers requests addressed to localhost',
+      });
+    });
+
+    // SECURITY: Hardening headers via helmet (#298). The SPA uses inline
+    // event handlers and two CDN stylesheets (Tailwind, Font Awesome), and
+    // the DNS-firewall panel queries Quad9 DoH directly, so the CSP names
+    // exactly those. HSTS is off: the UI is plain http on loopback.
+    this.app.use(helmet({
+      contentSecurityPolicy: {
+        useDefaults: false,
+        directives: {
+          'default-src': ["'self'"],
+          'script-src': ["'self'", "'unsafe-inline'"],
+          'style-src': ["'self'", "'unsafe-inline'", 'https://cdn.jsdelivr.net', 'https://cdnjs.cloudflare.com'],
+          'font-src': ["'self'", 'https://cdnjs.cloudflare.com', 'data:'],
+          'img-src': ["'self'", 'data:'],
+          'connect-src': ["'self'", 'https://dns.quad9.net'],
+          'frame-ancestors': ["'none'"],
+          'base-uri': ["'self'"],
+          'form-action': ["'self'"],
+          'object-src': ["'none'"],
+        },
+      },
+      hsts: false,
+      crossOriginEmbedderPolicy: false,
+      crossOriginOpenerPolicy: { policy: 'same-origin' },
+      crossOriginResourcePolicy: { policy: 'same-origin' },
+      referrerPolicy: { policy: 'no-referrer' },
+      frameguard: { action: 'deny' },
+    }));
+
     // SECURITY: Restrict CORS to localhost only (Issue #24)
     this.app.use(cors({
       origin: (origin, callback) => {
