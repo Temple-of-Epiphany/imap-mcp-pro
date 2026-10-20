@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Web UI: Allow / Deny Lists tab** (#69) — view, add, edit (replace), delete, filter and count the per-user allow/deny entries that the MCP tools and the combined spam scan already use; import a CSV or a vCard `.vcf` (Apple Contacts export, addresses only); clear a list with confirmation. New routes `GET/POST /api/address-lists`, `DELETE /api/address-lists/:listType/:value`, `POST /api/address-lists/import` (10 MB body), `POST /api/address-lists/clear`, `GET /api/address-lists/check`.
+
+### Fixed
+- **Web UI category creation used the `MCP_USER_ID` username as the owner** (follow-up to #329) — `POST /api/categories` now uses the user id like the read path, so categories created in the Web UI show up in the list.
+
 ### Security
 - **MCP SDK advisories closed: `@modelcontextprotocol/sdk` 1.22 → 1.32.1 via the Zod v4 migration** (#115) — cross-client transport leak, DNS rebinding, ReDoS and OAuth advisories (GHSA-345p-7cg4-v4c7, GHSA-8r9q-7v3j-jr4g et al.) are fixed in SDK ≥ 1.32. Every SDK ≥ 1.23 crashed the TypeScript build under Zod v3; on Zod 4.6.7 the type check completes in 1.4 s. Code changes: nested config defaults use `.prefault({})`; JSON Schema for the tools manifest and `--print-config-schema` now comes from Zod 4's built-in `z.toJSONSchema()` (the `zod-to-json-schema` dependency is removed). `npm audit` reports **0 advisories**.
 

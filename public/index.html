@@ -121,6 +121,18 @@
                         <p class="text-gray-600 text-sm">Map categories to IMAP folders for filtering</p>
                     </div>
 
+                    <!-- Allow / Deny Lists Tile (#69) -->
+                    <div class="tile-card bg-white rounded-lg shadow-md p-6 border-2 border-transparent hover:border-teal-500" onclick="showAddressLists()">
+                        <div class="flex items-center mb-4">
+                            <div class="text-4xl mr-4">✅</div>
+                            <div>
+                                <h3 class="text-xl font-semibold text-gray-800">Allow / Deny Lists</h3>
+                                <p class="text-sm text-gray-500">Trusted and blocked senders</p>
+                            </div>
+                        </div>
+                        <p class="text-gray-600 text-sm">Senders and domains that always pass or always fail spam checks. Import from CSV or Apple Contacts (.vcf).</p>
+                    </div>
+
                     <!-- Claude Setup Tile -->
                     <div class="tile-card bg-white rounded-lg shadow-md p-6 border-2 border-transparent hover:border-indigo-500" onclick="showClaudeSetup()">
                         <div class="flex items-center mb-4">
@@ -460,6 +472,79 @@
                 </div>
             </div>
 
+            <!-- Allow / Deny Lists View (#69) -->
+            <div id="addressListsView" class="hidden">
+                <div class="flex items-center mb-6">
+                    <button onclick="showDashboard()" class="text-blue-600 hover:text-blue-800 mr-4">
+                        ← Back to Dashboard
+                    </button>
+                </div>
+                <h2 class="text-3xl font-bold text-gray-900 mb-6">Allow / Deny Lists</h2>
+                <div class="bg-white rounded-lg shadow-md p-6">
+                    <div class="bg-teal-50 border border-teal-200 rounded-lg p-4 mb-6">
+                        <p class="text-sm text-gray-700">
+                            <strong>Allow list</strong> senders are never flagged by the spam scan; <strong>deny list</strong> senders always are.
+                            Entries are an email address (<span class="font-mono">someone@example.com</span>) or a whole domain (<span class="font-mono">example.com</span>).
+                            An address beats a domain, and allow beats deny.
+                        </p>
+                    </div>
+
+                    <!-- List selector -->
+                    <div class="flex items-center gap-3 mb-6">
+                        <label class="text-sm font-medium text-gray-700">List</label>
+                        <select id="addressListType" class="px-3 py-2 border border-gray-300 rounded-md" onchange="loadAddressLists()">
+                            <option value="allow">Allow list</option>
+                            <option value="deny">Deny list</option>
+                        </select>
+                        <span id="addressListCounts" class="text-sm text-gray-500"></span>
+                    </div>
+
+                    <!-- Add / edit entry -->
+                    <div class="mb-6 p-4 bg-gray-50 rounded-lg border-2 border-teal-200">
+                        <h3 class="text-lg font-semibold mb-4 text-teal-900"><i class="fas fa-plus-circle mr-2"></i><span id="addressEntryFormTitle">Add Entry</span></h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Email address or domain</label>
+                                <input type="text" id="addressEntryValue" placeholder="e.g., alerts@bank.example or newsletter.example" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-transparent">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Note <span class="text-xs text-gray-500">(optional)</span></label>
+                                <input type="text" id="addressEntryNote" placeholder="e.g., Bank alerts, imported from Contacts" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-transparent">
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <button onclick="saveAddressEntry()" class="bg-teal-600 text-white px-6 py-2 rounded-md hover:bg-teal-700 transition-colors"><i class="fas fa-save mr-2"></i><span id="addressEntrySaveLabel">Add</span></button>
+                            <button id="addressEntryCancel" onclick="cancelAddressEdit()" class="hidden text-gray-600 hover:text-gray-800 px-3 py-2">Cancel</button>
+                            <span id="addressEntryStatus" class="text-sm text-gray-600"></span>
+                        </div>
+                    </div>
+
+                    <!-- Import / clear -->
+                    <div class="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                        <h3 class="text-lg font-semibold mb-3 text-gray-900"><i class="fas fa-file-import mr-2"></i>Import &amp; Clear</h3>
+                        <p class="text-sm text-gray-600 mb-3">Import a CSV (one address per line or column) or a vCard <span class="font-mono">.vcf</span> file — Apple Contacts: select cards → File → Export → Export vCard. Only email addresses are read; names are not stored.</p>
+                        <div class="flex flex-wrap items-center gap-3">
+                            <input type="file" id="addressImportFile" accept=".csv,.vcf,.vcard,text/csv,text/vcard,text/plain" class="text-sm">
+                            <input type="text" id="addressImportNote" placeholder="Note for imported entries (optional)" class="px-3 py-2 border border-gray-300 rounded-md text-sm flex-1 min-w-[12rem]">
+                            <button onclick="importAddressFile()" class="bg-gray-700 text-white px-4 py-2 rounded-md hover:bg-gray-800 text-sm"><i class="fas fa-upload mr-2"></i>Import into selected list</button>
+                            <button onclick="clearAddressList()" class="bg-red-100 text-red-700 px-4 py-2 rounded-md hover:bg-red-200 text-sm"><i class="fas fa-trash mr-2"></i>Clear selected list</button>
+                        </div>
+                        <p id="addressImportStatus" class="text-sm text-gray-600 mt-3"></p>
+                    </div>
+
+                    <!-- Entries -->
+                    <div>
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-lg font-semibold text-gray-900"><i class="fas fa-list mr-2"></i>Entries <span id="addressListTotal" class="text-sm font-normal text-gray-500"></span></h3>
+                            <input type="search" id="addressListFilter" placeholder="Filter…" oninput="renderAddressEntries()" class="px-3 py-2 border border-gray-300 rounded-md text-sm">
+                        </div>
+                        <div id="addressListEntries" class="overflow-x-auto">
+                            <p class="text-sm text-gray-500 text-center py-8">Loading…</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Claude Setup View -->
             <div id="claudeSetupView" class="hidden">
                 <div class="flex items-center mb-6">
@@ -673,6 +758,6 @@
         </main>
     </div>
 
-    <script src="js/app.js?v=2.36.0"></script>
+    <script src="js/app.js?v=2.39.0"></script>
 </body>
 </html>

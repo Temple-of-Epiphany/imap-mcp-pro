@@ -22,6 +22,7 @@ function hideAllViews() {
   document.getElementById('categoriesView').classList.add('hidden');
   document.getElementById('claudeSetupView').classList.add('hidden');
   document.getElementById('rulesView').classList.add('hidden');
+  document.getElementById('addressListsView').classList.add('hidden');
 }
 
 function showDashboard() {
@@ -75,6 +76,13 @@ async function loadServiceConfig() {
       document.getElementById('servicePortInput').value = data.currentPort;
     }
   } catch {}
+}
+
+function showAddressLists() {
+  hideAllViews();
+  document.getElementById('addressListsView').classList.remove('hidden');
+  cancelAddressEdit();
+  loadAddressLists();
 }
 
 function showRules() {
@@ -1568,3 +1576,166 @@ document.addEventListener('DOMContentLoaded', () => {
   showDashboard();
   setVersionBadge();
 });
+
+
+// ===========================================================================
+// Allow / Deny lists (#69)
+// ===========================================================================
+let addressEntriesCache = [];
+let addressEditingValue = null; // value being edited (null = adding)
+
+function selectedAddressListType() {
+  return document.getElementById('addressListType').value === 'deny' ? 'deny' : 'allow';
+}
+
+async function loadAddressLists() {
+  const container = document.getElementById('addressListEntries');
+  try {
+    const response = await fetch('/api/address-lists');
+    const result = await response.json();
+    if (!result.success) throw new Error(result.error || 'Failed to load lists');
+    addressEntriesCache = result.entries || [];
+    document.getElementById('addressListCounts').textContent =
+      `${result.counts.allow} allowed · ${result.counts.deny} denied`;
+    renderAddressEntries();
+  } catch (error) {
+    container.innerHTML = `<p class="text-sm text-red-600 text-center py-8">${esc(error.message)}</p>`;
+  }
+}
+
+function renderAddressEntries() {
+  const type = selectedAddressListType();
+  const filter = (document.getElementById('addressListFilter').value || '').trim().toLowerCase();
+  const rows = addressEntriesCache
+    .filter(e => e.listType === type)
+    .filter(e => !filter || e.value.includes(filter) || (e.note || '').toLowerCase().includes(filter))
+    .sort((a, b) => a.value.localeCompare(b.value));
+  document.getElementById('addressListTotal').textContent = `(${rows.length})`;
+  const container = document.getElementById('addressListEntries');
+  if (rows.length === 0) {
+    container.innerHTML = `<p class="text-sm text-gray-500 text-center py-8">${filter ? 'No entries match the filter.' : `The ${type} list is empty.`}</p>`;
+    return;
+  }
+  container.innerHTML = `
+    <table class="min-w-full text-sm">
+      <thead><tr class="text-left text-gray-500 border-b">
+        <th class="py-2 pr-4">Value</th><th class="py-2 pr-4">Type</th><th class="py-2 pr-4">Note</th><th class="py-2 pr-4">Added</th><th class="py-2"></th>
+      </tr></thead>
+      <tbody>
+        ${rows.map(e => `
+          <tr class="border-b border-gray-100">
+            <td class="py-2 pr-4 font-mono">${esc(e.value)}</td>
+            <td class="py-2 pr-4"><span class="text-xs px-2 py-1 rounded ${e.valueType === 'domain' ? 'bg-indigo-100 text-indigo-800' : 'bg-gray-100 text-gray-800'}">${esc(e.valueType)}</span></td>
+            <td class="py-2 pr-4 text-gray-600">${esc(e.note || '')}</td>
+            <td class="py-2 pr-4 text-gray-500 whitespace-nowrap">${esc(new Date(e.createdAt).toLocaleDateString())}</td>
+            <td class="py-2 whitespace-nowrap">
+              <button onclick="editAddressEntry('${esc(e.value)}')" class="text-blue-600 hover:text-blue-800 mr-3">Edit</button>
+              <button onclick="removeAddressEntry('${esc(e.value)}')" class="text-red-600 hover:text-red-800">Delete</button>
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function editAddressEntry(value) {
+  const type = selectedAddressListType();
+  const entry = addressEntriesCache.find(e => e.listType === type && e.value === value);
+  if (!entry) return;
+  addressEditingValue = entry.value;
+  document.getElementById('addressEntryValue').value = entry.value;
+  document.getElementById('addressEntryNote').value = entry.note || '';
+  document.getElementById('addressEntryFormTitle').textContent = 'Edit Entry';
+  document.getElementById('addressEntrySaveLabel').textContent = 'Save';
+  document.getElementById('addressEntryCancel').classList.remove('hidden');
+  document.getElementById('addressEntryValue').focus();
+}
+
+function cancelAddressEdit() {
+  addressEditingValue = null;
+  document.getElementById('addressEntryValue').value = '';
+  document.getElementById('addressEntryNote').value = '';
+  document.getElementById('addressEntryFormTitle').textContent = 'Add Entry';
+  document.getElementById('addressEntrySaveLabel').textContent = 'Add';
+  document.getElementById('addressEntryCancel').classList.add('hidden');
+  document.getElementById('addressEntryStatus').textContent = '';
+}
+
+async function saveAddressEntry() {
+  const type = selectedAddressListType();
+  const value = document.getElementById('addressEntryValue').value.trim();
+  const note = document.getElementById('addressEntryNote').value.trim();
+  const status = document.getElementById('addressEntryStatus');
+  if (!value) { status.textContent = 'Enter an email address or domain.'; return; }
+  try {
+    // Edit = replace: remove the old value first (the service upserts notes for an unchanged value).
+    if (addressEditingValue && addressEditingValue !== value.toLowerCase()) {
+      await fetch(`/api/address-lists/${type}/${encodeURIComponent(addressEditingValue)}`, { method: 'DELETE' });
+    }
+    const response = await fetch('/api/address-lists', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ listType: type, value, note })
+    });
+    const result = await response.json();
+    if (!result.success) { status.textContent = result.error || 'Failed to save'; return; }
+    const wasEditing = !!addressEditingValue;
+    cancelAddressEdit();
+    status.textContent = `${wasEditing ? 'Saved' : 'Added'} ${result.entry.value} to the ${type} list.`;
+    loadAddressLists();
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
+async function removeAddressEntry(value) {
+  const type = selectedAddressListType();
+  if (!confirm(`Remove ${value} from the ${type} list?`)) return;
+  try {
+    const response = await fetch(`/api/address-lists/${type}/${encodeURIComponent(value)}`, { method: 'DELETE' });
+    const result = await response.json();
+    if (!result.success) alert('Failed to remove: ' + (result.error || 'Unknown error'));
+    loadAddressLists();
+  } catch (error) {
+    alert('Failed to remove: ' + error.message);
+  }
+}
+
+async function importAddressFile() {
+  const type = selectedAddressListType();
+  const input = document.getElementById('addressImportFile');
+  const status = document.getElementById('addressImportStatus');
+  const file = input.files && input.files[0];
+  if (!file) { status.textContent = 'Choose a .csv or .vcf file first.'; return; }
+  status.textContent = `Reading ${file.name}…`;
+  try {
+    const content = await file.text();
+    const format = /\.vcf$|\.vcard$/i.test(file.name) ? 'vcf' : (/\.csv$/i.test(file.name) ? 'csv' : 'auto');
+    const response = await fetch('/api/address-lists/import', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ listType: type, content, format, note: document.getElementById('addressImportNote').value.trim() })
+    });
+    const result = await response.json();
+    if (!result.success) { status.textContent = 'Import failed: ' + (result.error || 'Unknown error'); return; }
+    status.textContent = `Imported ${result.added} new ${type} entries from ${file.name} (${result.found} addresses found, ${result.skipped} already present or invalid).`;
+    input.value = '';
+    loadAddressLists();
+  } catch (error) {
+    status.textContent = 'Import failed: ' + error.message;
+  }
+}
+
+async function clearAddressList() {
+  const type = selectedAddressListType();
+  const count = addressEntriesCache.filter(e => e.listType === type).length;
+  if (!confirm(`Remove all ${count} entries from the ${type} list? This cannot be undone.`)) return;
+  try {
+    const response = await fetch('/api/address-lists/clear', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listType: type })
+    });
+    const result = await response.json();
+    document.getElementById('addressImportStatus').textContent = result.success
+      ? `Cleared ${result.removed} entries from the ${type} list.` : 'Clear failed: ' + (result.error || 'Unknown error');
+    loadAddressLists();
+  } catch (error) {
+    document.getElementById('addressImportStatus').textContent = 'Clear failed: ' + error.message;
+  }
+}
