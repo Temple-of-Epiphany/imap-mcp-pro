@@ -13,7 +13,6 @@
  * Tracker: #102. Phase 2 issue: #104.
  */
 
-import { zodToJsonSchema } from 'zod-to-json-schema';
 import { z } from 'zod';
 import {
   loadConfig,
@@ -66,16 +65,9 @@ export async function dispatchCli(opts: DispatcherOptions = {}): Promise<boolean
   const flags = parseCliArgs(argv);
 
   if (flags.printSchema) {
-    // The bypass for stdout silencing in index.ts only allows JSON.
-    // zodToJsonSchema returns a JSON-serializable object — perfect.
-    // Cast to any to short-circuit deep-instantiation type checking. Runtime
-    // behavior is identical; only the type-level inference explodes on the
-    // full nested ServerConfigSchema. Same root cause as the SDK 1.23+ issue
-    // documented in docs/sdk_audit_2026-04-29.md.
-    const schema = (zodToJsonSchema as any)(ServerConfigSchema, {
-      name: 'ServerConfig',
-      $refStrategy: 'none',
-    });
+    // Zod 4's built-in JSON Schema emitter (#115). The output is a plain
+    // JSON-serializable object, which is all the stdout bypass allows.
+    const schema = z.toJSONSchema(ServerConfigSchema, { io: 'input', unrepresentable: 'any' });
     await writeAndExit(JSON.stringify(schema, null, 2) + '\n', EXIT_CODES.OK);
   }
 

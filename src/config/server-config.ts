@@ -33,7 +33,7 @@ export const ServerConfigSchema = z.object({
     skipMigrations: z.boolean()
       .default(false)
       .describe('If true, skip the auto-migration on DatabaseService construction. Useful for the migrate CLI to take explicit control.'),
-  }).default({}).describe('Database configuration'),
+  }).prefault({}).describe('Database configuration'),
 
   encryption: z.object({
     masterKey: z.string()
@@ -43,7 +43,7 @@ export const ServerConfigSchema = z.object({
     claudeDesktopExtension: z.boolean()
       .default(false)
       .describe('Set to true when running as a Claude Desktop extension (.mcpb). Activates keyring-based key storage paths.'),
-  }).default({}).describe('Encryption configuration'),
+  }).prefault({}).describe('Encryption configuration'),
 
   attachments: z.object({
     allowedDirs: z.array(z.string())
@@ -62,7 +62,7 @@ export const ServerConfigSchema = z.object({
     stagingTtlSeconds: z.number().int().positive()
       .default(3600)
       .describe('Staging session lifetime in seconds. Default 1 hour.'),
-  }).default({}).describe('Attachment configuration'),
+  }).prefault({}).describe('Attachment configuration'),
 
   smtp: z.object({
     poolMaxPerAccount: z.number().int().min(1).max(50)
@@ -74,13 +74,13 @@ export const ServerConfigSchema = z.object({
     retryMaxAttempts: z.number().int().min(0).max(10)
       .default(3)
       .describe('Retry count for transient SMTP failures.'),
-  }).default({}).describe('SMTP configuration'),
+  }).prefault({}).describe('SMTP configuration'),
 
   imap: z.object({
     autoCreateSentFolder: z.boolean()
       .default(false)
       .describe('Create a Sent folder automatically if one cannot be detected. Per RFC 6154 SPECIAL-USE.'),
-  }).default({}).describe('IMAP configuration'),
+  }).prefault({}).describe('IMAP configuration'),
 
   contextReduction: z.object({
     inlineThreshold: z.number().int().positive()
@@ -132,7 +132,7 @@ export const ServerConfigSchema = z.object({
       .min(1)
       .default(path.join(DEFAULT_DATA_DIR, 'results'))
       .describe('Filesystem root for file-backed result storage.'),
-  }).default({}).describe('Context-reduction (handle/file response) tunables. See PR #94.'),
+  }).prefault({}).describe('Context-reduction (handle/file response) tunables. See PR #94.'),
 
   logging: z.object({
     level: LogLevel
@@ -141,14 +141,14 @@ export const ServerConfigSchema = z.object({
     path: z.string().nullable()
       .default(null)
       .describe('Log file destination. If null, log to stderr only (the standard MCP-stdio path that Claude Desktop captures).'),
-  }).default({}).describe('Logging configuration'),
+  }).prefault({}).describe('Logging configuration'),
 
   user: z.object({
     mcpUserId: z.string()
       .min(1)
       .default('default')
       .describe('Username for tool-context resolution in multi-tenant deployments. Set by Claude Desktop env or .mcpb manifest.'),
-  }).default({}).describe('User context'),
+  }).prefault({}).describe('User context'),
 });
 
 export type ServerConfig = z.infer<typeof ServerConfigSchema>;

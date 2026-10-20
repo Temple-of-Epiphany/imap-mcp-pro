@@ -71,7 +71,7 @@
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
-    "@modelcontextprotocol/sdk": "~1.22.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "body-parser": "^2.2.0",
     "chalk": "^5.4.1",
     "commander": "^14.0.0",
@@ -89,7 +89,6 @@
     "open": "^10.2.0",
     "ora": "^8.2.0",
     "pdf-parse": "^1.1.1",
-    "zod": "^3.25.76",
-    "zod-to-json-schema": "^3.25.2"
+    "zod": "^4.6.7"
   }
 }
