@@ -7,8 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
--
+### Fixed
+- **No more false "duplicate install" warning on every Claude Desktop start** (#292) — Desktop runs one IMAP MCP Pro process per host (chat client + Cowork bridge) from the same install, which #290 made supported. The #288 single lockfile reported that as a duplicate install, and the newest process overwrote/deleted it so detection drifted. Each process now writes its own record under `~/.imap-mcp/.instances/<pid>.json`; dead pids are pruned on start. Same install path + version → one info line ("N processes from this install share the data dir"). Different install path or version → the warning, naming both paths and versions. Only the primary (earliest) process starts the embedded Web UI, so the hosts no longer race for port 4500. The legacy `.instance.lock` is removed on first start.
 
 ### Changed
 -

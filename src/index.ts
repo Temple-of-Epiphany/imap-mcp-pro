@@ -90,6 +90,9 @@ await dispatchCli({
 // Pre-handshake stage — must complete in < 2s on cold start.
 // ============================================================================
 
+// Set by the instance registry (#292): only the primary process starts the Web UI.
+let webUIPrimary = true;
+
 const {
   server, imapService, smtpService, db, fileExport, results, workerPool,
   sentFolderService, appendRetryService, attachmentStaging, messageCache,
@@ -133,19 +136,33 @@ const {
       process.exit(EXIT_CODES.DATABASE_ERROR);
     }
 
-    // Duplicate-instance guard (#288): warn if another IMAP MCP Pro is already
-    // running against this data dir (e.g. the extension installed twice). Two
-    // servers on one store is confusing and split-brain-prone; surface it.
+    // Instance registry (#288, #292): record this process under the data dir
+    // and look at the other live ones. Claude Desktop runs one process per host
+    // (chat client + Cowork bridge) from the SAME install — expected since #290,
+    // logged at info. A DIFFERENT install path or version is the real duplicate
+    // install and gets the warning. Only the primary (earliest) instance starts
+    // the embedded Web UI so the hosts don't race for the port.
     try {
       const dataDir = path.dirname(config.database.path);
-      const other = registerInstance(dataDir, { version: PACKAGE_VERSION });
-      if (other) {
+      const installPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+      const reg = registerInstance(dataDir, { version: PACKAGE_VERSION, installPath });
+      webUIPrimary = reg.isPrimary;
+      if (reg.differentInstall.length > 0) {
+        const others = reg.differentInstall
+          .map(o => `pid ${o.pid} v${o.version ?? '?'} at ${o.installPath ?? '(unknown path)'}`)
+          .join('; ');
         logEvent('[startup]', {
           stage: 'pre-handshake', outcome: 'warning', component: 'InstanceLock',
-          message: `Another IMAP MCP Pro instance (pid ${other.pid}, started ${new Date(other.startedAt).toISOString()}) is already running against ${dataDir}. Running two instances is unsupported — remove the duplicate extension install to avoid confusing/split state.`,
+          message: `Another IMAP MCP Pro install is running against ${dataDir}: ${others}. This process is v${PACKAGE_VERSION} at ${installPath}. Two different installs on one data dir is unsupported — remove one.`,
         });
       }
-    } catch { /* guard is best-effort */ }
+      if (reg.sameInstall.length > 0) {
+        logEvent('[startup]', {
+          stage: 'pre-handshake', outcome: 'info', component: 'InstanceLock',
+          message: `${reg.sameInstall.length + 1} IMAP MCP Pro processes from this install share ${dataDir} (multiple Claude Desktop hosts, expected). ${reg.isPrimary ? 'This process is primary and will start the Web UI.' : `Web UI is owned by pid ${reg.sameInstall[0].pid}; this process will not start one.`}`,
+        });
+      }
+    } catch { /* registry is best-effort */ }
 
     // 4. Downstream services
     const fileExport = new FileExportService(db);
@@ -280,6 +297,10 @@ void timeStage('post-handshake', async () => {
   // Logging: emit a 'starting' breadcrumb BEFORE the await so a hang during
   // port probing or listen() still produces a startup log entry (#158). Then
   // emit a final success/error line after the call resolves.
+  if (!webUIPrimary) {
+    logEvent('[startup]', { component: 'web-ui', outcome: 'skipped', reason: 'another process from this install is primary (#292)' });
+    return;
+  }
   logEvent('[startup]', { component: 'web-ui', outcome: 'starting' });
   try {
     const r = await webUIManager.start({ autoOpen: false });
