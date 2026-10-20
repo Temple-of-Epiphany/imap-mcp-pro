@@ -7,6 +7,7 @@ import path from 'path';
 import { existsSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { ImapService } from './services/imap-service.js';
+import { TOOL_PROFILE_ENV, resolveToolProfile } from './tools/tool-profile.js';
 import { DatabaseService } from './services/database-service.js';
 import { SmtpService } from './services/smtp-service.js';
 import { FileExportService } from './services/file-export-service.js';
@@ -189,12 +190,18 @@ const {
     //     so the MCP transport is responsive first.
     const webUIManager = new WebUIManager(db, imapService);
 
-    // 7. Tool schema registration
+    // 7. Tool schema registration. The tool profile (#293) comes from the
+    //    .mcpb `tool_profile` user_config via IMAP_MCP_TOOL_PROFILE; `core`
+    //    registers only the everyday subset, `full` (default) everything.
+    const toolProfile = resolveToolProfile(process.env[TOOL_PROFILE_ENV], (msg) => console.error(msg));
     registerTools(
       server, imapService, db, smtpService, results, workerPool,
       sentFolderService, appendRetryService, attachmentStaging, messageCache,
-      skillsInstaller, webUIManager
+      skillsInstaller, webUIManager, { toolProfile }
     );
+    if (toolProfile !== 'full') {
+      console.error(`[tool-profile] Active profile "${toolProfile}" (${TOOL_PROFILE_ENV}); hidden tools are listed by imap_list_tools.`);
+    }
 
     // Mark unused config field as intentional for now
     void config;
@@ -324,9 +331,12 @@ async function buildToolsManifest(): Promise<unknown> {
   const tmpMessageCache = new MessageCacheService(tmpDb, tmpImap);
   const tmpBundleSkillsDir = resolveBundleSkillsDir(__dirname);
   const tmpSkillsInstaller = new SkillsInstallerService(tmpBundleSkillsDir);
+  // The manifest always describes the full catalog regardless of the
+  // profile the running server was started with (#293).
   registerTools(
     tmpServer, tmpImap, tmpDb, tmpSmtp, tmpResults, tmpWorkerPool,
-    tmpSentFolder, tmpAppendRetry, tmpStaging, tmpMessageCache, tmpSkillsInstaller
+    tmpSentFolder, tmpAppendRetry, tmpStaging, tmpMessageCache, tmpSkillsInstaller,
+    undefined, { toolProfile: 'full' }
   );
 
   // Pull the registered tools out of McpServer's internal map. This is

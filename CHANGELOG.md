@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Tool profiles** (#293) — new extension option **Tool Profile** / `IMAP_MCP_TOOL_PROFILE` (`full`, default, or `core`). `core` registers only the everyday subset (~29 tools: accounts, search/read, send/reply/forward, folders, mark/move/delete, discovery) so hosts that cannot handle the full ~130-tool surface (observed: the Claude Desktop Cowork bridge sees zero tools) can be tested with a smaller set. The filter lives in the shared `registerTool` wrapper (`src/tools/index.ts`) with the list in `src/tools/tool-profile.ts`; no tool module changes. `imap_list_tools` reports the active profile and the hidden tool names; unknown values fall back to `full` with a logged warning; the `.mcpb` manifest always lists the full catalog.
+
 ### Changed
 - **`CLAUDE.md` now carries the `github-operations` skill binding** (#295) — first-access cascade answers recorded (issue mode `all`, NIST Moderate audit, engineering wiki tracked, Aikido SAST, monthly library check). The existing project guidance (architecture, RFC 9051 compliance status, constraints) is unchanged below the new section. Added `CLAUDE_DESKTOP_INSTRUCTIONS.md` as the paste excerpt for Claude Desktop projects.
 

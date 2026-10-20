@@ -30,6 +30,11 @@ import { resultTools } from './result-tools.js';
 import { cacheTools } from './cache-tools.js';
 import { skillsTools } from './skills-tools.js';
 import { getAnnotations, titleFromName } from './annotations.js';
+import {
+  ToolProfile,
+  isToolVisible,
+  setActiveToolProfile,
+} from './tool-profile.js';
 
 /**
  * Wrap server.registerTool so every call gets MCP annotations injected
@@ -39,10 +44,23 @@ import { getAnnotations, titleFromName } from './annotations.js';
  *
  * Caller-supplied annotations (if any) win on a per-key basis — the
  * central table only fills in keys the call site didn't already set.
+ *
+ * The same wrapper applies the tool profile (#293): under `core`, tools
+ * outside CORE_TOOLS are recorded in `state.hidden` and never reach the
+ * SDK, so no tool module needs to know profiles exist.
  */
-function withAnnotations<T extends McpServer>(server: T): () => void {
+function withAnnotations<T extends McpServer>(
+  server: T,
+  profile: ToolProfile,
+  state: { registered: string[]; hidden: string[] }
+): () => void {
   const original = (server as any).registerTool.bind(server);
   (server as any).registerTool = (name: string, config: any, handler: any) => {
+    if (!isToolVisible(name, profile)) {
+      state.hidden.push(name);
+      return undefined;
+    }
+    state.registered.push(name);
     // Every tool gets a human-readable title (Anthropic directory requirement),
     // auto-derived from its name unless the call site set one. Applied at both
     // the top level and in annotations so either read path sees it.
@@ -57,6 +75,11 @@ function withAnnotations<T extends McpServer>(server: T): () => void {
   return () => { (server as any).registerTool = original; };
 }
 
+export interface RegisterToolsOptions {
+  /** Which tools to expose (#293). Default `full`. */
+  toolProfile?: ToolProfile;
+}
+
 export function registerTools(
   server: McpServer,
   imapService: ImapService,
@@ -69,12 +92,15 @@ export function registerTools(
   staging?: AttachmentStagingService,
   messageCache?: MessageCacheService,
   skillsInstaller?: SkillsInstallerService,
-  webUIManager?: WebUIManager
+  webUIManager?: WebUIManager,
+  options: RegisterToolsOptions = {}
 ): void {
+  const profile: ToolProfile = options.toolProfile ?? 'full';
+  const profileState = { registered: [] as string[], hidden: [] as string[] };
   // Inject MCP annotations on every registerTool call (drives Claude
   // Desktop's Tool Permissions UI). Restored after the registration phase
   // so re-entrant calls (e.g. from buildToolsManifest) start fresh.
-  const restoreRegisterTool = withAnnotations(server);
+  const restoreRegisterTool = withAnnotations(server, profile, profileState);
 
   // One shared BulkJobService instance (Issue #117) backs both the job
   // management tools and the async *_start / resume tools in userCheckTools.
@@ -144,4 +170,5 @@ export function registerTools(
   metaTools(server, webUIManager);
 
   restoreRegisterTool();
+  setActiveToolProfile({ profile, ...profileState });
 }

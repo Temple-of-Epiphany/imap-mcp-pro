@@ -247,6 +247,18 @@ The following environment variables can be configured in your Claude Desktop con
 | `PORT` | Port number for the Web UI server | `4500` | No |
 | `NODE_ENV` | Node environment mode. Set to `development` for detailed error stack traces. | `production` | No |
 | `IMAP_MCP_VERSION` | Version identifier (automatically set by installer) | (package version) | No |
+| `IMAP_MCP_TOOL_PROFILE` | Which tools the server exposes: `full` (every tool) or `core` (everyday subset of ~29 for hosts that cannot handle a large tool surface). In the Claude Desktop extension this is the **Tool Profile** option. See [Tool profiles](#tool-profiles). | `full` | No |
+
+### Tool profiles
+
+The server registers about 130 MCP tools. Some hosts announce all of them but surface none to the session (observed with the Claude Desktop Cowork bridge, #293). Set the **Tool Profile** extension option (or `IMAP_MCP_TOOL_PROFILE`) to choose how many are exposed:
+
+| Profile | What is registered |
+|---------|--------------------|
+| `full` (default) | Every tool. |
+| `core` | The everyday subset (~29): list users/accounts and test an account; search, read, latest, unread count, attachments; send, reply, forward, outbox dir; list folders and folder status; mark read/unread, move, copy, delete (single and bulk); plus `imap_list_tools`, `imap_help`, `imap_about`, `imap_open_web_ui`. |
+
+`imap_list_tools` always reports the active profile and the names of the hidden tools. An unknown value falls back to `full` with a warning in the server log. Restart Claude Desktop after changing the option. The `.mcpb` manifest always lists the full catalog regardless of profile.
 
 **Example multi-user configuration:**
 

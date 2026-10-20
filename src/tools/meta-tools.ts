@@ -1,4 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { getActiveToolProfile } from './tool-profile.js';
 import { z } from 'zod';
 import { withErrorHandling } from '../utils/error-handler.js';
 import { PACKAGE_NAME, PACKAGE_VERSION } from '../utils/package-info.js';
@@ -422,15 +423,32 @@ export function metaTools(server: McpServer, webUIManager?: WebUIManager): void 
       }
     ];
 
+    // Tool profile (#293): under `core`, tools hidden from the server are
+    // dropped from the listing too, and the response says which they are.
+    const profileState = getActiveToolProfile();
+    const hiddenSet = new Set(profileState.hidden);
+    const visibleTools = hiddenSet.size === 0
+      ? allTools
+      : allTools.filter(tool => !hiddenSet.has(tool.name));
+
     // Filter by category if specified
     const filteredTools = category === 'all'
-      ? allTools
-      : allTools.filter(tool => tool.category === category);
+      ? visibleTools
+      : visibleTools.filter(tool => tool.category === category);
 
     const response = {
-      totalTools: allTools.length,
+      totalTools: visibleTools.length,
       filteredCount: filteredTools.length,
       category: category,
+      toolProfile: {
+        active: profileState.profile,
+        available: ['full', 'core'],
+        hiddenCount: profileState.hidden.length,
+        hiddenTools: profileState.hidden,
+        note: profileState.profile === 'full'
+          ? 'All tools are registered. Set the extension option "Tool Profile" (IMAP_MCP_TOOL_PROFILE) to "core" to expose only the everyday subset.'
+          : 'Only the core subset is registered. Set the extension option "Tool Profile" (IMAP_MCP_TOOL_PROFILE) to "full" and restart Claude Desktop to expose the hidden tools.'
+      },
       tools: filteredTools.map(tool => ({
         name: tool.name,
         category: tool.category,
