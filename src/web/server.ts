@@ -13,6 +13,7 @@ import os from 'os';
 import { DatabaseService } from '../services/database-service.js';
 import { ImapService } from '../services/imap-service.js';
 import { UserCheckService } from '../services/usercheck-service.js';
+import { AddressListService, parseCsvEmails, parseVcfEmails, type ListType } from '../services/address-list-service.js';
 import { emailProviders, getProviderByEmail } from '../providers/email-providers.js';
 import { dnsProviders } from '../providers/dns-providers.js';
 import { ImapAccount } from '../types/index.js';
@@ -221,6 +222,102 @@ export class WebUIServer {
   }
 
   private setupRoutes(): void {
+
+    // ------------------------------------------------------------------
+    // Allow / deny address lists (#69) — Web UI over AddressListService.
+    // Same per-user lists the MCP tools (imap_add_list_entry …) and the
+    // combined spam scan use. Values are emails or domains; the service
+    // normalises and validates them.
+    // ------------------------------------------------------------------
+    const addressLists = new AddressListService(this.db);
+    const parseListType = (raw: unknown): ListType | null =>
+      raw === 'allow' || raw === 'deny' ? raw : null;
+
+    this.app.get('/api/address-lists', (req, res) => {
+      try {
+        const listType = req.query.type === undefined ? undefined : parseListType(req.query.type);
+        if (req.query.type !== undefined && !listType) {
+          return res.status(400).json({ success: false, error: 'type must be "allow" or "deny"' });
+        }
+        const entries = addressLists.listEntries(this.defaultUserId, listType ?? undefined);
+        res.json({
+          success: true,
+          counts: {
+            allow: entries.filter(e => e.listType === 'allow').length,
+            deny: entries.filter(e => e.listType === 'deny').length,
+          },
+          entries,
+        });
+      } catch (error) {
+        res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to list entries' });
+      }
+    });
+
+    this.app.post('/api/address-lists', (req, res) => {
+      try {
+        const listType = parseListType(req.body?.listType);
+        const value = typeof req.body?.value === 'string' ? req.body.value : '';
+        const note = typeof req.body?.note === 'string' && req.body.note.trim() ? req.body.note.trim() : undefined;
+        if (!listType) return res.status(400).json({ success: false, error: 'listType must be "allow" or "deny"' });
+        const entry = addressLists.addEntry(this.defaultUserId, listType, value, note);
+        if (!entry) return res.status(400).json({ success: false, error: `"${value}" is not a valid email address or domain` });
+        res.json({ success: true, entry });
+      } catch (error) {
+        res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to add entry' });
+      }
+    });
+
+    this.app.delete('/api/address-lists/:listType/:value', (req, res) => {
+      try {
+        const listType = parseListType(req.params.listType);
+        if (!listType) return res.status(400).json({ success: false, error: 'listType must be "allow" or "deny"' });
+        const removed = addressLists.removeEntry(this.defaultUserId, listType, decodeURIComponent(req.params.value));
+        if (!removed) return res.status(404).json({ success: false, error: 'Entry not found' });
+        res.json({ success: true });
+      } catch (error) {
+        res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Failed to remove entry' });
+      }
+    });
+
+    // Import: CSV or vCard text (Apple Contacts export). Larger body limit for pasted exports.
+    this.app.post('/api/address-lists/import', bodyParser.json({ limit: '10mb' }), (req, res) => {
+      try {
+        const listType = parseListType(req.body?.listType);
+        const content = typeof req.body?.content === 'string' ? req.body.content : '';
+        const format = req.body?.format === 'csv' || req.body?.format === 'vcf' ? req.body.format : 'auto';
+        const note = typeof req.body?.note === 'string' && req.body.note.trim() ? req.body.note.trim() : undefined;
+        if (!listType) return res.status(400).json({ success: false, error: 'listType must be "allow" or "deny"' });
+        if (!content.trim()) return res.status(400).json({ success: false, error: 'content is empty' });
+        const fmt = format === 'auto' ? (/BEGIN:VCARD/i.test(content) ? 'vcf' : 'csv') : format;
+        const values = fmt === 'vcf' ? parseVcfEmails(content) : parseCsvEmails(content);
+        const result = addressLists.importEntries(this.defaultUserId, listType, values, note);
+        res.json({ success: true, format: fmt, found: values.length, ...result });
+      } catch (error) {
+        res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Import failed' });
+      }
+    });
+
+    this.app.post('/api/address-lists/clear', (req, res) => {
+      try {
+        const listType = parseListType(req.body?.listType);
+        if (!listType) return res.status(400).json({ success: false, error: 'listType must be "allow" or "deny"' });
+        const removed = addressLists.clear(this.defaultUserId, listType);
+        res.json({ success: true, removed });
+      } catch (error) {
+        res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Clear failed' });
+      }
+    });
+
+    this.app.get('/api/address-lists/check', (req, res) => {
+      try {
+        const from = typeof req.query.from === 'string' ? req.query.from : '';
+        if (!from.trim()) return res.status(400).json({ success: false, error: 'from is required' });
+        res.json({ success: true, ...addressLists.check(this.defaultUserId, from) });
+      } catch (error) {
+        res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Check failed' });
+      }
+    });
+
     // Get all email providers
     this.app.get('/api/providers', (req, res) => {
       res.json(emailProviders);
@@ -955,7 +1052,7 @@ export class WebUIServer {
     // Create category
     this.app.post('/api/categories', (req, res) => {
       try {
-        const userId = process.env.MCP_USER_ID || 'default';
+        const userId = this.defaultUserId; // UUID (categories.user_id → users.user_id); see #329
         const { accountId, categoryName, keywords, targetFolder, enabled } = req.body;
 
         if (!accountId || !categoryName || !keywords || !targetFolder) {

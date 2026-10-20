@@ -13,6 +13,10 @@ import { describe, expect, it, beforeAll, afterAll, beforeEach } from 'vitest';
 import http from 'http';
 import type { AddressInfo } from 'net';
 import { WebUIServer } from './server.js';
+import { DatabaseService } from '../services/database-service.js';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 let created: any[] = [];
 let deleted: string[] = [];
@@ -226,5 +230,63 @@ describe('GET /api/accounts/status (#329)', () => {
     const emails = body.accounts.map((a: any) => a.email);
     expect(emails).toContain('me@x.com'); // seeded by makeDb for the default user
     expect(body.accounts.every((a: any) => a.status === 'disconnected')).toBe(true);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// #69 — allow / deny list routes
+// ---------------------------------------------------------------------------
+describe('/api/address-lists (#69)', () => {
+  let server: http.Server; let base: string; let tmpDir: string; let realDb: DatabaseService;
+  beforeAll(async () => {
+    // Real SQLite DB: the list routes go through AddressListService, which needs the schema.
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'imap-web-69-'));
+    realDb = new DatabaseService({ dbPath: path.join(tmpDir, 'data.db') });
+    const ui = new WebUIServer({ port: 0, db: realDb, imapService: {} as any });
+    server = http.createServer((ui as any).app);
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+  afterAll(async () => {
+    await new Promise<void>((r) => server.close(() => r()));
+    try { realDb.close?.(); } catch { /* ignore */ }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+  const json = (path: string, init?: RequestInit) => fetch(base + path, { headers: { 'content-type': 'application/json' }, ...init }).then(async r => ({ status: r.status, body: await r.json() }));
+
+  it('adds, lists, checks, edits and removes entries', async () => {
+    const first = await json('/api/address-lists', { method: 'POST', body: JSON.stringify({ listType: 'allow', value: 'Alerts@Bank.example', note: 'bank' }) });
+    expect(first.body).toMatchObject({ success: true, entry: { value: 'alerts@bank.example', valueType: 'email', note: 'bank' } });
+    expect((await json('/api/address-lists', { method: 'POST', body: JSON.stringify({ listType: 'deny', value: 'spammy.example' }) })).body.entry).toMatchObject({ value: 'spammy.example', valueType: 'domain' });
+    const list = (await json('/api/address-lists')).body;
+    expect(list.counts).toEqual({ allow: 1, deny: 1 });
+    expect((await json('/api/address-lists?type=deny')).body.entries.map((e: any) => e.value)).toEqual(['spammy.example']);
+    expect((await json('/api/address-lists/check?from=Someone <x@spammy.example>')).body).toMatchObject({ verdict: 'deny', matchedValue: 'spammy.example' });
+    const del = await json('/api/address-lists/deny/' + encodeURIComponent('spammy.example'), { method: 'DELETE' });
+    expect(del.body.success).toBe(true);
+    expect((await json('/api/address-lists/deny/nope.example', { method: 'DELETE' })).status).toBe(404);
+  });
+
+  it('rejects bad input', async () => {
+    expect((await json('/api/address-lists', { method: 'POST', body: JSON.stringify({ listType: 'block', value: 'a@b.c' }) })).status).toBe(400);
+    expect((await json('/api/address-lists', { method: 'POST', body: JSON.stringify({ listType: 'allow', value: 'not an address' }) })).status).toBe(400);
+    expect((await json('/api/address-lists?type=weird')).status).toBe(400);
+    expect((await json('/api/address-lists/check')).status).toBe(400);
+  });
+
+  it('imports CSV and vCard content and clears a list', async () => {
+    const csv = 'name,email\nA,a@csv.example\nB,b@csv.example\nbad,not-an-email\n';
+    const r1 = (await json('/api/address-lists/import', { method: 'POST', body: JSON.stringify({ listType: 'allow', content: csv, note: 'csv' }) })).body;
+    expect(r1).toMatchObject({ success: true, format: 'csv', added: 2 });
+    const vcf = 'BEGIN:VCARD\nVERSION:3.0\nFN:Jane\nEMAIL;type=INTERNET:jane@vcf.example\nEND:VCARD\nBEGIN:VCARD\nFN:Dup\nEMAIL:a@csv.example\nEND:VCARD\n';
+    const r2 = (await json('/api/address-lists/import', { method: 'POST', body: JSON.stringify({ listType: 'allow', content: vcf }) })).body;
+    expect(r2).toMatchObject({ success: true, format: 'vcf', found: 2 });
+    expect(r2.added + r2.skipped).toBe(2);
+    expect((await json('/api/address-lists?type=allow')).body.entries.length).toBeGreaterThanOrEqual(4);
+    const cleared = (await json('/api/address-lists/clear', { method: 'POST', body: JSON.stringify({ listType: 'allow' }) })).body;
+    expect(cleared.success).toBe(true);
+    expect(cleared.removed).toBeGreaterThanOrEqual(4);
+    expect((await json('/api/address-lists?type=allow')).body.entries).toEqual([]);
   });
 });
