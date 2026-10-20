@@ -7,8 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-- **Web UI "Check Status" no longer fails with "Account not found"** (#329) — `GET /api/accounts/:id` was registered before `GET /api/accounts/status`, so Express answered the status URL as a lookup of an account called "status" (404). The status route now comes first, and it (plus `GET /api/categories`) looks accounts up by the user's id instead of the `MCP_USER_ID` username, which would have returned an empty list.
+### Added
+-
 
 ### Changed
 -
@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 -
+
+## [2.38.0] - 2026-10-20
+
+### Fixed
+- **Web UI "Check Status" no longer fails with "Account not found"** (#329) — `GET /api/accounts/:id` was registered before `GET /api/accounts/status`, so Express answered the status URL as a lookup of an account called "status" (404). The status route now comes first, and it (plus `GET /api/categories`) looks accounts up by the user's id instead of the `MCP_USER_ID` username, which would have returned an empty list.
 
 ## [2.37.0] - 2026-10-20
 
