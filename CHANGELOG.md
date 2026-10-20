@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- **GitHub Actions least privilege** (#301) — `permissions: {}` at workflow level with per-job grants (`build-dxt.yml`: build read-only, release `contents: write`, registry publish `id-token: write`; `ci.yml` read-only), `persist-credentials: false` on every `actions/checkout`, and the macOS distribution workflow’s `checkout` / `setup-node` / `upload-artifact` pinned to SHAs.
 - **Config `deepMerge` skips `__proto__` / `constructor` / `prototype` keys** (#300) — the same guard #206 added to `setPath`, now applied when the config file, environment and CLI layers are merged, so a crafted YAML key cannot reach `Object.prototype`. Covered by `src/config/loader.test.ts`.
 
 ### Added
