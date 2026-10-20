@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+-
+
+### Changed
+-
+
+### Deprecated
+-
+
+### Removed
+-
+
+### Fixed
+-
+
+### Security
+-
+
+## [2.35.0] - 2026-10-20
+
+### Added
 - **`.github/CODEOWNERS`** (#303) — `@cbitterfield` owns all paths; satisfies NIST CM-2 and routes review requests under the new branch protection.
 - **Tool profiles** (#293) — new extension option **Tool Profile** / `IMAP_MCP_TOOL_PROFILE` (`full`, default, or `core`). `core` registers only the everyday subset (~29 tools: accounts, search/read, send/reply/forward, folders, mark/move/delete, discovery) so hosts that cannot handle the full ~130-tool surface (observed: the Claude Desktop Cowork bridge sees zero tools) can be tested with a smaller set. The filter lives in the shared `registerTool` wrapper (`src/tools/index.ts`) with the list in `src/tools/tool-profile.ts`; no tool module changes. `imap_list_tools` reports the active profile and the hidden tool names; unknown values fall back to `full` with a logged warning; the `.mcpb` manifest always lists the full catalog.
 
