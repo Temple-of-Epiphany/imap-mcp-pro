@@ -227,9 +227,19 @@ function envOverrides(env: NodeJS.ProcessEnv): {
  * Deep-merge `src` into `dest`. Arrays in `src` replace arrays in `dest`.
  * Mutates and returns `dest`.
  */
-function deepMerge(dest: any, src: any): any {
+/**
+ * Deep-merge `src` into `dest` (arrays replace, objects recurse).
+ *
+ * Prototype-pollution guard (#300): keys named `__proto__`, `constructor` or
+ * `prototype` are skipped at every depth, matching `setPath`. Sources are the
+ * local config file, the environment and CLI flags, so this is defence in
+ * depth, but a YAML file with `__proto__:` must never reach Object.prototype.
+ * Exported for tests.
+ */
+export function deepMerge(dest: any, src: any): any {
   if (src == null || typeof src !== 'object') return dest;
   for (const key of Object.keys(src)) {
+    if (UNSAFE_KEYS.has(key)) continue;
     const sv = src[key];
     if (Array.isArray(sv)) {
       dest[key] = sv;

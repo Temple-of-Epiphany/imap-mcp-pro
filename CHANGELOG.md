@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
--
+- **Config `deepMerge` skips `__proto__` / `constructor` / `prototype` keys** (#300) — the same guard #206 added to `setPath`, now applied when the config file, environment and CLI layers are merged, so a crafted YAML key cannot reach `Object.prototype`. Covered by `src/config/loader.test.ts`.
 
 ### Added
 -
@@ -23,8 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 -
 
 ### Fixed
-- **DNS firewall actually queries Quad9 now; `imap_test_quad9_dns` no longer reports a reachable Quad9 as unreachable** (#283) — Quad9's resolver on `dns.quad9.net:443` speaks RFC 8484 wire format over HTTP/2 only. The service sent the JSON-API shape (`?name=…`, `Accept: application/dns-json`) over Node's HTTP/1.1 `https.request`, which Quad9 answers with HTTP 400 / 505. The test tool turned that into "unreachable", and the production `checkDomain` path turned the same failure into "safe" for every domain and cached it for 24 h, so **the DNS firewall had never blocked anything**. New `src/utils/doh-client.ts` (RFC 8484 wire query over `node:http2`, RCODE + ANCOUNT parsing) backs both paths. A provider failure still fails open but is now reported in the result as `error` and is not cached, so the next check retries. Verified live 2026-10-20: `www.google.com` → NOERROR/8 answers, `malware.wicar.org` → NXDOMAIN, `imap_test_quad9_dns` → `quad9Active: true`.
 - **No more false "duplicate install" warning on every Claude Desktop start** (#292) — Desktop runs one IMAP MCP Pro process per host (chat client + Cowork bridge) from the same install, which #290 made supported. The #288 single lockfile reported that as a duplicate install, and the newest process overwrote/deleted it so detection drifted. Each process now writes its own record under `~/.imap-mcp/.instances/<pid>.json`; dead pids are pruned on start. Same install path + version → one info line ("N processes from this install share the data dir"). Different install path or version → the warning, naming both paths and versions. Only the primary (earliest) process starts the embedded Web UI, so the hosts no longer race for port 4500. The legacy `.instance.lock` is removed on first start.
+- **DNS firewall actually queries Quad9 now; `imap_test_quad9_dns` no longer reports a reachable Quad9 as unreachable** (#283) — Quad9's resolver on `dns.quad9.net:443` speaks RFC 8484 wire format over HTTP/2 only. The service sent the JSON-API shape (`?name=…`, `Accept: application/dns-json`) over Node's HTTP/1.1 `https.request`, which Quad9 answers with HTTP 400 / 505. The test tool turned that into "unreachable", and the production `checkDomain` path turned the same failure into "safe" for every domain and cached it for 24 h, so **the DNS firewall had never blocked anything**. New `src/utils/doh-client.ts` (RFC 8484 wire query over `node:http2`, RCODE + ANCOUNT parsing) backs both paths. A provider failure still fails open but is now reported in the result as `error` and is not cached, so the next check retries. Verified live 2026-10-20: `www.google.com` → NOERROR/8 answers, `malware.wicar.org` → NXDOMAIN, `imap_test_quad9_dns` → `quad9Active: true`.
 
 ## [2.36.0] - 2026-10-20
 
