@@ -4,6 +4,8 @@
 
 import { describe, expect, it, beforeEach } from 'vitest';
 import { metaTools } from './meta-tools.js';
+import { registerTools } from './index.js';
+import { getToolCatalog, categoryFor } from './tool-catalog.js';
 
 type Registered = { spec: any; handler: any };
 
@@ -52,5 +54,63 @@ describe('metaTools', () => {
     const about = JSON.parse(await text(tools, 'imap_about'));
     expect(about.license.model).toMatch(/PolyForm Noncommercial/);
     expect(JSON.stringify(about)).not.toMatch(/CleanTalk/);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// #302 — imap_list_tools is generated from the live registry
+// ---------------------------------------------------------------------------
+describe('imap_list_tools from the registry (#302)', () => {
+  function registerAll(profile: 'full' | 'core') {
+    const { server, tools } = makeServer();
+    const stub: any = {};
+    registerTools(server as any, stub, stub, stub, stub, stub, stub, stub, stub, stub, stub, stub, { toolProfile: profile });
+    return tools;
+  }
+
+  it('lists exactly the tools that were registered (full profile)', async () => {
+    const tools = registerAll('full');
+    const body = JSON.parse(await text(tools, 'imap_list_tools'));
+    expect(body.totalTools).toBe(tools.size);
+    expect(body.totalTools).toBeGreaterThan(100);
+    expect(new Set(body.tools.map((t: any) => t.name))).toEqual(new Set(tools.keys()));
+    expect(body.toolProfile.active).toBe('full');
+  });
+
+  it('tracks the core profile: 29 tools listed, the rest reported hidden', async () => {
+    const tools = registerAll('core');
+    const body = JSON.parse(await text(tools, 'imap_list_tools'));
+    expect(body.totalTools).toBe(tools.size);
+    expect(body.toolProfile.hiddenCount).toBeGreaterThan(90);
+    expect(body.tools.some((t: any) => t.name === 'imap_test_quad9_dns')).toBe(false);
+  });
+
+  it('carries title, description, parameters and hints for every tool, and no tool lands in "other"', async () => {
+    const tools = registerAll('full');
+    const body = JSON.parse(await text(tools, 'imap_list_tools'));
+    for (const t of body.tools) {
+      expect(t.title, t.name).toBeTruthy();
+      expect(t.description, t.name).toBeTruthy();
+      expect(Array.isArray(t.parameters), t.name).toBe(true);
+      expect(typeof t.readOnly).toBe('boolean');
+    }
+    const other = body.tools.filter((t: any) => t.category === 'other').map((t: any) => t.name);
+    expect(other, 'tools missing from TOOL_CATEGORIES').toEqual([]);
+    const search = body.tools.find((t: any) => t.name === 'imap_search_emails');
+    expect(search.parameters).toContain('accountId');
+  });
+
+  it('filters by category slug and warns on an unknown one', async () => {
+    const tools = registerAll('full');
+    const dns = JSON.parse(await text(tools, 'imap_list_tools', { category: 'dns' }));
+    expect(dns.filteredCount).toBe(dns.tools.length);
+    expect(dns.tools.every((t: any) => t.category === 'dns')).toBe(true);
+    expect(dns.tools.map((t: any) => t.name)).toContain('imap_test_quad9_dns');
+    const bad = JSON.parse(await text(tools, 'imap_list_tools', { category: 'nope' }));
+    expect(bad.warning).toMatch(/Unknown category/);
+    expect(bad.filteredCount).toBe(bad.totalTools);
+    expect(getToolCatalog().length).toBe(bad.totalTools);
+    expect(categoryFor('imap_send_email').slug).toBe('email');
   });
 });

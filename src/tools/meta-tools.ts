@@ -1,5 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getActiveToolProfile } from './tool-profile.js';
+import { getToolCatalog, TOOL_CATEGORIES } from './tool-catalog.js';
 import { z } from 'zod';
 import { withErrorHandling } from '../utils/error-handler.js';
 import { PACKAGE_NAME, PACKAGE_VERSION } from '../utils/package-info.js';
@@ -149,297 +150,40 @@ export function metaTools(server: McpServer, webUIManager?: WebUIManager): void 
     };
   }));
 
-  // List tools - returns detailed manifest of all available tools
+  // List tools — built from the live registry (#302), so it always matches
+  // tools/list and the active tool profile (#293).
+  const categorySlugs = ['all', ...TOOL_CATEGORIES.map(c => c.slug), 'other'];
   server.registerTool('imap_list_tools', {
-    description: 'List all available MCP tools with descriptions and parameters',
+    description:
+      'List every MCP tool this server currently exposes, with title, description, parameter names, ' +
+      'category and read-only/destructive hints. Generated from the registry at call time. ' +
+      `Filter with category (one of: ${categorySlugs.join(', ')}).`,
     inputSchema: {
-      category: z.enum(['all', 'user', 'account', 'email', 'bulk', 'folder', 'sending', 'metrics', 'meta'])
+      category: z.string()
         .optional()
         .default('all')
-        .describe('Filter tools by category (default: all)')
+        .describe(`Filter tools by category slug (default: all). One of: ${categorySlugs.join(', ')}`)
     }
   }, withErrorHandling(async ({ category }) => {
-    const allTools = [
-      // User Management Tools (9) - NEW in v2.6.0
-      {
-        category: 'user',
-        name: 'imap_create_user',
-        description: 'Create a new user in the database',
-        parameters: ['username', 'email', 'organization', 'role']
-      },
-      {
-        category: 'user',
-        name: 'imap_list_users',
-        description: 'List all users in the database',
-        parameters: []
-      },
-      {
-        category: 'user',
-        name: 'imap_get_user',
-        description: 'Get user details by username',
-        parameters: ['username']
-      },
-      {
-        category: 'user',
-        name: 'imap_db_add_account',
-        description: 'Add IMAP account to database with encryption',
-        parameters: ['userId', 'name', 'host', 'port', 'username', 'password', 'tls', 'smtpHost', 'smtpPort']
-      },
-      {
-        category: 'user',
-        name: 'imap_db_list_accounts',
-        description: 'List accounts for a user from database',
-        parameters: ['userId']
-      },
-      {
-        category: 'user',
-        name: 'imap_db_get_account',
-        description: 'Get decrypted account details from database',
-        parameters: ['accountId']
-      },
-      {
-        category: 'user',
-        name: 'imap_db_remove_account',
-        description: 'Remove account from database',
-        parameters: ['accountId']
-      },
-      {
-        category: 'user',
-        name: 'imap_share_account',
-        description: 'Share account with another user (MSP feature)',
-        parameters: ['accountId', 'targetUserId', 'role']
-      },
-      {
-        category: 'user',
-        name: 'imap_unshare_account',
-        description: 'Revoke account access from user',
-        parameters: ['accountId', 'targetUserId']
-      },
+    const all = getToolCatalog();
+    const wanted = (category ?? 'all').trim().toLowerCase();
+    const known = categorySlugs.includes(wanted);
+    const filteredTools = wanted === 'all' || !known ? all : all.filter(t => t.category === wanted);
 
-      // Account Management Tools (5)
-      {
-        category: 'account',
-        name: 'imap_add_account',
-        description: 'Add a new IMAP account configuration',
-        parameters: ['name', 'host', 'port', 'user', 'password', 'tls']
-      },
-      {
-        category: 'account',
-        name: 'imap_remove_account',
-        description: 'Remove an IMAP account by ID',
-        parameters: ['accountId']
-      },
-      {
-        category: 'account',
-        name: 'imap_list_accounts',
-        description: 'List all configured IMAP accounts',
-        parameters: []
-      },
-      {
-        category: 'account',
-        name: 'imap_connect',
-        description: 'Connect to an IMAP account',
-        parameters: ['accountId']
-      },
-      {
-        category: 'account',
-        name: 'imap_disconnect',
-        description: 'Disconnect from an IMAP account',
-        parameters: ['accountId']
-      },
+    const categories = TOOL_CATEGORIES
+      .map(c => ({ slug: c.slug, label: c.label, count: all.filter(t => t.category === c.slug).length }))
+      .filter(c => c.count > 0);
+    const otherCount = all.filter(t => t.category === 'other').length;
+    if (otherCount > 0) categories.push({ slug: 'other', label: 'Other', count: otherCount });
 
-      // Email Operations (9)
-      {
-        category: 'email',
-        name: 'imap_search_emails',
-        description: 'Search for emails in a folder with multiple criteria',
-        parameters: ['accountId', 'folder', 'from', 'to', 'subject', 'body', 'since', 'before', 'seen', 'flagged', 'limit']
-      },
-      {
-        category: 'email',
-        name: 'imap_get_email',
-        description: 'Get the full content of an email',
-        parameters: ['accountId', 'folder', 'uid']
-      },
-      {
-        category: 'email',
-        name: 'imap_mark_as_read',
-        description: 'Mark an email as read',
-        parameters: ['accountId', 'folder', 'uid']
-      },
-      {
-        category: 'email',
-        name: 'imap_mark_as_unread',
-        description: 'Mark an email as unread',
-        parameters: ['accountId', 'folder', 'uid']
-      },
-      {
-        category: 'email',
-        name: 'imap_delete_email',
-        description: 'Delete an email (mark as deleted and optionally expunge)',
-        parameters: ['accountId', 'folder', 'uid']
-      },
-      {
-        category: 'email',
-        name: 'imap_copy_email',
-        description: 'Copy an email to another folder',
-        parameters: ['accountId', 'sourceFolder', 'uid', 'targetFolder']
-      },
-      {
-        category: 'email',
-        name: 'imap_move_email',
-        description: 'Move an email to another folder (copy + mark deleted)',
-        parameters: ['accountId', 'sourceFolder', 'uid', 'targetFolder']
-      },
-      {
-        category: 'email',
-        name: 'imap_flag_email',
-        description: 'Flag an email as important',
-        parameters: ['accountId', 'folder', 'uid']
-      },
-      {
-        category: 'email',
-        name: 'imap_unflag_email',
-        description: 'Remove flag from an email',
-        parameters: ['accountId', 'folder', 'uid']
-      },
-
-      // Bulk Operations (4)
-      {
-        category: 'bulk',
-        name: 'imap_bulk_delete_emails',
-        description: 'Delete multiple emails efficiently',
-        parameters: ['accountId', 'folder', 'uids', 'expunge']
-      },
-      {
-        category: 'bulk',
-        name: 'imap_bulk_get_emails',
-        description: 'Fetch multiple emails (headers/body/full modes)',
-        parameters: ['accountId', 'folder', 'uids', 'mode']
-      },
-      {
-        category: 'bulk',
-        name: 'imap_bulk_mark_emails',
-        description: 'Mark multiple emails as read/unread/flagged/unflagged',
-        parameters: ['accountId', 'folder', 'uids', 'action']
-      },
-      {
-        category: 'bulk',
-        name: 'imap_bulk_copy_emails',
-        description: 'Copy multiple emails to another folder',
-        parameters: ['accountId', 'sourceFolder', 'uids', 'targetFolder']
-      },
-      {
-        category: 'bulk',
-        name: 'imap_bulk_move_emails',
-        description: 'Move multiple emails to another folder',
-        parameters: ['accountId', 'sourceFolder', 'uids', 'targetFolder']
-      },
-
-      // Folder Operations (6)
-      {
-        category: 'folder',
-        name: 'imap_list_folders',
-        description: 'List all folders in an IMAP account',
-        parameters: ['accountId']
-      },
-      {
-        category: 'folder',
-        name: 'imap_folder_status',
-        description: 'Get folder statistics (total, new, unseen messages)',
-        parameters: ['accountId', 'folder']
-      },
-      {
-        category: 'folder',
-        name: 'imap_get_unread_count',
-        description: 'Count unread emails across folders',
-        parameters: ['accountId', 'folders']
-      },
-      {
-        category: 'folder',
-        name: 'imap_create_folder',
-        description: 'Create a new folder/mailbox in an IMAP account',
-        parameters: ['accountId', 'folderName']
-      },
-      {
-        category: 'folder',
-        name: 'imap_delete_folder',
-        description: 'Delete a folder/mailbox from an IMAP account',
-        parameters: ['accountId', 'folderName']
-      },
-      {
-        category: 'folder',
-        name: 'imap_rename_folder',
-        description: 'Rename a folder/mailbox in an IMAP account',
-        parameters: ['accountId', 'oldName', 'newName']
-      },
-
-      // Email Sending (2)
-      {
-        category: 'sending',
-        name: 'imap_send_email',
-        description: 'Send an email via SMTP',
-        parameters: ['accountId', 'to', 'subject', 'body', 'cc', 'bcc', 'attachments']
-      },
-      {
-        category: 'sending',
-        name: 'imap_reply_to_email',
-        description: 'Reply to an existing email',
-        parameters: ['accountId', 'folder', 'uid', 'body', 'replyAll']
-      },
-
-      // Metrics & Monitoring (3)
-      {
-        category: 'metrics',
-        name: 'imap_get_metrics',
-        description: 'Get connection health metrics (operations, success rate, latency, uptime)',
-        parameters: ['accountId']
-      },
-      {
-        category: 'metrics',
-        name: 'imap_get_operation_metrics',
-        description: 'Get per-operation statistics',
-        parameters: ['accountId', 'operation']
-      },
-      {
-        category: 'metrics',
-        name: 'imap_reset_metrics',
-        description: 'Reset metric tracking for an account',
-        parameters: ['accountId']
-      },
-
-      // Meta/Discovery Tools (2)
-      {
-        category: 'meta',
-        name: 'imap_about',
-        description: 'Get comprehensive information about the IMAP MCP Pro service',
-        parameters: []
-      },
-      {
-        category: 'meta',
-        name: 'imap_list_tools',
-        description: 'List all available MCP tools with descriptions',
-        parameters: ['category']
-      }
-    ];
-
-    // Tool profile (#293): under `core`, tools hidden from the server are
-    // dropped from the listing too, and the response says which they are.
     const profileState = getActiveToolProfile();
-    const hiddenSet = new Set(profileState.hidden);
-    const visibleTools = hiddenSet.size === 0
-      ? allTools
-      : allTools.filter(tool => !hiddenSet.has(tool.name));
-
-    // Filter by category if specified
-    const filteredTools = category === 'all'
-      ? visibleTools
-      : visibleTools.filter(tool => tool.category === category);
 
     const response = {
-      totalTools: visibleTools.length,
+      totalTools: all.length,
       filteredCount: filteredTools.length,
-      category: category,
+      category: known ? wanted : 'all',
+      ...(known ? {} : { warning: `Unknown category "${category}"; showing all. Valid: ${categorySlugs.join(', ')}` }),
+      categories,
       toolProfile: {
         active: profileState.profile,
         available: ['full', 'core'],
@@ -449,18 +193,20 @@ export function metaTools(server: McpServer, webUIManager?: WebUIManager): void 
           ? 'All tools are registered. Set the extension option "Tool Profile" (IMAP_MCP_TOOL_PROFILE) to "core" to expose only the everyday subset.'
           : 'Only the core subset is registered. Set the extension option "Tool Profile" (IMAP_MCP_TOOL_PROFILE) to "full" and restart Claude Desktop to expose the hidden tools.'
       },
-      tools: filteredTools.map(tool => ({
-        name: tool.name,
-        category: tool.category,
-        description: tool.description,
-        parameters: tool.parameters
+      tools: filteredTools.map(t => ({
+        name: t.name,
+        title: t.title,
+        category: t.category,
+        description: t.description,
+        parameters: t.parameters,
+        readOnly: t.readOnly,
+        destructive: t.destructive,
       })),
       usage:
-        'Each `tool.name` is a valid MCP tool name callable on this server. Pass a `category` ' +
-        'argument to scope the listing (one of: user, account, email, bulk, folder, sending, ' +
-        'metrics, meta). For full per-tool input schemas, the schema lives on the registered ' +
-        'tool itself (visible via the MCP tools/list method); this tool returns a hand-curated ' +
-        'parameter summary only. Common workflow chains: ' +
+        'Each `tool.name` is a valid MCP tool name callable on this server. Pass a `category` slug to ' +
+        'scope the listing. For full per-tool input schemas, the schema lives on the registered tool ' +
+        'itself (visible via the MCP tools/list method); `parameters` lists top-level argument names only. ' +
+        'Common workflow chains: ' +
         '(a) imap_list_users -> imap_list_accounts -> imap_search_emails / imap_send_email; ' +
         '(b) imap_list_providers -> imap_add_account_with_provider -> imap_test_account; ' +
         '(c) imap_get_outbox_dir -> Write file -> imap_send_email(attachmentPaths). For server ' +

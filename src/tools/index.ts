@@ -35,6 +35,7 @@ import {
   isToolVisible,
   setActiveToolProfile,
 } from './tool-profile.js';
+import { recordTool, resetToolCatalog } from './tool-catalog.js';
 
 /**
  * Wrap server.registerTool so every call gets MCP annotations injected
@@ -70,6 +71,7 @@ function withAnnotations<T extends McpServer>(
       title,
       annotations: { title, ...getAnnotations(name), ...(config?.annotations ?? {}) },
     };
+    recordTool(name, merged); // live catalog for imap_list_tools (#302)
     return original(name, merged, handler);
   };
   return () => { (server as any).registerTool = original; };
@@ -100,6 +102,7 @@ export function registerTools(
   // Inject MCP annotations on every registerTool call (drives Claude
   // Desktop's Tool Permissions UI). Restored after the registration phase
   // so re-entrant calls (e.g. from buildToolsManifest) start fresh.
+  resetToolCatalog();
   const restoreRegisterTool = withAnnotations(server, profile, profileState);
 
   // One shared BulkJobService instance (Issue #117) backs both the job

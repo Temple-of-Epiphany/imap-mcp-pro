@@ -225,7 +225,7 @@
 | `imap_about` | Get comprehensive information about the IMAP MCP Pro service including version, features, and capabilities |
 | `imap_check_skill_updates` | Check public GitHub for newer skill versions without changing anything on disk. |
 | `imap_help` | Show IMAP MCP Pro capabilities and copy-paste workflow recipes, by category. |
-| `imap_list_tools` | List all available MCP tools with descriptions and parameters |
+| `imap_list_tools` | List every MCP tool this server currently exposes, with title, description, parameter names, category and read-only/destructive hints. |
 | `imap_results` | Manage cached MCP tool results (resource-handle pattern). |
 | `imap_update_skills` | Apply skill updates from public GitHub for explicitly named skills. |
 
