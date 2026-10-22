@@ -1,11 +1,12 @@
+<!-- github-operations:project-instructions:begin -->
 # CLAUDE.md — Project Instructions
 
-> **Auto-generated** by the `github-operations` skill on 2026-10-19.
+> **Auto-generated** by the `github-operations` skill on 2026-10-22.
 > Regenerate with: `gh-skill generate-project-instructions --refresh`
 > Source: `~/.claude/skills/github-operations/scripts/generate-project-instructions.sh`
 
 **Project:** Temple-of-Epiphany/imap-mcp-pro
-**Skill version:** github-operations v3.11.0
+**Skill version:** github-operations v3.18.1
 **Target client:** both
 
 ---
@@ -13,16 +14,19 @@
 ## Skill bindings
 
 This project delegates GitHub-related operations to the `github-operations`
-skill. Trigger phrases that invoke it: any mention of "github" (any case),
-any `git` subcommand, any `gh` subcommand. The skill enforces 26 Hard
-Rules — see `~/.claude/skills/github-operations/SKILL.md` for the full
-list. The most load-bearing for daily work:
+skill. It activates on any mention of "github" (any case), any `git`
+subcommand and any `gh` subcommand; nobody needs to name it. Its Hard Rules
+are listed in `~/.claude/skills/github-operations/SKILL.md`. The most
+load-bearing for daily work:
 
 - **Hard Rule 7** — PR-first by default; commits go through worktrees + branches
 - **Hard Rule 11** — 3rd-party GitHub Actions must be SHA-pinned
 - **Hard Rule 12** — no `.env` in CI; secrets via `${{ secrets.* }}`
 - **Hard Rule 18** — never `git push --force`; use `--force-with-lease`
 - **Hard Rule 26** — every code change starts with a GitHub issue (see below)
+
+For interactive logins (e.g. `gh auth login`, `gcloud auth login`), type
+`! <command>` in the prompt — output lands in the conversation.
 
 ---
 
@@ -104,12 +108,13 @@ issue.
 
 **Tool in use:** Aikido
 
-**Aikido** is the SAST tool of record for this project. It runs via the
-Aikido MCP server (`mcp__plugin_aikido-mcp__aikido_full_scan`).
+**Aikido** is the SAST tool of record for this project, invoked through
+the `aikido:scan` skill (which calls the Aikido MCP server).
 
 Workflow:
-1. After Claude generates, adds, or modifies any code file, it MUST run
-   `aikido_full_scan` on the changed paths before committing.
+1. After Claude generates, adds, or modifies any code file, it runs the
+   `aikido:scan` skill on the changed paths before committing, so findings
+   are fixed before review rather than after.
 2. If Aikido reports SAST or secret findings, Claude fixes them and
    re-scans before opening the PR.
 3. The scan result is posted as a comment on the issue.
@@ -118,24 +123,20 @@ If the MCP server is unavailable, fall back to:
 - `gitleaks-scan.sh --mode staged` for credentials
 - Aikido CLI: `aikido scan` (if installed)
 
-See the `aikido:scan` skill for invocation patterns.
-
 ---
 
 ## Library maintenance
 
 **Cadence:** monthly outdated sweep + Dependabot
 
-On the first session of each calendar month, Claude runs the
-language-appropriate outdated check before any new work:
+On the first session of each calendar month, Claude runs the outdated
+check for each dependency manifest this repo actually has (detected on
+2026-10-22: Node.js (`package.json`), GitHub Actions (SHA-pinned, `.github/workflows/`)) before any new work:
 
-| Language | Command |
+| Manifest | Command |
 |---|---|
-| Node.js | `npm outdated && npm audit` |
-| Python | `pip list --outdated && pip-audit` |
-| Rust | `cargo outdated && cargo audit` |
-| Ruby | `bundle outdated && bundle-audit check` |
-| Go | `go list -m -u all && govulncheck ./...` |
+| Node.js (`package.json`) | `npm outdated && npm audit` |
+| GitHub Actions (SHA-pinned, `.github/workflows/`) | for each `uses: owner/action@SHA # vX`, compare the SHA to `gh api repos/<owner>/<action>/git/ref/tags/<vX> --jq .object.sha` |
 
 Findings produce one issue per major version drift, labeled
 `dependencies` and `p2`. Dependabot handles automated security bumps
@@ -148,34 +149,15 @@ releases >18 months, archived repo, deprecated notice in README.
 
 ## Secrets
 
-- All secrets via GitHub org/repo/environment secrets (Hard Rule 12)
-- Segregated by environment: `development` / `staging` / `production` (Hard Rule 13)
+- This repo deploys nothing and holds no deploy secrets. Hard Rules 12 and 13 have no object here; if a deploy is added, re-run `--refresh` and answer the secrets questions again
 - No `.env` files committed; only `.env.example` with placeholders
-- For meta-repos, secrets must be **org-level** (Hard Rule 23)
-
----
-
-## Trigger phrases recap
-
-The skill activates on any of these — Claude does not need to be told
-explicitly to use it:
-
-- Any mention of `github` (any casing)
-- Any `git` subcommand: `clone`, `push`, `pull`, `commit`, `checkout`,
-  `status`, `log`, `merge`, `rebase`, `diff`, `stash`, `branch`,
-  `worktree`, `reflog`
-- Any `gh` subcommand: `issue`, `pr`, `repo`, `release`, `secret`,
-  `workflow`, `run`, `auth`, `label`, `project`, `api`
-
-For interactive logins (e.g. `gh auth login`, `gcloud auth login`),
-type `! <command>` in the prompt — output lands in the conversation.
 
 ---
 
 ## Re-run the project setup
 
 If any answer changes (wiki added, NIST opt-in flipped, SAST tool
-swapped):
+swapped, secrets source or environments changed, a manifest added):
 
 ```bash
 ~/.claude/skills/github-operations/scripts/generate-project-instructions.sh --refresh
@@ -183,6 +165,7 @@ swapped):
 
 This re-prompts and rewrites this file. The previous version is backed
 up to `CLAUDE.md.bak` (one backup retained per project preferences).
+<!-- github-operations:project-instructions:end -->
 
 ---
 
